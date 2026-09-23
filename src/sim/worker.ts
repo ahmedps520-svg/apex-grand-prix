@@ -71,7 +71,7 @@ function tick(time: number): void {
       steps,
       alpha: clock.alpha,
       stepCostUs,
-      carCount: world.cars.length,
+      carCount: world.snapshotCount,
       buffer,
       race: world.director?.status ?? null,
     },
@@ -87,7 +87,7 @@ scope.onmessage = (event) => {
       case 'session':
         session = msg.session;
         world = World.forSession(msg.session);
-        bufferBytes = snapshotBytes(world.cars.length);
+        bufferBytes = snapshotBytes(world.snapshotCount);
         pool.length = 0;
         clock.resetBaseline();
         post({ type: 'ready', carCount: world.cars.length });

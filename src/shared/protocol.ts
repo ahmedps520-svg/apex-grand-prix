@@ -112,6 +112,8 @@ export interface SessionConfig {
   location: SpawnPoint;
   /** Free roam start in the open world. */
   roamStart?: RoamStart;
+  /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
+  traffic?: number;
   opponents: number;
   laps: number;
   difficulty: Difficulty;

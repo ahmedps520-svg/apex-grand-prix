@@ -19,6 +19,7 @@ import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
 import { cityMap } from '../content/city/map';
 import { CitySurface } from './city/CitySurface';
+import { Traffic } from './city/Traffic';
 import { Car, type Spawn } from './vehicle/car';
 import { carById, peakPower, topSpeed } from './vehicle/cars';
 import { TEST_MULE, type CarSpec } from './vehicle/spec';
@@ -61,6 +62,8 @@ export class World {
   director: RaceDirector | null = null;
   /** AI driver per car (null for the player). */
   drivers: Array<AiDriver | null> = [];
+  /** Free roam: the traffic sharing the world, written after the cars in the snapshot. */
+  traffic: Traffic | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
   private readonly hints: number[] = [];
@@ -91,6 +94,15 @@ export class World {
       const world = new World(1, surface, surface.map.spawns[config.roamStart ?? 'downtown'], spec);
       world.setAids(0, config.aids);
       world.cars[0]!.damageScale = config.damage ?? 0;
+      const time = config.conditions?.time;
+      if ((config.traffic ?? 0) > 0) {
+        world.traffic = new Traffic(
+          surface.map,
+          config.traffic ?? 0,
+          config.seed,
+          time === 'night' || time === 'dusk',
+        );
+      }
       return world;
     }
     if (config.mode === 'free' || !config.trackId) {
@@ -175,6 +187,7 @@ export class World {
 
   storePrevious(): void {
     for (const car of this.cars) car.storePrevious();
+    this.traffic?.storePrevious();
   }
 
   step(dt: number): void {
@@ -199,6 +212,7 @@ export class World {
       }
     }
     if (cars.length > 1) resolveCarContacts(cars);
+    this.traffic?.step(dt, cars[0]!);
     director?.update(dt, cars);
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {
@@ -235,7 +249,13 @@ export class World {
     }
   }
 
+  /** Cars in the snapshot: the physics cars, then the traffic slots. */
+  get snapshotCount(): number {
+    return this.cars.length + (this.traffic?.count ?? 0);
+  }
+
   writeSnapshot(out: Float32Array): void {
     for (let i = 0; i < this.cars.length; i++) this.cars[i]!.writeSnapshot(out, i * CAR_STRIDE);
+    this.traffic?.writeSnapshot(out, this.cars.length);
   }
 }

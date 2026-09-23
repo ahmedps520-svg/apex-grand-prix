@@ -1,0 +1,611 @@
+import { trafficModel } from '../../content/city/fleet';
+import {
+  laneGraph,
+  signalState,
+  type LaneGraph,
+  type LaneLink,
+  type LanePoint,
+} from '../../content/city/lanes';
+import type { CityMap } from '../../content/city/map';
+import { mulberry32, quatFromYaw, type Quat, type Vec3 } from '../../shared/math';
+import {
+  C,
+  CAR_STRIDE,
+  FLAG_HAZARDS,
+  FLAG_HEADLIGHTS,
+  FLAG_INDICATOR_LEFT,
+  FLAG_INDICATOR_RIGHT,
+  W,
+  WHEEL_COUNT,
+  WHEEL_STRIDE,
+} from '../../shared/protocol';
+import type { Car } from '../vehicle/car';
+import type { CarSpec } from '../vehicle/spec';
+
+/**
+ * Traffic: everyday cars driving the lane graph around the player. They are kinematic (a
+ * position along a lane and a speed, no tyre model), so a full field costs little: they follow
+ * the car ahead (an intelligent-driver model), obey the signals, stop signs and give-way
+ * rules, pick turns at random, indicate before turning, show brake lights, and put their
+ * hazards on after a crash. Cars that fall out of the bubble around the player respawn on a
+ * lane inside it. The player collides with them as oriented boxes: the player's car takes the
+ * impulse, the traffic car is shoved and stops.
+ */
+
+const CONTROL_HZ = 50;
+/** Bubble around the player: spawn inside the inner radius, respawn beyond the outer one. */
+const SPAWN_RADIUS = 380;
+const DESPAWN_RADIUS = 540;
+const SPAWN_CLEAR = 60;
+/** IDM parameters: comfortable acceleration and braking, headway, standstill gap. */
+const ACCEL = 1.7;
+const BRAKE = 2.6;
+const HEADWAY = 1.3;
+const STANDSTILL = 2.6;
+const HARD_BRAKE = 4.5;
+/** Seconds a car waits at a stop line, and shows its hazards after a crash. */
+const STOP_WAIT = 0.9;
+const HAZARD_TIME = 12;
+
+interface Vehicle {
+  slot: number;
+  spec: CarSpec;
+  active: boolean;
+  link: LaneLink;
+  s: number;
+  v: number;
+  a: number;
+  next: LaneLink | null;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  prevX: number;
+  prevY: number;
+  prevZ: number;
+  prevYaw: number;
+  steer: number;
+  spin: number;
+  brake: number;
+  indicator: -1 | 0 | 1;
+  hazards: number;
+  /** Seconds stood at a stop line. */
+  waited: number;
+  /** Sideways shove after a crash, decaying. */
+  shoveX: number;
+  shoveZ: number;
+  /** This driver's speed relative to the limit and following gap. */
+  pace: number;
+  halfWidth: number;
+  front: number;
+  rear: number;
+}
+
+const point: LanePoint = { x: 0, z: 0, y: 0, tx: 0, tz: 0 };
+const kmh = (v: number): number => v / 3.6;
+
+export class Traffic {
+  readonly vehicles: Vehicle[] = [];
+  readonly graph: LaneGraph;
+  private readonly rand: () => number;
+  private controlTimer = 0;
+  private time = 0;
+  private readonly playerBox = { x: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, front: 2, rear: 2 };
+
+  constructor(
+    map: CityMap,
+    readonly count: number,
+    seed: number,
+    /** Headlights on (dusk and night). */
+    readonly lightsOn: boolean,
+  ) {
+    this.graph = laneGraph(map);
+    this.rand = mulberry32(seed ^ 0x7a11c);
+    for (let slot = 0; slot < count; slot++) {
+      const model = trafficModel(slot);
+      const spec = model.spec;
+      this.vehicles.push({
+        slot,
+        spec,
+        active: false,
+        link: this.graph.links[0]!,
+        s: 0,
+        v: 0,
+        a: 0,
+        next: null,
+        x: 1e5,
+        y: -100,
+        z: 1e5,
+        yaw: 0,
+        prevX: 1e5,
+        prevY: -100,
+        prevZ: 1e5,
+        prevYaw: 0,
+        steer: 0,
+        spin: 0,
+        brake: 0,
+        indicator: 0,
+        hazards: 0,
+        waited: 0,
+        shoveX: 0,
+        shoveZ: 0,
+        pace: 0.88 + this.rand() * 0.17,
+        halfWidth: spec.body.halfWidth,
+        front: spec.body.front,
+        rear: spec.body.rear,
+      });
+    }
+  }
+
+  /** One physics step: drivers decide at CONTROL_HZ, every car moves every step. */
+  step(dt: number, player: Car): void {
+    this.time += dt;
+    this.controlTimer += dt;
+    const px = player.pos.x;
+    const pz = player.pos.z;
+    if (this.controlTimer >= 1 / CONTROL_HZ) {
+      const cdt = this.controlTimer;
+      this.controlTimer = 0;
+      this.placePlayer(player);
+      this.respawn(px, pz);
+      for (const car of this.vehicles) if (car.active) this.decide(car, cdt, player);
+    }
+    for (const car of this.vehicles) {
+      if (!car.active) continue;
+      car.v = Math.max(car.v + car.a * dt, 0);
+      car.s += car.v * dt;
+      if (car.hazards > 0) car.hazards -= dt;
+      const decay = Math.exp(-dt * 0.8);
+      car.shoveX *= decay;
+      car.shoveZ *= decay;
+      while (car.s >= car.link.length) {
+        const next = car.next ?? this.choose(car.link);
+        if (!next) {
+          car.active = false;
+          break;
+        }
+        car.s -= car.link.length;
+        car.link = next;
+        car.next = null;
+        car.waited = 0;
+      }
+      if (car.active) this.pose(car, dt);
+    }
+    this.contacts(player, dt);
+  }
+
+  storePrevious(): void {
+    for (const car of this.vehicles) {
+      car.prevX = car.x;
+      car.prevY = car.y;
+      car.prevZ = car.z;
+      car.prevYaw = car.yaw;
+    }
+  }
+
+  /** Writes every slot's state after the physics cars in the snapshot. */
+  writeSnapshot(out: Float32Array, firstIndex: number): void {
+    const q: Quat = { x: 0, y: 0, z: 0, w: 1 };
+    for (const car of this.vehicles) {
+      const base = (firstIndex + car.slot) * CAR_STRIDE;
+      out.fill(0, base, base + CAR_STRIDE);
+      out[base + C.PREV_POS] = car.prevX;
+      out[base + C.PREV_POS + 1] = car.prevY;
+      out[base + C.PREV_POS + 2] = car.prevZ;
+      quatFromYaw(q, car.prevYaw);
+      out[base + C.PREV_ROT] = q.x;
+      out[base + C.PREV_ROT + 1] = q.y;
+      out[base + C.PREV_ROT + 2] = q.z;
+      out[base + C.PREV_ROT + 3] = q.w;
+      out[base + C.POS] = car.x;
+      out[base + C.POS + 1] = car.y;
+      out[base + C.POS + 2] = car.z;
+      quatFromYaw(q, car.yaw);
+      out[base + C.ROT] = q.x;
+      out[base + C.ROT + 1] = q.y;
+      out[base + C.ROT + 2] = q.z;
+      out[base + C.ROT + 3] = q.w;
+      const fx = -Math.sin(car.yaw);
+      const fz = -Math.cos(car.yaw);
+      out[base + C.VEL] = fx * car.v;
+      out[base + C.VEL + 2] = fz * car.v;
+      out[base + C.SPEED] = car.v;
+      out[base + C.RPM] = 900 + car.v * 90;
+      out[base + C.GEAR] = car.v < 1 ? 0 : Math.min(1 + Math.floor(car.v / 7), 6);
+      out[base + C.THROTTLE] = car.a > 0.05 ? Math.min(car.a / ACCEL, 1) : 0;
+      out[base + C.BRAKE] = car.brake;
+      out[base + C.STEER] = car.steer;
+      out[base + C.STEER_ANGLE] = car.steer * 0.5;
+      out[base + C.STEER_AUTHORITY] = 0.5;
+      out[base + C.FLAGS] =
+        (this.lightsOn && car.active ? FLAG_HEADLIGHTS : 0) |
+        (car.hazards > 0 ? FLAG_HAZARDS : 0) |
+        (car.indicator < 0 ? FLAG_INDICATOR_LEFT : 0) |
+        (car.indicator > 0 ? FLAG_INDICATOR_RIGHT : 0);
+      out[base + C.ERS] = -1;
+      for (let i = 0; i < WHEEL_COUNT; i++) {
+        const o = base + C.WHEELS + i * WHEEL_STRIDE;
+        const axle = i < 2 ? car.spec.front : car.spec.rear;
+        out[o + W.PREV_LENGTH] = axle.staticLength;
+        out[o + W.LENGTH] = axle.staticLength;
+        const steer = i < 2 ? car.steer * 0.5 : 0;
+        out[o + W.PREV_STEER] = steer;
+        out[o + W.STEER] = steer;
+        out[o + W.PREV_SPIN] = car.spin;
+        out[o + W.SPIN] = car.spin;
+        out[o + W.CONTACT] = car.active ? 1 : 0;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- driving
+
+  private decide(car: Vehicle, dt: number, player: Car): void {
+    const link = car.link;
+    if (!car.next) car.next = this.choose(link);
+    const remaining = link.length - car.s;
+    const limit = kmh(link.speedLimit || 60) * car.pace;
+    // Slow for the next link's limit as its start nears.
+    let target = limit;
+    if (car.next) {
+      const nextLimit = kmh(car.next.speedLimit || 60) * car.pace;
+      if (nextLimit < target)
+        target = Math.min(
+          target,
+          Math.sqrt(nextLimit * nextLimit + 2 * BRAKE * Math.max(remaining, 0)),
+        );
+    }
+
+    // The nearest thing ahead: a car on this link or the next, the player, or a stop line.
+    let gap = Infinity;
+    let leadSpeed = 0;
+    const consider = (distance: number, speed: number) => {
+      if (distance < gap) {
+        gap = distance;
+        leadSpeed = speed;
+      }
+    };
+    for (const other of this.vehicles) {
+      if (other === car || !other.active) continue;
+      if (other.link === link && other.s > car.s) {
+        consider(other.s - car.s - car.front - other.rear, other.v);
+      } else if (car.next && other.link === car.next) {
+        consider(remaining + other.s - car.front - other.rear, other.v);
+      } else if (car.next && car.next.next[0] === other.link && other.s < 30) {
+        consider(remaining + car.next.length + other.s - car.front - other.rear, other.v);
+      }
+    }
+    this.playerAhead(car, player, remaining, consider);
+
+    // The line at the end of the link: signals, stop signs, giving way, left turns.
+    const stopLine = remaining - 1.5;
+    const control = link.control;
+    const node = link.to >= 0 ? this.graph.nodes[link.to]! : null;
+    let mustStop = false;
+    if (node && link.kind === 'lane') {
+      if (control === 'signal') {
+        const state = signalState(node, link.axis, this.time);
+        // Amber: stop unless it would take a hard brake.
+        mustStop =
+          state === 'red' || (state === 'amber' && stopLine > (car.v * car.v) / (2 * HARD_BRAKE));
+      } else if (control === 'stop') {
+        if (car.v < 0.3 && stopLine < 3) car.waited += dt;
+        mustStop = car.waited < STOP_WAIT || this.crossingTraffic(node, link, 24, player);
+      } else if (control === 'yield') {
+        mustStop = this.crossingTraffic(node, link, 30, player);
+      }
+      // A left turn gives way to oncoming traffic.
+      if (!mustStop && car.next?.turn === -1 && this.oncoming(node, link, 38, player))
+        mustStop = true;
+    }
+    if (mustStop && stopLine > -1) consider(Math.max(stopLine, 0.1), 0);
+
+    // Intelligent driver model; above the target speed it brakes properly rather than coasting.
+    const over = car.v - target;
+    let a =
+      over <= 0
+        ? ACCEL * (1 - Math.pow(car.v / Math.max(target, 0.5), 4))
+        : -BRAKE * Math.min(over / 1.5 + 0.25, 1.3);
+    if (gap < 200) {
+      const dv = car.v - leadSpeed;
+      const wanted = STANDSTILL + car.v * HEADWAY + (car.v * dv) / (2 * Math.sqrt(ACCEL * BRAKE));
+      const ratio = wanted / Math.max(gap, 0.3);
+      a -= ACCEL * ratio * ratio;
+    }
+    car.a = Math.max(a, -HARD_BRAKE * 1.5);
+    car.brake = car.a < -0.5 ? Math.min(-car.a / BRAKE, 1) : 0;
+    if (car.hazards > 0) car.brake = 1;
+
+    // Indicators: before and through a turn, and hazards override nothing (both blink).
+    const turning =
+      link.kind === 'turn'
+        ? link.turn
+        : car.next?.kind === 'turn' && remaining < 35
+          ? car.next.turn
+          : 0;
+    car.indicator = turning;
+  }
+
+  /** The player as a leader when it is in this car's lane ahead. */
+  private playerAhead(
+    car: Vehicle,
+    player: Car,
+    remaining: number,
+    consider: (distance: number, speed: number) => void,
+  ): void {
+    const box = this.playerBox;
+    const links = car.next ? [car.link, car.next] : [car.link];
+    let along = 0;
+    for (const link of links) {
+      const p = this.projectOnLink(link, box.x, box.z);
+      if (p && Math.abs(p.lateral) < 2.4) {
+        const ahead = along + p.s - car.s;
+        if (ahead > 0 && ahead < 120) {
+          const speed = player.vel.x * p.tx + player.vel.z * p.tz;
+          consider(ahead - car.front - box.rear, Math.max(speed, 0));
+        }
+      }
+      along += link === car.link ? remaining : link.length;
+      if (link === car.link) along = remaining;
+    }
+  }
+
+  /** Any car (or the player) approaching the node on another road within `reach` metres. */
+  private crossingTraffic(
+    node: { ins: LaneLink[]; x: number; z: number },
+    mine: LaneLink,
+    reach: number,
+    player: Car,
+  ): boolean {
+    for (const other of this.vehicles) {
+      if (!other.active || other.link === mine) continue;
+      if (other.link.road === mine.road && other.link.kind === 'lane') continue;
+      if (!node.ins.includes(other.link) && other.link.from !== mine.to) continue;
+      if (other.link.kind === 'lane' && node.ins.includes(other.link)) {
+        const left = other.link.length - other.s;
+        if (left < reach && other.v > 0.5) return true;
+      } else if (other.link.kind === 'turn' && other.link.from === mine.to) {
+        return true;
+      }
+    }
+    const d = Math.hypot(player.pos.x - node.x, player.pos.z - node.z);
+    return d < reach * 0.8 && Math.hypot(player.vel.x, player.vel.z) > 1.5;
+  }
+
+  /** Oncoming traffic on the same road heading into the node (for a left turn). */
+  private oncoming(node: { ins: LaneLink[] }, mine: LaneLink, reach: number, player: Car): boolean {
+    for (const other of this.vehicles) {
+      if (!other.active || other.link === mine || other.link.kind !== 'lane') continue;
+      if (other.link.road !== mine.road || !node.ins.includes(other.link)) continue;
+      if (other.link.length - other.s < reach && other.v > 1) return true;
+    }
+    const p = this.projectOnLink(mine, player.pos.x, player.pos.z);
+    return p !== null && p.lateral < -2 && p.lateral > -12 && p.s > mine.length - reach;
+  }
+
+  private choose(link: LaneLink): LaneLink | null {
+    const options = link.next;
+    if (options.length === 0) return null;
+    if (options.length === 1) return options[0]!;
+    let total = 0;
+    const weights = options.map((o) => {
+      const w = o.kind !== 'turn' ? 3 : o.turn === 0 ? 3 : o.turn === 1 ? 1.4 : 0.9;
+      const w2 = o.road?.kind === 'ramp' || o.next[0]?.road?.kind === 'ramp' ? w * 0.5 : w;
+      total += w2;
+      return w2;
+    });
+    let r = this.rand() * total;
+    for (let i = 0; i < options.length; i++) {
+      r -= weights[i]!;
+      if (r <= 0) return options[i]!;
+    }
+    return options[options.length - 1]!;
+  }
+
+  private pose(car: Vehicle, dt: number): void {
+    this.graph.pointAt(car.link, car.s, point);
+    const yaw = Math.atan2(-point.tx, -point.tz);
+    let turn = yaw - car.yaw;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    const rate = dt > 0 ? turn / dt : 0;
+    // Steering from the yaw rate: the wheels point where the car is going.
+    const wanted = Math.max(-1, Math.min(1, (rate * 2.6) / Math.max(car.v, 3)));
+    car.steer += (wanted - car.steer) * Math.min(dt * 12, 1);
+    car.yaw = yaw;
+    car.x = point.x + car.shoveX;
+    car.z = point.z + car.shoveZ;
+    car.y = point.y + car.spec.cogHeight;
+    car.spin += (car.v * dt) / car.spec.front.wheelRadius;
+  }
+
+  // ---------------------------------------------------------------- spawning
+
+  private respawn(px: number, pz: number): void {
+    let nearby: LaneLink[] | null = null;
+    for (const car of this.vehicles) {
+      const d = car.active ? Math.hypot(car.x - px, car.z - pz) : Infinity;
+      if (d <= DESPAWN_RADIUS) continue;
+      nearby ??= this.graph
+        .linksNear(px, pz, SPAWN_RADIUS)
+        .filter((l) => l.kind === 'lane' && l.length > 30);
+      if (nearby.length === 0) {
+        car.active = false;
+        continue;
+      }
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const link = nearby[Math.floor(this.rand() * nearby.length)]!;
+        const s = 6 + this.rand() * (link.length - 12);
+        this.graph.pointAt(link, s, point);
+        if (Math.hypot(point.x - px, point.z - pz) < SPAWN_CLEAR) continue;
+        if (this.vehicles.some((o) => o.active && o.link === link && Math.abs(o.s - s) < 14))
+          continue;
+        car.active = true;
+        car.link = link;
+        car.s = s;
+        car.v = kmh(link.speedLimit || 40) * 0.6;
+        car.a = 0;
+        car.next = null;
+        car.hazards = 0;
+        car.waited = 0;
+        car.shoveX = 0;
+        car.shoveZ = 0;
+        car.yaw = Math.atan2(-point.tx, -point.tz);
+        car.steer = 0;
+        this.pose(car, 0);
+        car.prevX = car.x;
+        car.prevY = car.y;
+        car.prevZ = car.z;
+        car.prevYaw = car.yaw;
+        break;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- contacts
+
+  private placePlayer(player: Car): void {
+    const q = player.rot;
+    const box = this.playerBox;
+    box.x = player.pos.x;
+    box.z = player.pos.z;
+    box.fx = -2 * (q.x * q.z + q.w * q.y);
+    box.fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const len = Math.hypot(box.fx, box.fz) || 1;
+    box.fx /= len;
+    box.fz /= len;
+    box.halfWidth = player.spec.body.halfWidth;
+    box.front = player.spec.body.front;
+    box.rear = player.spec.body.rear;
+  }
+
+  /** The player against each nearby traffic car as oriented boxes on the ground plane. */
+  private contacts(player: Car, dt: number): void {
+    this.placePlayer(player);
+    const box = this.playerBox;
+    for (const car of this.vehicles) {
+      if (!car.active) continue;
+      if (Math.abs(car.x - box.x) > 9 || Math.abs(car.z - box.z) > 9) continue;
+      if (Math.abs(car.y - player.pos.y) > 2.5) continue;
+      const fx = -Math.sin(car.yaw);
+      const fz = -Math.cos(car.yaw);
+      const hit = overlap(
+        box.x,
+        box.z,
+        box.fx,
+        box.fz,
+        box.halfWidth,
+        box.front,
+        box.rear,
+        car.x,
+        car.z,
+        fx,
+        fz,
+        car.halfWidth,
+        car.front,
+        car.rear,
+      );
+      if (!hit) continue;
+      // Push the player out along the separating axis, taking its approach speed away, and
+      // shove the traffic car the other way; it stops with its hazards on.
+      const vn =
+        player.vel.x * hit.nx + player.vel.z * hit.nz - (fx * hit.nx + fz * hit.nz) * car.v;
+      const mass = player.spec.mass;
+      const impulse = mass * (Math.max(-vn, 0) * 1.1 + hit.depth * 6 * dt * 60);
+      const point: Vec3 = { x: hit.x, y: player.pos.y, z: hit.z };
+      player.applyImpulse(point, { x: hit.nx * impulse, y: 0, z: hit.nz * impulse });
+      car.shoveX -= hit.nx * hit.depth * 0.5;
+      car.shoveZ -= hit.nz * hit.depth * 0.5;
+      car.v = Math.max(car.v - Math.abs(vn) * 0.5, 0);
+      car.a = -HARD_BRAKE;
+      car.hazards = HAZARD_TIME;
+    }
+  }
+
+  /** Distance along a link and sideways from it for a point (null when far from it). */
+  private projectOnLink(
+    link: LaneLink,
+    x: number,
+    z: number,
+  ): { s: number; lateral: number; tx: number; tz: number } | null {
+    let best: { s: number; lateral: number; tx: number; tz: number } | null = null;
+    let bestD = 12;
+    const pts = link.points;
+    for (let i = 0; i < pts.length / 2 - 1; i++) {
+      const ax = pts[i * 2]!;
+      const az = pts[i * 2 + 1]!;
+      const bx = pts[i * 2 + 2]!;
+      const bz = pts[i * 2 + 3]!;
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 1e-6) continue;
+      const tx = (bx - ax) / len;
+      const tz = (bz - az) / len;
+      const t = Math.min(Math.max(((x - ax) * tx + (z - az) * tz) / len, 0), 1);
+      const px = ax + tx * len * t;
+      const pz = az + tz * len * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d < bestD) {
+        bestD = d;
+        const lateral = (x - px) * -tz + (z - pz) * tx;
+        best = { s: link.cum[i]! + len * t, lateral, tx, tz };
+      }
+    }
+    return best;
+  }
+}
+
+/**
+ * Two boxes on the ground plane (centre, forward direction, half width, and how far the body
+ * reaches ahead of and behind the centre): the smallest push that separates them, as the
+ * direction to move the first box, its depth and a contact point. Null when apart.
+ */
+function overlap(
+  ax: number,
+  az: number,
+  afx: number,
+  afz: number,
+  aw: number,
+  afront: number,
+  arear: number,
+  bx: number,
+  bz: number,
+  bfx: number,
+  bfz: number,
+  bw: number,
+  bfront: number,
+  brear: number,
+): { nx: number; nz: number; depth: number; x: number; z: number } | null {
+  // Box centres shifted to the middle of each body.
+  const acx = ax + afx * ((afront - arear) / 2);
+  const acz = az + afz * ((afront - arear) / 2);
+  const bcx = bx + bfx * ((bfront - brear) / 2);
+  const bcz = bz + bfz * ((bfront - brear) / 2);
+  const al = (afront + arear) / 2;
+  const bl = (bfront + brear) / 2;
+  const axes: Array<[number, number]> = [
+    [afx, afz],
+    [-afz, afx],
+    [bfx, bfz],
+    [-bfz, bfx],
+  ];
+  const dx = bcx - acx;
+  const dz = bcz - acz;
+  let best = Infinity;
+  let nx = 0;
+  let nz = 0;
+  for (const [ux, uz] of axes) {
+    const ra = Math.abs(afx * ux + afz * uz) * al + Math.abs(-afz * ux + afx * uz) * aw;
+    const rb = Math.abs(bfx * ux + bfz * uz) * bl + Math.abs(-bfz * ux + bfx * uz) * bw;
+    const d = dx * ux + dz * uz;
+    const pen = ra + rb - Math.abs(d);
+    if (pen <= 0) return null;
+    if (pen < best) {
+      best = pen;
+      // Push a away from b.
+      const sign = d > 0 ? -1 : 1;
+      nx = ux * sign;
+      nz = uz * sign;
+    }
+  }
+  return { nx, nz, depth: best, x: (acx + bcx) / 2, z: (acz + bcz) / 2 };
+}
