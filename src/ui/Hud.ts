@@ -31,6 +31,10 @@ export class Hud {
   private readonly segments: HTMLElement[] = [];
   private readonly abs = el('span', 'hud-lamp', 'ABS');
   private readonly tc = el('span', 'hud-lamp', 'TC');
+  /** Damage: wing, engine and alignment bars, shown once something is damaged. */
+  private readonly damage = el('div', 'hud-damage');
+  private readonly damageBars: HTMLElement[] = [];
+  private damageShown = '';
   private litSegments = -1;
   private litLights = -1;
   private flash = 0;
@@ -54,13 +58,23 @@ export class Hud {
     }
     const lamps = el('div', 'hud-lamps');
     lamps.append(this.tc, this.abs);
+    for (const name of ['AERO', 'ENGINE', 'ALIGN']) {
+      const row = el('div', 'hud-damage-row');
+      const bar = el('span', 'hud-damage-bar');
+      const fill = el('span');
+      bar.appendChild(fill);
+      row.append(el('span', 'hud-damage-name', name), bar);
+      this.damage.appendChild(row);
+      this.damageBars.push(fill);
+    }
+    this.damage.hidden = true;
     const readout = el('div', 'hud-readout');
     const gearBlock = el('div', 'hud-gear-block');
     gearBlock.append(this.gear, this.mode);
     const speedBlock = el('div', 'hud-speed-block');
     speedBlock.append(this.speed, this.unit);
     readout.append(gearBlock, speedBlock);
-    this.root.append(this.lights, bar, readout, lamps);
+    this.root.append(this.damage, this.lights, bar, readout, lamps);
     parent.appendChild(this.root);
   }
 
@@ -111,5 +125,20 @@ export class Hud {
     this.abs.classList.toggle('off', car.absLevel === 0);
     this.abs.classList.toggle('active', (car.flags & FLAG_ABS) !== 0);
     this.tc.classList.toggle('active', (car.flags & FLAG_TC) !== 0);
+    this.updateDamage(car);
+  }
+
+  private updateDamage(car: CarRenderState): void {
+    const levels = [car.damageAero, car.damageEngine, Math.abs(car.damageSteer)];
+    // Update the DOM only when a bar moves by a visible step.
+    const key = levels.map((v) => Math.round(v * 20)).join(',');
+    if (key === this.damageShown) return;
+    this.damageShown = key;
+    this.damage.hidden = levels.every((v) => v < 0.03);
+    levels.forEach((v, i) => {
+      const fill = this.damageBars[i]!;
+      fill.style.width = `${Math.round(Math.min(v, 1) * 100)}%`;
+      fill.className = v > 0.5 ? 'bad' : v > 0.2 ? 'warn' : '';
+    });
   }
 }

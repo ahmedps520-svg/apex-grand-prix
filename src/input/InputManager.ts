@@ -197,8 +197,19 @@ export class InputManager {
   private stickX = 0;
   private stickY = 0;
   private capture: Capture | null = null;
+  /**
+   * Button presses (released → pressed) seen between frames, per pad. The Gamepad API has no
+   * button events, only polling: at a low frame rate a quick tap can start and end between two
+   * frames, so the pads are also sampled on a fast timer and each new press is kept until the
+   * next frame reads it. Only presses are kept, not the pressed state, so a press never lasts
+   * longer than the button was actually down.
+   */
+  private readonly latched = new Map<number, boolean[]>();
+  private readonly sampled = new Map<number, boolean[]>();
+  private readonly sampler: ReturnType<typeof setInterval>;
 
   constructor() {
+    this.sampler = setInterval(() => this.samplePads(), 8);
     this.listen(window, 'keydown', (e) => this.onKey(e as KeyboardEvent, true));
     this.listen(window, 'keyup', (e) => this.onKey(e as KeyboardEvent, false));
     // Released keys aren't reported while the window is unfocused: forget them.
@@ -276,7 +287,9 @@ export class InputManager {
       brake = Math.max(brake, padBrake);
       const b = this.bindings.pad;
       const prev = this.prevButtons.get(pad.index) ?? [];
-      const now2 = pad.buttons.map((btn) => btn.pressed);
+      const latch = this.latched.get(pad.index);
+      const now2 = pad.buttons.map((btn, i) => btn.pressed || latch?.[i] === true);
+      if (latch) latch.length = 0;
       const pressed = (i: number) => now2[i] === true && prev[i] !== true;
       this.prevButtons.set(pad.index, now2);
 
@@ -390,7 +403,29 @@ export class InputManager {
   }
 
   dispose(): void {
+    clearInterval(this.sampler);
     for (const [target, type, fn] of this.listeners) target.removeEventListener(type, fn);
+  }
+
+  /** Between frames: remembers each new button press, so short taps aren't missed. */
+  private samplePads(): void {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const pad of pads) {
+      if (!pad || !pad.connected) continue;
+      let latch = this.latched.get(pad.index);
+      let last = this.sampled.get(pad.index);
+      if (!latch || !last) {
+        latch = [];
+        last = [];
+        this.latched.set(pad.index, latch);
+        this.sampled.set(pad.index, last);
+      }
+      for (let i = 0; i < pad.buttons.length; i++) {
+        const down = pad.buttons[i]!.pressed;
+        if (down && last[i] !== true) latch[i] = true;
+        last[i] = down;
+      }
+    }
   }
 
   /** Menu events from a standard pad: buttons once per press, directions with auto-repeat. */

@@ -25,7 +25,7 @@ import { TEST_MULE, type CarSpec } from './vehicle/spec';
  * Racing line settings for a car, scaled from the ones tuned for the GT test car by grip,
  * downforce and power-to-weight, so the AI knows how fast each car can take a corner.
  */
-export function lineOptionsFor(spec: CarSpec, calibration = 1): RacingLineOptions {
+export function lineOptionsFor(spec: CarSpec, calibration = 1, trackGrip = 1): RacingLineOptions {
   const d = DEFAULT_LINE_OPTIONS;
   const ref = TEST_MULE;
   const mu = (s: CarSpec) => (s.front.tyre.muY + s.rear.tyre.muY) / 2;
@@ -34,9 +34,9 @@ export function lineOptionsFor(spec: CarSpec, calibration = 1): RacingLineOption
   const power = peakPower(spec) / spec.mass / (peakPower(ref) / ref.mass);
   const f = calibration;
   return {
-    gripG: d.gripG * grip * f,
+    gripG: d.gripG * grip * f * trackGrip,
     downforce: d.downforce * aero * f * f,
-    brake: d.brake * grip * f,
+    brake: d.brake * grip * f * trackGrip,
     accel: d.accel * Math.min(Math.max(power, 0.5), 1.6),
     topSpeed: topSpeed(spec) / 3.6,
   };
@@ -87,17 +87,19 @@ export class World {
     }
     const def = trackById(config.trackId) ?? TRACKS[0]!;
     const track = new Track(def);
+    track.gripScale = config.grip ?? 1;
     const count = config.mode === 'race' ? Math.max(config.opponents, 0) + 1 : 1;
     const world = new World(count, track, track.gridSlot(0), spec);
     world.track = track;
     world.setAids(0, config.aids);
-    const line = computeRacingLine(track, lineOptionsFor(spec, model.aiGrip));
+    const line = computeRacingLine(track, lineOptionsFor(spec, model.aiGrip, track.gripScale));
     const rand = mulberry32(config.seed);
-    for (let i = 1; i < count; i++) {
+    for (let i = config.attract ? 0 : 1; i < count; i++) {
       const skill = SKILL[config.difficulty] * (0.985 + rand() * 0.03);
       world.drivers[i] = new AiDriver(track, line, { skill, seed: config.seed + i * 7919 });
       world.cars[i]!.setAids({ ...defaultAids(), gearbox: 'auto', tc: 'high', abs: 'high' });
     }
+    for (const car of world.cars) car.damageScale = config.damage ?? 0;
     const laps = config.mode === 'race' ? config.laps : 0;
     world.director = new RaceDirector(track, count, config.mode, laps, config.seed);
     world.director.restart(world.cars, Math.min(config.gridSlot, count - 1));
@@ -135,6 +137,7 @@ export class World {
   }
 
   restartSession(playerSlot: number): void {
+    for (const car of this.cars) car.repair();
     this.director?.restart(this.cars, playerSlot);
     if (!this.director) this.cars[0]?.reset();
   }

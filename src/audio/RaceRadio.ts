@@ -26,6 +26,10 @@ export interface RadioInput {
   gapAhead: number | null;
   gapBehind: number | null;
   finished: boolean;
+  /** Player's damage, 0 … 1 (steering signed: + = pulls right). */
+  damageAero: number;
+  damageEngine: number;
+  damageSteer: number;
 }
 
 export interface RadioMessage {
@@ -64,6 +68,10 @@ export class RaceEngineer {
   private lastChatter = -Infinity;
   private finishedSaid = false;
   private finalLapSaid = false;
+  /** Damage already reported (so each part is mentioned once). */
+  private aeroSaid = false;
+  private engineSaid = false;
+  private steerSaid = false;
 
   reset(): void {
     this.lastPhase = null;
@@ -76,6 +84,9 @@ export class RaceEngineer {
     this.lastChatter = -Infinity;
     this.finishedSaid = false;
     this.finalLapSaid = false;
+    this.aeroSaid = false;
+    this.engineSaid = false;
+    this.steerSaid = false;
   }
 
   update(dt: number, r: RadioInput): RadioMessage[] {
@@ -152,6 +163,24 @@ export class RaceEngineer {
       if (parts.length > 0) {
         out.push({ text: parts.join(' '), priority: 2 });
         this.lastChatter = this.time;
+      }
+    }
+
+    // Damage, once per part, after the car has settled from the hit.
+    if (r.phase === 'racing' && !r.finished) {
+      if (!this.aeroSaid && r.damageAero > 0.25) {
+        this.aeroSaid = true;
+        out.push({
+          text: 'We have aero damage. Expect less grip in the fast corners.',
+          priority: 2,
+        });
+      } else if (!this.steerSaid && Math.abs(r.damageSteer) > 0.25) {
+        this.steerSaid = true;
+        const side = r.damageSteer > 0 ? 'right' : 'left';
+        out.push({ text: `Steering is bent, the car will pull to the ${side}.`, priority: 2 });
+      } else if (!this.engineSaid && r.damageEngine > 0.25) {
+        this.engineSaid = true;
+        out.push({ text: 'Engine damage. We are down on power.', priority: 2 });
       }
     }
 

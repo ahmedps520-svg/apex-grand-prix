@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { VERSION_TEXT } from '../../app/version';
-import { PAINTS } from '../../content/paints';
+import { TIMES_OF_DAY, WEATHERS } from '../../content/conditions';
+import { LIVERY_PATTERNS, colourName } from '../../content/livery';
 import { TRACKS } from '../../content/tracks';
 import {
   KEY_ACTIONS,
@@ -19,7 +20,7 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, MenuStore } from './store';
+import type { Difficulty, MenuStore, ReplayCommand } from './store';
 import { Button, Choice, Note, Section, Slider, Tabs, Toggle, percent } from './widgets';
 
 interface ScreenProps {
@@ -59,6 +60,11 @@ const SMOOTHING = [
   { value: 'low', text: 'Low' },
   { value: 'medium', text: 'Medium' },
   { value: 'high', text: 'High' },
+] as const;
+const DAMAGE = [
+  { value: 'off', text: 'Off' },
+  { value: 'light', text: 'Light' },
+  { value: 'full', text: 'Full' },
 ] as const;
 const TOUCH_STEERING = [
   { value: 'drag', text: 'Drag' },
@@ -238,8 +244,7 @@ export function CarSelectScreen({ store }: ScreenProps) {
   useTabKeys(root, CAR_CLASSES, setCls);
   const pick = (carId: string) => {
     store.update({ carId });
-    if (setup.mode === 'race') store.push('raceSetup');
-    else store.actions.startSession({ ...store.setup.value, carId });
+    store.push('raceSetup');
   };
   const cars = CARS.filter((c) => c.className === cls);
   const focusId = cars.some((c) => c.id === setup.carId) ? setup.carId : cars[0]?.id;
@@ -247,7 +252,13 @@ export function CarSelectScreen({ store }: ScreenProps) {
     <div class="mn-panel mn-wide" ref={root}>
       <Header title="Choose your car" subtitle="Every car in the race is the one you pick" />
       <Tabs tabs={CAR_CLASSES.map((c) => ({ id: c, label: c }))} active={cls} onSelect={setCls} />
-      <PaintChoice store={store} />
+      <div class="mn-row-buttons">
+        <Button
+          label="Paint & livery"
+          hint={liveryHint(store)}
+          onPress={() => store.push('livery')}
+        />
+      </div>
       <div class="mn-cards" key={cls}>
         {cars.map((c) => (
           <button
@@ -270,21 +281,11 @@ export function CarSelectScreen({ store }: ScreenProps) {
   );
 }
 
-/** The player's paint colour, with a swatch. */
-function PaintChoice({ store }: ScreenProps) {
-  const s = store.settings;
-  return (
-    <div class="mn-paint">
-      <span class="mn-swatch" style={{ background: `#${s.paint.toString(16).padStart(6, '0')}` }} />
-      <Choice
-        label="Paint"
-        value={s.paint}
-        options={PAINTS.map((p) => ({ value: p.hex, text: p.name }))}
-        onChange={(v) => ((s.paint = v), store.changed())}
-        wrap
-      />
-    </div>
-  );
+/** A short description of the player's livery for the car select screen. */
+function liveryHint(store: MenuStore): string {
+  const l = store.settings.livery;
+  const pattern = LIVERY_PATTERNS.find((p) => p.value === l.pattern)?.text ?? '';
+  return `${colourName(l.primary) ?? 'Custom'} · ${pattern} · #${l.number}`;
 }
 
 const SEASON_LENGTHS = [3, 4, 6, 8];
@@ -473,48 +474,77 @@ export function RaceSetupScreen({ store }: ScreenProps) {
   const setup = store.setup.value;
   const aids = store.settings.aids;
   const track = TRACKS.find((t) => t.id === setup.trackId);
+  const race = setup.mode === 'race';
   return (
     <div class="mn-panel">
-      <Header title="Race setup" subtitle={track ? `${track.name} · ${track.location}` : ''} />
+      <Header
+        title={race ? 'Race setup' : 'Time trial setup'}
+        subtitle={track ? `${track.name} · ${track.location}` : ''}
+      />
       <div class="mn-list">
-        <Choice
-          label="Opponents"
-          value={setup.opponents}
-          options={[1, 3, 5, 7, 9, 11].map((n) => ({ value: n, text: String(n) }))}
-          onChange={(opponents) =>
-            store.update({ opponents, gridSlot: Math.min(setup.gridSlot, opponents) })
-          }
-        />
-        <Choice
-          label="Laps"
-          value={setup.laps}
-          options={[1, 2, 3, 4, 5, 6, 8, 10, 15].map((n) => ({ value: n, text: String(n) }))}
-          onChange={(laps) => store.update({ laps })}
-        />
-        <Choice
-          label="Difficulty"
-          value={setup.difficulty}
-          options={DIFFICULTY}
-          onChange={(difficulty) => store.update({ difficulty })}
-        />
-        <Choice
-          label="Start position"
-          value={setup.gridSlot}
-          options={Array.from({ length: setup.opponents + 1 }, (_, i) => ({
-            value: i,
-            text: i === 0 ? 'Pole' : `P${i + 1}`,
-          }))}
-          onChange={(gridSlot) => store.update({ gridSlot })}
-        />
+        {race && (
+          <>
+            <Choice
+              label="Opponents"
+              value={setup.opponents}
+              options={[1, 3, 5, 7, 9, 11].map((n) => ({ value: n, text: String(n) }))}
+              onChange={(opponents) =>
+                store.update({ opponents, gridSlot: Math.min(setup.gridSlot, opponents) })
+              }
+            />
+            <Choice
+              label="Laps"
+              value={setup.laps}
+              options={[1, 2, 3, 4, 5, 6, 8, 10, 15].map((n) => ({ value: n, text: String(n) }))}
+              onChange={(laps) => store.update({ laps })}
+            />
+            <Choice
+              label="Difficulty"
+              value={setup.difficulty}
+              options={DIFFICULTY}
+              onChange={(difficulty) => store.update({ difficulty })}
+            />
+            <Choice
+              label="Start position"
+              value={setup.gridSlot}
+              options={Array.from({ length: setup.opponents + 1 }, (_, i) => ({
+                value: i,
+                text: i === 0 ? 'Pole' : `P${i + 1}`,
+              }))}
+              onChange={(gridSlot) => store.update({ gridSlot })}
+            />
+          </>
+        )}
+        <ConditionChoices store={store} />
         <AidChoices store={store} aids={aids} />
         <Button
-          label="Start race"
+          label={race ? 'Start race' : 'Start'}
           primary
           autofocus
           onPress={() => store.actions.startSession(store.setup.value)}
         />
       </div>
     </div>
+  );
+}
+
+function ConditionChoices({ store }: ScreenProps) {
+  const setup = store.setup.value;
+  return (
+    <>
+      <Choice
+        label="Time of day"
+        value={setup.time}
+        options={TIMES_OF_DAY}
+        onChange={(time) => store.update({ time })}
+      />
+      <Choice
+        label="Weather"
+        value={setup.weather}
+        options={WEATHERS}
+        onChange={(weather) => store.update({ weather })}
+      />
+    </>
   );
 }
 
@@ -590,6 +620,7 @@ export function PauseScreen({ store }: ScreenProps) {
           />
         )}
         <Button label="Reset car" onPress={() => store.actions.resetCar()} />
+        <Button label="Photo mode" onPress={() => store.actions.photoMode()} />
         <Button label="Settings" onPress={() => store.push('settings')} />
         <Button label="Controls" onPress={() => store.push('controls')} />
         <Button label="Quit to main menu" onPress={() => store.actions.quitToMenu()} />
@@ -654,6 +685,9 @@ export function ResultsScreen({ store }: ScreenProps) {
             autofocus
             primary
           />
+          {store.replayAvailable.value && (
+            <Button label="Watch replay" onPress={() => store.actions.watchReplay()} />
+          )}
         </div>
       ) : (
         <div class="mn-row-buttons">
@@ -663,10 +697,85 @@ export function ResultsScreen({ store }: ScreenProps) {
             autofocus
             primary
           />
+          {store.replayAvailable.value && (
+            <Button label="Watch replay" onPress={() => store.actions.watchReplay()} />
+          )}
           <Button label="Choose track" onPress={() => store.set(['main', 'trackSelect'])} />
           <Button label="Main menu" onPress={() => store.actions.quitToMenu()} />
         </div>
       )}
+    </div>
+  );
+}
+
+const CAMERA_NAMES = { tv: 'TV', chase: 'Chase', onboard: 'Onboard' } as const;
+
+/** Replay controls over the 3D view: a timeline and buttons for mouse and touch. */
+export function ReplayScreen({ store }: ScreenProps) {
+  const info = store.replay.value;
+  if (!info) return null;
+  const send = (command: ReplayCommand) => () => store.actions.replay(command);
+  const clock = (t: number) => {
+    const m = Math.floor(t / 60);
+    return `${m}:${Math.floor(t - m * 60)
+      .toString()
+      .padStart(2, '0')}`;
+  };
+  return (
+    <div class="mn-replay">
+      <div class="mn-replay-top">
+        <span class="mn-replay-badge">REPLAY</span>
+        <span class="mn-replay-car">{info.car}</span>
+        <span class="mn-replay-meta">
+          {CAMERA_NAMES[info.camera]} · {info.speed}×
+        </span>
+      </div>
+      <div class="mn-replay-bar">
+        <button type="button" class="mn-replay-btn" onClick={send('back5')} aria-label="Back 5 s">
+          ⏪
+        </button>
+        <button
+          type="button"
+          class="mn-replay-btn"
+          onClick={send('playPause')}
+          aria-label={info.playing ? 'Pause' : 'Play'}
+        >
+          {info.playing ? '❚❚' : '▶'}
+        </button>
+        <button
+          type="button"
+          class="mn-replay-btn"
+          onClick={send('forward5')}
+          aria-label="Forward 5 s"
+        >
+          ⏩
+        </button>
+        <span class="mn-replay-time">{clock(info.time)}</span>
+        <div class="mn-replay-track">
+          <span style={{ width: `${(info.time / Math.max(info.duration, 0.001)) * 100}%` }} />
+        </div>
+        <span class="mn-replay-time">{clock(info.duration)}</span>
+        <button
+          type="button"
+          class="mn-replay-btn"
+          onClick={send('prevCar')}
+          aria-label="Previous car"
+        >
+          ◀
+        </button>
+        <button type="button" class="mn-replay-btn" onClick={send('nextCar')} aria-label="Next car">
+          ▶
+        </button>
+        <button type="button" class="mn-replay-btn wide" onClick={send('camera')}>
+          Camera
+        </button>
+        <button type="button" class="mn-replay-btn wide" onClick={() => store.actions.photoMode()}>
+          Photo
+        </button>
+        <button type="button" class="mn-replay-btn wide" onClick={send('exit')}>
+          Exit
+        </button>
+      </div>
     </div>
   );
 }
@@ -713,6 +822,12 @@ export function SettingsScreen({ store }: ScreenProps) {
               value={s.camera}
               options={CAMERAS}
               onChange={(v) => ((s.camera = v), changed())}
+            />
+            <Choice
+              label="Damage"
+              value={s.damage}
+              options={DAMAGE}
+              onChange={(v) => ((s.damage = v), changed())}
             />
             <Toggle
               label="Time trial ghost"

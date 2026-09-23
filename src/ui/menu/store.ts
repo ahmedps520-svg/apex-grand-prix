@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals';
 import type { Settings } from '../../app/settings';
+import type { Conditions, Weather } from '../../content/conditions';
 import type { Difficulty, GameMode, SpawnPoint } from '../../shared/protocol';
 import type { PromptFamily } from './prompts';
 
@@ -14,12 +15,14 @@ export type ScreenId =
   | 'main'
   | 'trackSelect'
   | 'carSelect'
+  | 'livery'
   | 'championship'
   | 'standings'
   | 'raceSetup'
   | 'freeSetup'
   | 'pause'
   | 'results'
+  | 'replay'
   | 'settings'
   | 'bindPad'
   | 'bindKeys'
@@ -42,6 +45,8 @@ export interface SessionSetup {
   difficulty: Difficulty;
   /** 0 = pole … opponents = last. */
   gridSlot: number;
+  time: Conditions['time'];
+  weather: Weather;
 }
 
 export interface ResultRow {
@@ -64,8 +69,10 @@ export interface Championship {
   /** Points each car scored in the latest round. */
   last: number[];
   names: string[];
-  /** Car index → paint, so each rival keeps its colours all season. */
+  /** Car index → paint (older saves; liveries now come from `liverySeed`). */
   paints: number[];
+  /** Seed for the rivals' liveries, so each keeps its look all season. */
+  liverySeed?: number;
   /** Car, field size, laps and difficulty for every round. */
   setup: SessionSetup;
 }
@@ -89,6 +96,30 @@ export function isChampionship(value: unknown): value is Championship {
     c.setup !== null
   );
 }
+
+export type ReplayCamera = 'tv' | 'chase' | 'onboard';
+
+/** What the replay screen shows, updated by the game every frame while watching. */
+export interface ReplayInfo {
+  time: number;
+  duration: number;
+  speed: number;
+  playing: boolean;
+  camera: ReplayCamera;
+  /** Watched car: name and position at the end of the race. */
+  car: string;
+}
+
+export type ReplayCommand =
+  | 'playPause'
+  | 'back5'
+  | 'forward5'
+  | 'slower'
+  | 'faster'
+  | 'prevCar'
+  | 'nextCar'
+  | 'camera'
+  | 'exit';
 
 export interface SessionResults {
   mode: GameMode;
@@ -128,6 +159,11 @@ export interface MenuActions {
   startChampionship(races: number): void;
   /** Runs the next championship race. */
   nextRound(): void;
+  /** Watches the race just finished (from the results). */
+  watchReplay(): void;
+  /** Opens photo mode (from the pause menu or a replay). */
+  photoMode(): void;
+  replay(command: ReplayCommand): void;
 }
 
 export interface PadSnapshot {
@@ -156,11 +192,16 @@ export class MenuStore {
     laps: 3,
     difficulty: 'medium',
     gridSlot: 4,
+    time: 'track',
+    weather: 'clear',
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);
   readonly results = signal<SessionResults | null>(null);
   readonly championship = signal<Championship | null>(null);
+  /** A replay of the session just finished can be watched. */
+  readonly replayAvailable = signal(false);
+  readonly replay = signal<ReplayInfo | null>(null);
   /** Live controller state for the tester (updated every frame while it's open). */
   readonly pads = signal<PadSnapshot[]>([]);
   /** Short status line for the current screen (e.g. an import error). */

@@ -78,6 +78,8 @@ export class Track implements Surface {
   readonly wallOffset: number;
   /** Per sample: is there a kerb on the left (-1) / right (+1) edge. */
   readonly kerbs: Array<{ left: boolean; right: boolean }> = [];
+  /** Wet weather: multiplier on every surface's grip. */
+  gripScale = 1;
   private readonly grid = new Map<number, number[]>();
 
   constructor(readonly def: TrackDef) {

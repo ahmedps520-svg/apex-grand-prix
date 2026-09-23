@@ -1,3 +1,4 @@
+import { defaultLivery, sanitizeLivery, type Livery } from '../content/livery';
 import { sanitizeBindings, defaultBindings, type Bindings } from '../input/bindings';
 import { CURVE_KINDS, type CurveKind } from '../input/curves';
 import {
@@ -48,6 +49,8 @@ export interface Settings {
   audio: { volume: number; muted: boolean };
   /** Time trial: show the best lap as a see-through car. */
   ghost: boolean;
+  /** How much crashes damage the car. */
+  damage: DamageLevel;
   /** Race engineer: spoken calls and subtitles. */
   radio: { voice: boolean; subtitles: boolean; volume: number };
   /** Wheel profiles by gamepad id. */
@@ -58,11 +61,18 @@ export interface Settings {
   prompts: PromptSetting;
   /** Touch screens: steer by dragging on the left half, or by tilting the device. */
   touchSteering: 'drag' | 'tilt';
-  /** Player's car colour (hex). */
+  /** Player's car colour (hex): the livery's primary colour, kept for older saves. */
   paint: number;
+  /** Player's livery: colours, pattern, race number and finish. */
+  livery: Livery;
   rumble: RumbleSettings;
   bindings: Bindings;
 }
+
+export type DamageLevel = 'off' | 'light' | 'full';
+const DAMAGE_LEVELS: readonly DamageLevel[] = ['off', 'light', 'full'];
+/** Damage setting → how much impacts hurt (see Car.damageScale). */
+export const DAMAGE_SCALE: Record<DamageLevel, number> = { off: 0, light: 0.5, full: 1 };
 
 export const SETTINGS_VERSION = 3;
 
@@ -89,12 +99,14 @@ export const defaultSettings = (): Settings => ({
   pad: defaultPadSettings(),
   audio: { volume: 0.7, muted: false },
   ghost: true,
+  damage: 'light',
   radio: { voice: true, subtitles: true, volume: 0.9 },
   wheels: {},
   wheelsPrompted: [],
   prompts: 'auto',
   touchSteering: 'drag',
   paint: 0xa3101f,
+  livery: defaultLivery(),
   rumble: defaultRumbleSettings(),
   bindings: defaultBindings(),
 });
@@ -127,6 +139,10 @@ export function parseSettings(raw: unknown): Settings {
   const pad = isObject(raw.pad) ? raw.pad : {};
   const audio = isObject(raw.audio) ? raw.audio : {};
   const radio = isObject(raw.radio) ? raw.radio : {};
+  const paint =
+    typeof raw.paint === 'number' && Number.isInteger(raw.paint) && raw.paint >= 0
+      ? Math.min(raw.paint, 0xffffff)
+      : d.paint;
   const rumble = isObject(raw.rumble) ? raw.rumble : {};
   const channels = isObject(rumble.channels) ? rumble.channels : {};
   const rumbleChannels = { ...d.rumble.channels };
@@ -170,6 +186,7 @@ export function parseSettings(raw: unknown): Settings {
       muted: typeof audio.muted === 'boolean' ? audio.muted : d.audio.muted,
     },
     ghost: typeof raw.ghost === 'boolean' ? raw.ghost : d.ghost,
+    damage: oneOf(raw.damage, DAMAGE_LEVELS, d.damage),
     radio: {
       voice: typeof radio.voice === 'boolean' ? radio.voice : d.radio.voice,
       subtitles: typeof radio.subtitles === 'boolean' ? radio.subtitles : d.radio.subtitles,
@@ -181,10 +198,9 @@ export function parseSettings(raw: unknown): Settings {
       : [],
     prompts: oneOf(raw.prompts, PROMPTS, d.prompts),
     touchSteering: raw.touchSteering === 'tilt' ? 'tilt' : 'drag',
-    paint:
-      typeof raw.paint === 'number' && Number.isInteger(raw.paint) && raw.paint >= 0
-        ? Math.min(raw.paint, 0xffffff)
-        : d.paint,
+    paint,
+    // Saves from before liveries had only a paint colour: it becomes the livery's colour.
+    livery: raw.livery !== undefined ? sanitizeLivery(raw.livery) : { ...d.livery, primary: paint },
     rumble: {
       enabled: typeof rumble.enabled === 'boolean' ? rumble.enabled : d.rumble.enabled,
       strength: num(rumble.strength, 0, 1, d.rumble.strength),

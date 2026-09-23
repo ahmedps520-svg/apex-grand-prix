@@ -2,6 +2,8 @@ import { h, render } from 'preact';
 import * as THREE from 'three/webgpu';
 import { EngineAudio, type AudioFrame } from '../audio/EngineAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
+import { gripFactor, type Conditions, type Weather } from '../content/conditions';
+import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
 import { TRACKS, trackById } from '../content/tracks';
 import { InputManager } from '../input/InputManager';
@@ -15,6 +17,16 @@ import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene } from '../render/TrackScene';
 import {
+  PhotoCamera,
+  PhotoControls,
+  PhotoPipeline,
+  capturePng,
+  defaultPhotoSettings,
+  downloadPhoto,
+  photoFileName,
+} from '../render/PhotoMode';
+import { TvDirector } from '../render/TvCamera';
+import {
   FLAG_LIMITER,
   FLAG_SHIFTING,
   SIM_HZ,
@@ -23,6 +35,7 @@ import {
   type SessionConfig,
   type SpawnPoint,
 } from '../shared/protocol';
+import { mulberry32 } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 import { Track } from '../sim/track/Track';
 import { carById, type CarModel } from '../sim/vehicle/cars';
@@ -31,12 +44,15 @@ import { HelpPanel } from '../ui/HelpPanel';
 import { Hud } from '../ui/Hud';
 import { FocusManager } from '../ui/menu/focus';
 import { MenuRoot } from '../ui/menu/MenuRoot';
+import { PhotoScreen } from '../ui/menu/PhotoScreen';
 import { promptFamily } from '../ui/menu/prompts';
 import {
   MenuStore,
   isChampionship,
   type Championship,
   type MenuActions,
+  type ReplayCamera,
+  type ReplayCommand,
   type SessionSetup,
 } from '../ui/menu/store';
 import { Minimap, type MinimapCar } from '../ui/Minimap';
@@ -50,7 +66,9 @@ import { WheelSetup } from '../ui/WheelSetup';
 import { DragTimer, formatDragResult } from './dragTimer';
 import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from './ghost';
 import { loadRecords, loadSeason, saveRecord, saveSeason } from './records';
+import { ReplayRecorder, type Replay } from './replay';
 import {
+  DAMAGE_SCALE,
   defaultSettings,
   exportSettings,
   importSettings,
@@ -127,6 +145,40 @@ const LOCATIONS: ReadonlyArray<{ value: SpawnPoint; text: string }> = [
   { value: 'skidpad', text: 'Skidpad' },
 ];
 
+const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4];
+const REPLAY_CAMERAS: readonly ReplayCamera[] = ['tv', 'chase', 'onboard'];
+/** Base car of each class: the menus' backdrop race uses one of them. */
+const SHOWCASE_CARS = ['gt', 'formula', 'prototype', 'touring', 'street'];
+/** Seconds the backdrop race follows one car before the director picks another. */
+const ATTRACT_SHOT = 16;
+/** Engine sound level while the menus are open over the backdrop race. */
+const MENU_AUDIO = 0.35;
+
+/** Random conditions for the backdrop race and championship rounds: mostly dry. */
+function randomConditions(): Pick<SessionSetup, 'time' | 'weather'> {
+  const times: Array<Conditions['time']> = [
+    'track',
+    'track',
+    'morning',
+    'midday',
+    'afternoon',
+    'golden',
+    'dusk',
+  ];
+  const r = Math.random();
+  const weather: Weather =
+    r < 0.45
+      ? 'clear'
+      : r < 0.7
+        ? 'cloudy'
+        : r < 0.84
+          ? 'overcast'
+          : r < 0.94
+            ? 'lightRain'
+            : 'heavyRain';
+  return { time: times[Math.floor(Math.random() * times.length)]!, weather };
+}
+
 const cssColor = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
 
 function colourDistance(a: number, b: number): number {
@@ -185,6 +237,9 @@ export class Game {
     gapAhead: null,
     gapBehind: null,
     finished: false,
+    damageAero: 0,
+    damageEngine: 0,
+    damageSteer: 0,
   };
   private readonly rumble: RumbleMixer;
   private readonly touch: TouchControls;
@@ -205,6 +260,41 @@ export class Game {
   private ghostView: CarView | null = null;
   private ghostModelId = '';
   private ghostLaps = 0;
+  /** Records the session being raced, for the replay. */
+  private replayRecorder: ReplayRecorder | null = null;
+  private lastReplay: Replay | null = null;
+  /** The replay being watched, or null. */
+  private replay: Replay | null = null;
+  private replayTime = 0;
+  private replaySpeed = 1;
+  private replayPlaying = true;
+  private replayCar = 0;
+  private replayCamera: ReplayCamera = 'tv';
+  private replayShownAt = -1;
+  /** TV cameras for the circuit (replays and the menus' backdrop race). */
+  private tv: TvDirector | null = null;
+  private readonly tvTarget = new THREE.Vector3();
+  private readonly tvVelocity = new THREE.Vector3();
+  /** The menus' backdrop: an AI race watched from the TV cameras. */
+  private attract = false;
+  private attractCar = 0;
+  private attractTimer = 0;
+  private audioDuck = 1;
+  /** Photo mode (from the pause menu or a replay), or null. */
+  private photo: {
+    camera: PhotoCamera;
+    pipeline: PhotoPipeline;
+    controls: PhotoControls;
+    /** Where to go back to: the pause menu or the replay. */
+    from: 'pause' | 'replay';
+    target: THREE.Vector3;
+    busy: boolean;
+    status: string;
+  } | null = null;
+  private readonly photoSettings = defaultPhotoSettings();
+  private readonly photoHost: HTMLElement;
+  /** `?autopilot`: the AI drives the player's car too (demos and browser tests). */
+  private readonly autopilot = new URLSearchParams(window.location.search).has('autopilot');
   private readonly debug: DebugApi;
   private readonly idleInput = neutralInput();
 
@@ -218,8 +308,10 @@ export class Game {
   private resultsShown = false;
   /** Championship round being raced, or -1. */
   private seasonRound = -1;
-  /** Rival colours for the championship being raced. */
-  private seasonPaints: number[] | null = null;
+  /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
+  private liverySeed = 1;
+  /** The livery editor is open: the camera circles the player's car wearing their livery. */
+  private showroom = false;
   private finishedAt = -1;
   private bestLapSeen = Infinity;
   private records = loadRecords();
@@ -247,7 +339,10 @@ export class Game {
     const settings = this.settings;
     const { width, height } = host.renderer.domElement.getBoundingClientRect();
     this.camera = new ChaseCamera(width / Math.max(height, 1));
-    host.onResize((w, h2) => this.camera.setAspect(w / h2));
+    host.onResize((w, h2) => {
+      this.camera.setAspect(w / h2);
+      this.photo?.camera.setAspect(w / h2);
+    });
     host.setResolutionScale(settings.resolutionScale);
 
     this.scenery = this.buildProvingGround();
@@ -285,6 +380,9 @@ export class Game {
     this.menuHost = document.createElement('div');
     this.menuHost.className = 'menu-host';
     ui.appendChild(this.menuHost);
+    this.photoHost = document.createElement('div');
+    this.photoHost.className = 'photo-host';
+    ui.appendChild(this.photoHost);
     this.menus = new MenuStore(settings, this.menuActions());
     this.menus.championship.value = loadSeason(isChampionship);
     this.focus = new FocusManager(() => this.focusScope());
@@ -322,7 +420,8 @@ export class Game {
     this.scenery.buildEnvironment(this.host.renderer);
     // `?drive` skips the menus and starts free driving (handy for testing).
     const direct = new URLSearchParams(window.location.search).has('drive');
-    await this.startSession(this.freeSetup(), !direct);
+    if (direct) await this.startSession(this.freeSetup());
+    else await this.startSession(this.showcaseSetup(), true, true);
     this.menus.set(direct ? [] : ['title']);
     render(h(MenuRoot, { store: this.menus }), this.menuHost);
     this.applyHudVisibility();
@@ -361,7 +460,23 @@ export class Game {
     return { ...this.menus.setup.value, mode: 'free' };
   }
 
-  private configFor(setup: SessionSetup): SessionConfig {
+  /** The menus' backdrop: ten AI cars racing on a circuit (the given one, or a random one). */
+  private showcaseSetup(trackId?: string): SessionSetup {
+    const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;
+    return {
+      ...this.menus.setup.value,
+      mode: 'race',
+      trackId: trackId || pick(TRACKS).id,
+      carId: pick(SHOWCASE_CARS),
+      opponents: 9,
+      laps: 99,
+      difficulty: 'expert',
+      gridSlot: 0,
+      ...randomConditions(),
+    };
+  }
+
+  private configFor(setup: SessionSetup, attract = false): SessionConfig {
     return {
       mode: setup.mode,
       trackId: setup.mode === 'free' ? '' : setup.trackId || TRACKS[0]?.id || '',
@@ -373,20 +488,38 @@ export class Game {
       gridSlot: Math.min(setup.gridSlot, setup.opponents),
       aids: { ...this.settings.aids },
       seed: (Math.random() * 1e9) | 0,
+      attract: attract || (this.autopilot && setup.mode === 'race'),
+      damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
+      grip: gripFactor(setup.weather),
+      conditions: { time: setup.time, weather: setup.weather },
     };
   }
 
   /** Builds the scene and cars for a session and starts it in the worker. */
-  private async startSession(setup: SessionSetup, idle = false): Promise<void> {
-    const config = this.configFor(setup);
+  private async startSession(setup: SessionSetup, idle = false, attract = false): Promise<void> {
+    const config = this.configFor(setup, attract);
     this.rumble.stop(this.input.activePad);
     const previous = this.session;
     this.session = config;
     // The proving ground is built at start-up; circuits are built when first driven.
     const changed = previous ? previous.trackId !== config.trackId : config.trackId !== '';
     if (changed) this.buildScenery(config);
+    else if (this.scenery instanceof TrackScene && config.conditions) {
+      this.scenery.setConditions(config.conditions);
+    }
+    this.attract = attract && this.tv !== null;
+    const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
+    this.liverySeed = season?.liverySeed ?? config.seed;
     this.buildCars(config.mode === 'race' ? config.opponents + 1 : 1, carById(config.carId));
     this.setupGhost(config);
+    this.replay = null;
+    this.lastReplay = null;
+    this.replayRecorder =
+      !idle && config.mode !== 'free' ? new ReplayRecorder(this.cars.length, 30) : null;
+    this.menus.replayAvailable.value = false;
+    this.attractCar = 0;
+    this.attractTimer = 0;
+    this.tv?.cut();
     await this.sim.start(config);
     this.race = null;
     this.resultsShown = false;
@@ -497,10 +630,13 @@ export class Game {
     const def = config.trackId ? trackById(config.trackId) : undefined;
     if (def) {
       this.track = new Track(def);
-      this.scenery = new TrackScene(this.track);
+      const scene = new TrackScene(this.track, config.conditions);
+      this.scenery = scene;
       this.minimap = new Minimap(this.ui, this.track);
+      this.tv = new TvDirector(this.track, { obstacles: scene.obstacles });
     } else {
       this.track = null;
+      this.tv = null;
       this.scenery = this.buildProvingGround();
     }
     this.scenery.buildEnvironment(this.host.renderer);
@@ -532,7 +668,7 @@ export class Game {
     }
     while (this.cars.length < count) {
       const i = this.cars.length;
-      this.cars.push(new CarView(model.spec, this.paintFor(i), model.style));
+      this.cars.push(new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i)));
       this.states.push(createCarRenderState());
       this.minimapCars.push({ x: 0, z: 0, color: '#fff', player: i === 0 });
     }
@@ -542,22 +678,20 @@ export class Game {
     this.repaint();
   }
 
-  private paintFor(car: number): number {
-    const player = this.settings.paint;
-    if (car === 0) return player;
-    const fixed = this.seasonPaints?.[car];
-    if (fixed !== undefined) return fixed;
-    const rivals = rivalPaints(player);
-    return rivals[(car - 1) % rivals.length] ?? 0x9e9e9e;
+  /** The player's livery, or a rival's: random but the same all session (and all season). */
+  private liveryFor(car: number): Livery {
+    const player = this.settings.livery;
+    if (car === 0 && (!this.attract || this.showroom)) return player;
+    return randomLivery(mulberry32((this.liverySeed + car * 7919) >>> 0), player);
   }
 
-  /** Applies the player's paint (and rivals that avoid it) to every car and minimap dot. */
+  /** Applies every car's livery, and colours the minimap dots to match. */
   private repaint(): void {
     for (let i = 0; i < this.cars.length; i++) {
-      const paint = this.paintFor(i);
-      this.cars[i]!.setPaint(paint);
+      const livery = this.liveryFor(i);
+      this.cars[i]!.setLivery(livery);
       const dot = this.minimapCars[i];
-      if (dot) dot.color = cssColor(paint);
+      if (dot) dot.color = cssColor(livery.primary);
     }
   }
 
@@ -584,27 +718,27 @@ export class Game {
 
   private quitToMenu(): void {
     this.seasonRound = -1;
-    this.seasonPaints = null;
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
       this.sim.resume();
       this.audio.resume();
     }
-    // The menus idle on the circuit just driven (no rebuild), or on the proving ground.
-    const trackId = this.session?.trackId;
-    const backdrop: SessionSetup = trackId
-      ? { ...this.menus.setup.value, mode: 'timeTrial', trackId }
-      : this.freeSetup();
-    void this.startSession(backdrop, true).then(() => this.menus.set(['main']));
+    this.leaveReplay();
+    // Behind the menus: an AI race on the circuit just driven (no rebuild), or a random one.
+    void this.startSession(this.showcaseSetup(this.session?.trackId), true, true).then(() =>
+      this.menus.set(['main']),
+    );
   }
 
   private applyHudVisibility(): void {
-    const driving = this.driving && !this.menus.open;
+    const driving = this.driving && !this.menus.open && !this.photo;
     this.hud.root.hidden = !driving;
     this.raceHud.setVisible(driving && this.session?.mode !== 'free');
     this.minimap?.setVisible(driving);
     this.telemetry.setVisible(driving && this.settings.telemetry);
+    this.telemetry.root.classList.toggle('below-map', this.minimap !== null);
+    if (!driving) this.radioBox.hide();
     this.perf.setVisible(this.settings.overlay);
     const device = this.input.lastDevice;
     this.touch.setVisible(driving && hasTouch() && (device === 'touch' || device === 'none'));
@@ -624,7 +758,8 @@ export class Game {
     input.update();
     this.handleDevices();
     const menusOpen = this.menus.open;
-    if (this.wheelSetup.visible) this.wheelSetup.update(input.wheelPad, dt);
+    if (this.photo) this.handlePhotoInput(dt);
+    else if (this.wheelSetup.visible) this.wheelSetup.update(input.wheelPad, dt);
     else if (menusOpen) this.handleMenuInput(dt);
     else if (this.driving) this.handleActions();
     this.menus.prompts.value = promptFamily(
@@ -634,13 +769,19 @@ export class Game {
     );
     this.menus.padFamily.value = input.padFamily;
 
-    const controls = this.driving && !this.menus.open && !this.wheelSetup.visible;
+    const controls = this.driving && !this.menus.open && !this.wheelSetup.visible && !this.photo;
     if (controls) this.applyHudVisibility();
     this.sim.tick(now, [controls ? input.driver : this.idleInput]);
 
+    const duck = this.menus.open && !this.replay ? MENU_AUDIO : 1;
+    if (duck !== this.audioDuck) {
+      this.audioDuck = duck;
+      this.audio.setVolume(this.settings.audio.volume * duck);
+    }
     const snapshot = this.sim.latest;
     const view = this.sim.latestView;
-    if (snapshot && view) {
+    if (this.replay) this.updateReplay(dt);
+    else if (snapshot && view) {
       const count = Math.min(snapshot.carCount, this.cars.length);
       for (let i = 0; i < count; i++) {
         interpolateCar(view, i, snapshot.alpha, this.states[i]!);
@@ -648,8 +789,20 @@ export class Game {
       }
       const player = this.states[0]!;
       this.cones?.update(dt, player);
-      this.camera.update(dt, player);
+      const showroom = this.menus.top === 'livery';
+      if (showroom !== this.showroom) {
+        this.showroom = showroom;
+        this.repaint();
+        this.camera.reset();
+        this.camera.mode = showroom || !this.driving ? 'orbit' : this.settings.camera;
+        this.tv?.cut();
+      }
+      if (this.attract && !showroom) this.updateAttractCamera(dt, count, snapshot.race);
+      else this.camera.update(dt, player);
       this.race = snapshot.race;
+      if (this.replayRecorder && snapshot.race && !this.paused) {
+        this.replayRecorder.record(snapshot.simTime, this.states);
+      }
       if (controls) {
         this.hud.update(player, dt);
         this.telemetry.update(dt, player, {
@@ -660,7 +813,8 @@ export class Game {
         });
       }
       this.updateRace(dt, player, count);
-      this.updateAudio(dt, player);
+      const focus = this.attract ? (this.states[this.attractCar] ?? player) : player;
+      this.updateAudio(dt, focus);
       if (controls) this.rumble.update(dt, player, input.activePad);
       else if (this.wasControlling) this.rumble.stop(input.activePad);
       this.wasControlling = controls;
@@ -669,20 +823,282 @@ export class Game {
           this.toasts.show(formatDragResult(result, this.settings.units), { timeout: 8 });
         }
       }
-      this.carPosition.set(player.pos.x, player.pos.y, player.pos.z);
+      this.carPosition.set(focus.pos.x, focus.pos.y, focus.pos.z);
       this.scenery.follow(this.carPosition);
       this.statSteps += snapshot.steps;
       this.statStepCount++;
     }
+    this.updateWeather(dt);
     this.quickMenu.update(dt);
     if (this.menus.top === 'tester') this.updateTester();
 
-    this.host.renderer.render(this.scenery.scene, this.camera.camera);
+    if (this.photo) this.photo.pipeline.render();
+    else this.host.renderer.render(this.scenery.scene, this.camera.camera);
 
     this.frames++;
     if (this.frames === 2) document.body.classList.add('running');
     this.updateStats(realDt);
     this.updateDebug(snapshot !== null);
+  }
+
+  /** Rain around the camera and spray behind the cars (does nothing in the dry). */
+  private updateWeather(dt: number): void {
+    const scene = this.scenery;
+    if (!(scene instanceof TrackScene)) return;
+    scene.update(dt, this.camera.camera);
+    for (let i = 0; i < this.cars.length; i++) {
+      const s = this.states[i]!;
+      scene.spray(s.pos.x, s.pos.y, s.pos.z, s.vel.x, s.vel.z);
+    }
+  }
+
+  /** Backdrop race: the TV cameras follow one car, then another. */
+  private updateAttractCamera(dt: number, count: number, race: RaceStatus | null): void {
+    this.attractTimer += dt;
+    if (this.attractTimer > ATTRACT_SHOT && count > 1) {
+      this.attractTimer = 0;
+      // Mostly the leader or a car in a close fight; sometimes anyone.
+      const order = race?.order ?? [];
+      const r = Math.random();
+      const pick =
+        r < 0.35 ? order[0] : r < 0.8 ? order[1 + Math.floor(Math.random() * 3)] : undefined;
+      this.attractCar = pick ?? Math.floor(Math.random() * count);
+      this.tv?.cut();
+    }
+    this.followWithTv(dt, this.states[this.attractCar] ?? this.states[0]!);
+  }
+
+  private followWithTv(dt: number, state: CarRenderState): void {
+    if (!this.tv) {
+      this.camera.update(dt, state);
+      return;
+    }
+    this.tvTarget.set(state.pos.x, state.pos.y, state.pos.z);
+    this.tvVelocity.set(state.vel.x, state.vel.y, state.vel.z);
+    this.tv.update(dt, this.tvTarget, this.tvVelocity, this.camera.camera);
+  }
+
+  // ---------------------------------------------------------------- photo mode
+
+  /** Photo mode from the pause menu or a paused replay: a free camera, lens and filters. */
+  private enterPhoto(): void {
+    if (this.photo) return;
+    const from = this.replay ? 'replay' : 'pause';
+    if (this.replay) this.replayPlaying = false;
+    const focus = this.replay ? this.states[this.replayCar] : this.states[0];
+    const target = new THREE.Vector3(
+      focus?.pos.x ?? 0,
+      (focus?.pos.y ?? 0) + 0.5,
+      focus?.pos.z ?? 0,
+    );
+    const camera = new PhotoCamera(this.photoSettings);
+    const { width, height } = this.host.renderer.domElement.getBoundingClientRect();
+    camera.setAspect(width / Math.max(height, 1));
+    camera.reset(this.camera.camera, target);
+    const pipeline = new PhotoPipeline(
+      this.host.renderer,
+      this.scenery.scene,
+      camera.camera,
+      this.photoSettings,
+    );
+    pipeline.setFocusTarget(target);
+    const controls = new PhotoControls(this.host.renderer.domElement, camera);
+    this.photo = { camera, pipeline, controls, from, target, busy: false, status: '' };
+    this.menus.set([]);
+    this.ui.classList.add('photo-mode');
+    this.renderPhotoPanel();
+    this.applyHudVisibility();
+  }
+
+  private leavePhoto(): void {
+    const photo = this.photo;
+    if (!photo) return;
+    photo.controls.dispose();
+    photo.pipeline.dispose();
+    this.photo = null;
+    render(null, this.photoHost);
+    this.ui.classList.remove('photo-mode');
+    this.menus.set([photo.from === 'replay' ? 'replay' : 'pause']);
+    this.applyHudVisibility();
+  }
+
+  private renderPhotoPanel(): void {
+    const photo = this.photo;
+    if (!photo) return;
+    render(
+      h(PhotoScreen, {
+        store: this.menus,
+        settings: this.photoSettings,
+        onChange: () => this.renderPhotoPanel(),
+        onCapture: () => void this.capturePhoto(),
+        onExit: () => this.leavePhoto(),
+        dofUnavailable: photo.pipeline.dofNote || undefined,
+        status: photo.status,
+      }),
+      this.photoHost,
+    );
+  }
+
+  private async capturePhoto(): Promise<void> {
+    const photo = this.photo;
+    if (!photo || photo.busy) return;
+    photo.busy = true;
+    try {
+      const blob = await capturePng(this.host.renderer, () => photo.pipeline.render(), {
+        watermark: this.photoSettings.watermark,
+      });
+      const name = photoFileName();
+      downloadPhoto(blob, name);
+      photo.status = `Saved ${name}`;
+    } catch (error) {
+      photo.status = 'The photo could not be saved.';
+      console.warn('Photo capture failed', error);
+    } finally {
+      photo.busy = false;
+      this.renderPhotoPanel();
+    }
+  }
+
+  /** Photo mode input: the panel through the focus engine, the camera from sticks and keys. */
+  private handlePhotoInput(dt: number): void {
+    const photo = this.photo!;
+    const settings = this.photoSettings;
+    for (const { event } of this.input.ui) {
+      if (settings.showPanel && this.focus.handle(event)) continue;
+      if (event === 'back' || event === 'pause') {
+        if (settings.showPanel) {
+          this.leavePhoto();
+          return;
+        }
+        settings.showPanel = true;
+        this.renderPhotoPanel();
+      } else if (event === 'confirm' && !settings.showPanel) {
+        void this.capturePhoto();
+      }
+    }
+    if (settings.showPanel) this.focus.sync();
+    const frame = photo.controls.read(this.input.activePad, settings.showPanel);
+    if (frame.togglePanel) {
+      settings.showPanel = !settings.showPanel;
+      this.renderPhotoPanel();
+    }
+    if (frame.capture) void this.capturePhoto();
+    if (photo.camera.update(dt, frame.camera, photo.target)) this.renderPhotoPanel();
+  }
+
+  // ---------------------------------------------------------------- replays
+
+  private watchReplay(): void {
+    const replay = this.lastReplay ?? this.replayRecorder?.finish() ?? null;
+    if (!replay || replay.duration <= 0) return;
+    this.lastReplay = replay;
+    this.replayRecorder = null;
+    this.replay = replay;
+    this.replayTime = 0;
+    this.replaySpeed = 1;
+    this.replayPlaying = true;
+    this.replayCar = 0;
+    this.replayCamera = 'tv';
+    this.replayShownAt = -1;
+    this.tv?.cut();
+    this.sim.pause();
+    this.rumble.stop(this.input.activePad);
+    this.radio.stop();
+    this.radioBox.hide();
+    this.menus.set(['replay']);
+  }
+
+  private leaveReplay(): void {
+    if (!this.replay) return;
+    this.replay = null;
+    this.menus.replay.value = null;
+    this.camera.mode = this.driving ? this.settings.camera : 'orbit';
+    this.camera.reset();
+    if (!this.paused) this.sim.resume();
+  }
+
+  private replayCommand(command: ReplayCommand): void {
+    const replay = this.replay;
+    if (!replay) return;
+    const count = Math.min(replay.carCount, this.cars.length);
+    const speedIndex = REPLAY_SPEEDS.indexOf(this.replaySpeed);
+    switch (command) {
+      case 'playPause':
+        if (!this.replayPlaying && this.replayTime >= replay.duration) this.replayTime = 0;
+        this.replayPlaying = !this.replayPlaying;
+        break;
+      case 'back5':
+      case 'forward5':
+        this.replayTime = Math.min(
+          Math.max(this.replayTime + (command === 'back5' ? -5 : 5), 0),
+          replay.duration,
+        );
+        this.tv?.cut();
+        this.camera.reset();
+        break;
+      case 'slower':
+      case 'faster': {
+        const next = speedIndex + (command === 'faster' ? 1 : -1);
+        this.replaySpeed = REPLAY_SPEEDS[Math.min(Math.max(next, 0), REPLAY_SPEEDS.length - 1)]!;
+        break;
+      }
+      case 'prevCar':
+      case 'nextCar':
+        this.replayCar = (this.replayCar + (command === 'nextCar' ? 1 : -1) + count) % count;
+        this.tv?.cut();
+        this.camera.reset();
+        break;
+      case 'camera': {
+        const i = REPLAY_CAMERAS.indexOf(this.replayCamera);
+        this.replayCamera = REPLAY_CAMERAS[(i + 1) % REPLAY_CAMERAS.length]!;
+        this.tv?.cut();
+        this.camera.reset();
+        break;
+      }
+      case 'exit':
+        this.leaveReplay();
+        this.menus.set(['results']);
+        return;
+    }
+    this.replayShownAt = -1;
+  }
+
+  /** Plays the replay: every car from the recording, the camera on the watched car. */
+  private updateReplay(dt: number): void {
+    const replay = this.replay!;
+    if (this.replayPlaying) {
+      this.replayTime = Math.min(this.replayTime + dt * this.replaySpeed, replay.duration);
+      if (this.replayTime >= replay.duration) this.replayPlaying = false;
+    }
+    const time = replay.startTime + this.replayTime;
+    const count = Math.min(replay.carCount, this.cars.length);
+    for (let i = 0; i < count; i++) {
+      replay.sample(time, i, this.states[i]!);
+      this.cars[i]!.update(this.states[i]!);
+    }
+    const focus = this.states[Math.min(this.replayCar, count - 1)]!;
+    if (this.replayCamera === 'tv') this.followWithTv(dt, focus);
+    else {
+      this.camera.mode = this.replayCamera === 'onboard' ? 'bonnet' : 'chase';
+      this.camera.update(dt, focus);
+    }
+    if (this.scenery instanceof TrackScene) this.scenery.setStartLights(0, false);
+    this.updateAudio(dt * this.replaySpeed, focus);
+    this.carPosition.set(focus.pos.x, focus.pos.y, focus.pos.z);
+    this.scenery.follow(this.carPosition);
+    // The controls re-render a few times a second, not every frame.
+    if (Math.abs(this.replayTime - this.replayShownAt) > 0.2 || this.replayShownAt < 0) {
+      this.replayShownAt = this.replayTime;
+      const final = this.race?.cars[this.replayCar];
+      this.menus.replay.value = {
+        time: this.replayTime,
+        duration: replay.duration,
+        speed: this.replaySpeed,
+        playing: this.replayPlaying,
+        camera: this.replayCamera,
+        car: `${final ? `P${final.position} · ` : ''}${this.driverName(this.replayCar)}`,
+      };
+    }
   }
 
   private updateRace(dt: number, player: CarRenderState, count: number): void {
@@ -757,6 +1173,10 @@ export class Game {
     r.lastLap = me.lastLap;
     r.bestLap = me.bestLap;
     r.finished = me.finished;
+    const player = this.states[0];
+    r.damageAero = player?.damageAero ?? 0;
+    r.damageEngine = player?.damageEngine ?? 0;
+    r.damageSteer = player?.damageSteer ?? 0;
     let rivalBest = 0;
     for (let i = 1; i < race.cars.length; i++) {
       const best = race.cars[i]!.bestLap;
@@ -793,6 +1213,8 @@ export class Game {
       }),
     };
     if (inSeason) this.scoreRound(season, race);
+    this.menus.replayAvailable.value =
+      this.lastReplay !== null || (this.replayRecorder?.duration ?? 0) > 5;
     this.menus.set(['results']);
     this.applyHudVisibility();
   }
@@ -839,6 +1261,7 @@ export class Game {
     }
     const season: Championship = {
       tracks,
+      liverySeed: (Math.random() * 1e9) | 0,
       round: 0,
       points: new Array<number>(field).fill(0),
       last: new Array<number>(field).fill(0),
@@ -869,10 +1292,10 @@ export class Game {
       trackId,
       opponents: field - 1,
       gridSlot: Math.max(0, Math.min(gridSlot, field - 1)),
+      ...randomConditions(),
     };
     this.menus.update(setup);
     this.seasonRound = season.round;
-    this.seasonPaints = season.paints;
     this.menus.set([]);
     if (def) this.toasts.show(`Round ${season.round + 1} of ${season.tracks.length}: ${def.name}`);
     void this.startSession(setup).then(() => this.resume());
@@ -897,6 +1320,32 @@ export class Game {
         return;
       }
     }
+    if (top === 'replay') {
+      for (const { event } of this.input.ui) {
+        const command: ReplayCommand | null =
+          event === 'confirm'
+            ? 'playPause'
+            : event === 'left'
+              ? 'back5'
+              : event === 'right'
+                ? 'forward5'
+                : event === 'up'
+                  ? 'faster'
+                  : event === 'down'
+                    ? 'slower'
+                    : event === 'tabPrev'
+                      ? 'prevCar'
+                      : event === 'tabNext'
+                        ? 'nextCar'
+                        : event === 'fastUp' || event === 'fastDown'
+                          ? 'camera'
+                          : event === 'back' || event === 'pause'
+                            ? 'exit'
+                            : null;
+        if (command) this.replayCommand(command);
+      }
+      return;
+    }
     for (const { event, source } of this.input.ui) {
       if (top === 'title') {
         this.menus.set(['main']);
@@ -914,6 +1363,11 @@ export class Game {
   }
 
   private focusScope(): HTMLElement | null {
+    if (this.photo) {
+      return this.photoSettings.showPanel
+        ? this.photoHost.querySelector<HTMLElement>('.photo-panel')
+        : null;
+    }
     const modal = this.menuHost.querySelector<HTMLElement>('[data-modal]');
     if (modal) return modal;
     return this.menuHost.querySelector<HTMLElement>('.menu-screen');
@@ -1012,7 +1466,6 @@ export class Game {
     return {
       startSession: (setup) => {
         this.seasonRound = -1;
-        this.seasonPaints = null;
         this.menus.set([]);
         void this.startSession(setup).then(() => this.resume());
       },
@@ -1051,6 +1504,9 @@ export class Game {
       record: (trackId) => this.records[trackId] ?? null,
       startChampionship: (races) => this.startChampionship(races),
       nextRound: () => this.nextRound(),
+      watchReplay: () => this.watchReplay(),
+      photoMode: () => this.enterPhoto(),
+      replay: (command) => this.replayCommand(command),
     };
   }
 
@@ -1069,9 +1525,10 @@ export class Game {
     this.input.bindings = s.bindings;
     this.input.wheelProfiles = s.wheels;
     this.hud.setUnits(s.units);
-    this.audio.setVolume(s.audio.volume);
+    this.audio.setVolume(s.audio.volume * this.audioDuck);
     this.audio.setMuted(s.audio.muted);
     this.rumble.settings = s.rumble;
+    s.paint = s.livery.primary;
     this.radio.enabled = s.radio.voice && !s.audio.muted;
     this.radio.volume = s.radio.volume;
     this.radioBox.enabled = s.radio.subtitles;

@@ -39,6 +39,7 @@ import {
   type DriverAids,
   type DriverInput,
   type SteerSmoothing,
+  SIM_DT,
 } from '../../shared/protocol';
 import { SURFACE, SURFACE_PROPS, rayHit, type Surface, type SurfaceId } from '../track/surface';
 import type { AxleSpec, CarSpec } from './spec';
@@ -66,6 +67,23 @@ const BODY_STIFFNESS = 250_000;
 const BODY_DAMPING = 12_000;
 const BODY_FRICTION = 0.55;
 /** Body-to-barrier contact: stiff and well damped, with scraping friction. */
+/** Impact energy per kilogram of car that does full damage, J/kg (~85 km/h into a wall). */
+const DAMAGE_ENERGY_PER_KG = 280;
+/** Closing speeds below this do no damage (brushes and parking bumps), m/s. */
+const DAMAGE_MIN_SPEED = 2.5;
+/** Fully damaged: downforce lost, extra drag, torque lost, and the toe error at the front. */
+const DAMAGE_DOWNFORCE = 0.45;
+const DAMAGE_DRAG = 0.15;
+const DAMAGE_TORQUE = 0.35;
+const DAMAGE_TOE = (1.4 * Math.PI) / 180;
+
+/** Mechanical damage: 0 = as new … 1 = wrecked; steering is signed (+ = pulls right). */
+export interface CarDamage {
+  aero: number;
+  engine: number;
+  steering: number;
+}
+
 const WALL_STIFFNESS = 900_000;
 const WALL_DAMPING = 60_000;
 const WALL_FRICTION = 0.35;
@@ -228,6 +246,9 @@ export class Car {
   private readonly wallPoints: Vec3[];
   /** Largest contact force from barriers or other cars during the last step (for effects). */
   impactForce = 0;
+  readonly damage: CarDamage = { aero: 0, engine: 0, steering: 0 };
+  /** How much impacts hurt: 0 = no damage, 0.5 = light, 1 = full. */
+  damageScale = 0;
   /** On the grid before the start: the handbrake is held on whatever the driver does. */
   holdForStart = false;
   private readonly wheelbase: number;
@@ -520,8 +541,10 @@ export class Car {
     const [fl, fr, rl, rr] = this.wheels as [Wheel, Wheel, Wheel, Wheel];
     // Turning right (angle > 0): the right wheel is on the inside. Toe-in points each wheel's
     // front towards the car's centre line.
-    fl.steer = sign * (angle > 0 ? outer : inner) + front.toe;
-    fr.steer = sign * (angle > 0 ? inner : outer) - front.toe;
+    // Bent steering: both front wheels point off to one side, so the car pulls.
+    const bent = this.damage.steering * DAMAGE_TOE;
+    fl.steer = sign * (angle > 0 ? outer : inner) + front.toe + bent;
+    fr.steer = sign * (angle > 0 ? inner : outer) - front.toe + bent;
     rl.steer = this.spec.rear.toe;
     rr.steer = -this.spec.rear.toe;
   }
@@ -547,7 +570,7 @@ export class Car {
       addScaledV(this.t1, this.t1, this.vel, 1);
       w.lengthRate = dotV(this.t1, w.normal) / w.cosAngle;
       const props = SURFACE_PROPS[hit.surface];
-      w.grip = props.grip;
+      w.grip = props.grip * (surface.gripScale ?? 1);
       w.rollingResistance = props.rollingResistance;
       w.surface = hit.surface;
     } else {
@@ -620,7 +643,7 @@ export class Car {
         }
       }
     }
-    return throttle * full - (1 - throttle) * friction;
+    return throttle * full * (1 - DAMAGE_TORQUE * this.damage.engine) - (1 - throttle) * friction;
   }
 
   /** Engine speed the driven wheels would give in `gear`. */
@@ -868,10 +891,12 @@ export class Car {
     const v = this.vel;
     const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
     if (speed < 0.1) return;
-    const dragScale = -0.5 * AIR_DENSITY * a.dragArea * speed;
+    const hurt = this.damage.aero;
+    const dragScale = -0.5 * AIR_DENSITY * a.dragArea * (1 + DAMAGE_DRAG * hurt) * speed;
     addScaledV(this.force, this.force, v, dragScale);
     const vLong = dotV(v, this.fwd);
-    const downforce = 0.5 * AIR_DENSITY * a.downforceArea * vLong * vLong;
+    const downforce =
+      0.5 * AIR_DENSITY * a.downforceArea * (1 - DAMAGE_DOWNFORCE * hurt) * vLong * vLong;
     const frontPoint = addScaledV(this.t0, this.pos, this.fwd, this.spec.front.offset);
     this.applyForce(this.up, -downforce * a.frontShare, frontPoint);
     const rearPoint = addScaledV(this.t1, this.pos, this.fwd, this.spec.rear.offset);
@@ -928,6 +953,7 @@ export class Car {
         normal.nz * push - tz * friction,
       );
       this.impactForce = Math.max(this.impactForce, push);
+      if (-vn > DAMAGE_MIN_SPEED) this.takeDamage(p, push * -vn * SIM_DT);
       crossV(vScratch, arm, f);
       addScaledV(this.torque, this.torque, vScratch, 1);
       addScaledV(this.force, this.force, f, 1);
@@ -950,10 +976,37 @@ export class Car {
     local.z /= I.roll;
     const world = rotateV(vScratch2, this.rot, local);
     addScaledV(this.angVel, this.angVel, world, 1);
-    this.impactForce = Math.max(
-      this.impactForce,
-      Math.hypot(impulse.x, impulse.y, impulse.z) * 400,
-    );
+    const j = Math.hypot(impulse.x, impulse.y, impulse.z);
+    this.impactForce = Math.max(this.impactForce, j * 400);
+    if (j / this.spec.mass > DAMAGE_MIN_SPEED * 0.5) {
+      const at = invRotateV(vScratch3, this.rot, subV(vScratch3, point, this.pos));
+      this.takeDamage(at, (j * j) / (2 * this.spec.mass));
+    }
+  }
+
+  /** Impact energy (J) at a point in the car's frame damages the parts near it. */
+  private takeDamage(at: Vec3, energy: number): void {
+    if (this.damageScale <= 0 || !(energy > 0)) return;
+    const units = (energy * this.damageScale) / (DAMAGE_ENERGY_PER_KG * this.spec.mass);
+    const d = this.damage;
+    if (at.z < 0) {
+      // Front: wing and splitter, radiators, and the steering on that side.
+      d.aero = Math.min(d.aero + units * 0.8, 1);
+      d.engine = Math.min(d.engine + units * 0.25, 1);
+      const side = at.x > 0 ? 1 : -1;
+      d.steering = clamp(d.steering + side * units * 0.6, -1, 1);
+    } else {
+      // Rear: wing and diffuser, gearbox and exhaust.
+      d.aero = Math.min(d.aero + units * 0.6, 1);
+      d.engine = Math.min(d.engine + units * 0.35, 1);
+    }
+  }
+
+  /** Back to as new (a restart). */
+  repair(): void {
+    this.damage.aero = 0;
+    this.damage.engine = 0;
+    this.damage.steering = 0;
   }
 
   /** Acceleration the driver feels (everything but gravity), in the car's frame, smoothed. */
@@ -1119,6 +1172,9 @@ export class Car {
     out[base + C.GEARBOX_MANUAL] = this.aids.gearbox === 'manual' ? 1 : 0;
     out[base + C.TC_LEVEL] = aidLevelNumber(this.aids.tc);
     out[base + C.ABS_LEVEL] = aidLevelNumber(this.aids.abs);
+    out[base + C.DAMAGE_AERO] = this.damage.aero;
+    out[base + C.DAMAGE_ENGINE] = this.damage.engine;
+    out[base + C.DAMAGE_STEER] = this.damage.steering;
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i]!;
       const o = base + C.WHEELS + i * WHEEL_STRIDE;

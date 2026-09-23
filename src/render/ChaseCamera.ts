@@ -2,6 +2,8 @@ import * as THREE from 'three/webgpu';
 import type { CarRenderState } from './interpolate';
 
 /** 'orbit' circles the car (debug / showroom view, only via ?cam=orbit; not in the cycle). */
+const DEFAULT_FOV = 62;
+
 export type CameraMode = 'chase' | 'chase-far' | 'bonnet' | 'orbit';
 const MODES: CameraMode[] = ['chase', 'chase-far', 'bonnet'];
 
@@ -25,7 +27,7 @@ export class ChaseCamera {
   private orbitAngle = 0.6;
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(62, aspect, 0.1, 3200);
+    this.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, aspect, 0.1, 3200);
   }
 
   cycle(): CameraMode {
@@ -39,9 +41,17 @@ export class ChaseCamera {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Snap behind the car (e.g. after a reset) instead of swinging round. */
+  /**
+   * Snap behind the car (e.g. after a reset) instead of swinging round, and take the camera
+   * back from anything else that moved or zoomed it (TV cameras, photo mode).
+   */
   reset(): void {
     this.initialised = false;
+    this.camera.up.set(0, 1, 0);
+    if (this.camera.fov !== DEFAULT_FOV) {
+      this.camera.fov = DEFAULT_FOV;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   update(dt: number, car: CarRenderState): void {
