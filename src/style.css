@@ -1028,3 +1028,92 @@ body.fatal #loading-text {
   place-items: center;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
+
+/* Free roam: the wanted level, the pursuit's state and the fine, at the top of the screen. */
+.hud-heat {
+  position: absolute;
+  top: calc(16px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 20px 10px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  min-width: 190px;
+  pointer-events: none;
+}
+
+.hud-heat-stars {
+  display: flex;
+  gap: 5px;
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.18);
+}
+
+.hud-heat-stars .lit {
+  color: #ffd23f;
+  text-shadow: 0 0 10px rgba(255, 210, 63, 0.7);
+}
+
+.hud-heat-state {
+  font: 800 15px var(--font);
+  letter-spacing: 0.18em;
+  min-height: 18px;
+}
+
+.hud-heat.pursuit .hud-heat-state {
+  animation: hud-heat-flash 0.5s steps(1) infinite;
+}
+
+@keyframes hud-heat-flash {
+  0% {
+    color: #ff4a4a;
+  }
+  50% {
+    color: #5b9bff;
+  }
+}
+
+.hud-heat.escaped .hud-heat-state {
+  color: #5ce08a;
+}
+
+.hud-heat.busted .hud-heat-state {
+  color: #ff4a4a;
+}
+
+.hud-heat-evade {
+  width: 170px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.hud-heat-evade span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #5ce08a, #b7ff9a);
+  transition: width 0.2s linear;
+}
+
+.hud-heat-fine {
+  font: 600 12px var(--font);
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.hud-heat-fine:empty {
+  display: none;
+}
+
+.hud-heat[hidden] {
+  display: none;
+}

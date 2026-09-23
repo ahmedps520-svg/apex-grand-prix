@@ -114,6 +114,8 @@ export interface SessionConfig {
   roamStart?: RoamStart;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
+  /** Free roam: police cars (slots after the traffic). */
+  police?: number;
   opponents: number;
   laps: number;
   difficulty: Difficulty;
@@ -163,6 +165,22 @@ export interface SnapshotMessage {
   buffer: ArrayBuffer;
   /** Race state for the HUD (null in free drive). */
   race: RaceStatus | null;
+  /** Free roam: the police's view of the player (null elsewhere). */
+  police?: PoliceStatus | null;
+}
+
+/** What the police make of the player, for the HUD. */
+export interface PoliceStatus {
+  /** Wanted level, 0 … 5. */
+  heat: number;
+  state: 'clear' | 'pursuit' | 'escaped' | 'busted';
+  /** Out of sight for this share of the time it takes to get away, 0 … 1. */
+  evade: number;
+  /** The fine owed in the current pursuit, and the fines paid so far. */
+  fine: number;
+  fines: number;
+  /** Spike strips on the road: [x1, z1, x2, z2] each. */
+  strips: number[][];
 }
 
 export type WorkerToMain =
@@ -260,6 +278,8 @@ export const FLAG_INDICATOR_LEFT = 128;
 export const FLAG_INDICATOR_RIGHT = 256;
 export const FLAG_HAZARDS = 512;
 export const FLAG_HORN = 1024;
+/** A police car with its lights and siren going. */
+export const FLAG_SIREN = 2048;
 
 export const aidLevelNumber = (level: AidLevel): number =>
   level === 'off' ? 0 : level === 'low' ? 1 : 2;

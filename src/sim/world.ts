@@ -19,6 +19,7 @@ import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
 import { cityMap } from '../content/city/map';
 import { CitySurface } from './city/CitySurface';
+import { Police } from './city/Police';
 import { Traffic } from './city/Traffic';
 import { Car, type Spawn } from './vehicle/car';
 import { carById, peakPower, topSpeed } from './vehicle/cars';
@@ -64,6 +65,8 @@ export class World {
   drivers: Array<AiDriver | null> = [];
   /** Free roam: the traffic sharing the world, written after the cars in the snapshot. */
   traffic: Traffic | null = null;
+  /** Free roam: the police, driving some of the traffic's slots. */
+  police: Police | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
   private readonly hints: number[] = [];
@@ -95,13 +98,16 @@ export class World {
       world.setAids(0, config.aids);
       world.cars[0]!.damageScale = config.damage ?? 0;
       const time = config.conditions?.time;
-      if ((config.traffic ?? 0) > 0) {
+      const police = config.police ?? 0;
+      if ((config.traffic ?? 0) + police > 0) {
         world.traffic = new Traffic(
           surface.map,
           config.traffic ?? 0,
+          police,
           config.seed,
           time === 'night' || time === 'dusk',
         );
+        if (police > 0) world.police = new Police(world.traffic, surface.map);
       }
       return world;
     }
@@ -213,6 +219,7 @@ export class World {
     }
     if (cars.length > 1) resolveCarContacts(cars);
     this.traffic?.step(dt, cars[0]!);
+    this.police?.step(dt, cars[0]!);
     director?.update(dt, cars);
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {

@@ -1,4 +1,10 @@
-import { FLAG_ABS, FLAG_LIMITER, FLAG_SHIFT_DENIED, FLAG_TC } from '../shared/protocol';
+import {
+  FLAG_ABS,
+  FLAG_LIMITER,
+  FLAG_SHIFT_DENIED,
+  FLAG_TC,
+  type PoliceStatus,
+} from '../shared/protocol';
 import type { CarRenderState } from '../render/interpolate';
 import { el, setText } from './dom';
 
@@ -31,6 +37,16 @@ export class Hud {
   /** Free roam: the speed limit of the road, as a round sign. */
   private readonly limit = el('div', 'hud-limit');
   private limitShown = -1;
+  /** Free roam: the wanted level, the state of the pursuit and the fine, at the top. */
+  private readonly heat = el('div', 'hud-heat');
+  private readonly heatStars: HTMLElement[] = [];
+  private readonly heatState = el('div', 'hud-heat-state');
+  private readonly heatEvade = el('div', 'hud-heat-evade');
+  private readonly heatEvadeFill = el('span');
+  private readonly heatFine = el('div', 'hud-heat-fine');
+  private heatShown = '';
+  private heatVisible = true;
+  private heatActive = false;
   private readonly segments: HTMLElement[] = [];
   private readonly abs = el('span', 'hud-lamp', 'ABS');
   private readonly tc = el('span', 'hud-lamp', 'TC');
@@ -87,8 +103,62 @@ export class Hud {
     speedBlock.append(this.speed, this.unit);
     readout.append(gearBlock, speedBlock);
     this.limit.hidden = true;
+    const stars = el('div', 'hud-heat-stars');
+    for (let i = 0; i < 5; i++) {
+      const star = el('span', undefined, '★');
+      stars.appendChild(star);
+      this.heatStars.push(star);
+    }
+    this.heatEvade.appendChild(this.heatEvadeFill);
+    this.heat.append(stars, this.heatState, this.heatEvade, this.heatFine);
+    this.heat.hidden = true;
     this.root.append(this.damage, this.hybrid, this.lights, bar, readout, lamps, this.limit);
-    parent.appendChild(this.root);
+    // The wanted level sits at the top of the screen, outside the panel.
+    parent.append(this.root, this.heat);
+  }
+
+  /** Shows or hides the HUD (the wanted level goes with it). */
+  setVisible(visible: boolean): void {
+    this.root.hidden = !visible;
+    this.heatVisible = visible;
+    this.heat.hidden = !(visible && this.heatActive);
+  }
+
+  /** Free roam: the wanted stars, the pursuit's state and the fine (null hides it all). */
+  setHeat(status: PoliceStatus | null): void {
+    const shown = !!status && (status.heat > 0 || status.state !== 'clear');
+    const evade = status && status.state === 'pursuit' ? status.evade : 0;
+    const key = status
+      ? `${shown}:${status.heat}:${status.state}:${status.fine}:${status.fines}:${Math.round(evade * 40)}`
+      : '';
+    if (key === this.heatShown) return;
+    this.heatShown = key;
+    this.heatActive = shown;
+    this.heat.hidden = !(shown && this.heatVisible);
+    if (!status || !shown) return;
+    this.heat.className = `hud-heat ${status.state}`;
+    this.heatStars.forEach((star, i) => star.classList.toggle('lit', i < status.heat));
+    setText(
+      this.heatState,
+      status.state === 'pursuit'
+        ? 'PURSUIT'
+        : status.state === 'escaped'
+          ? 'GOT AWAY'
+          : status.state === 'busted'
+            ? 'BUSTED'
+            : '',
+    );
+    this.heatEvade.hidden = status.state !== 'pursuit';
+    this.heatEvadeFill.style.width = `${Math.round(evade * 100)}%`;
+    const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+    setText(
+      this.heatFine,
+      status.state === 'busted'
+        ? `FINES PAID ${money(status.fines)}`
+        : status.state === 'pursuit'
+          ? `FINE ${money(status.fine)}`
+          : '',
+    );
   }
 
   /** Shows the road's speed limit (km/h or mph by the units; 0 hides the sign). */

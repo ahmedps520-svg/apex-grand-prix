@@ -20,7 +20,15 @@ import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap } from '../ui/CityMinimap';
 import { cityMap } from '../content/city/map';
-import { trafficModel, trafficPaint, trafficSlotsFor } from '../content/city/fleet';
+import {
+  POLICE_PAINT,
+  policeModel,
+  policeSlotsFor,
+  trafficModel,
+  trafficPaint,
+  trafficSlotsFor,
+} from '../content/city/fleet';
+import { SpikeStrips } from '../render/SpikeStrips';
 import { MAP_MAX_X, MAP_MAX_Z, MAP_MIN_X, MAP_MIN_Z } from '../content/city/terrain';
 import {
   PhotoCamera,
@@ -36,9 +44,11 @@ import {
   FLAG_HORN,
   FLAG_LIMITER,
   FLAG_SHIFTING,
+  FLAG_SIREN,
   SIM_HZ,
   neutralInput,
   type AidLevel,
+  type PoliceStatus,
   type SessionConfig,
   type SpawnPoint,
 } from '../shared/protocol';
@@ -118,6 +128,12 @@ export interface DebugApi {
   mode: string;
   cars: number;
   race: { phase: string; lap: number; position: number } | null;
+  /** Free roam: the wanted level and where the police cars are (distance to the player). */
+  police: {
+    heat: number;
+    state: string;
+    units: Array<{ x: number; z: number; d: number; siren: boolean }>;
+  } | null;
   errors: string[];
 }
 
@@ -393,6 +409,9 @@ export class Game {
   private records = loadRecords();
   private lastTime = -1;
   private frames = 0;
+  /** Free roam: what the police make of the player, and their spike strips on the road. */
+  private policeStatus: PoliceStatus | null = null;
+  private readonly strips = new SpikeStrips();
   private lastPadName = '';
   private lastWheelId = '';
   private soundCheckAt = -1;
@@ -487,6 +506,7 @@ export class Game {
       mode: '',
       cars: 0,
       race: null,
+      police: null,
       errors: [],
     };
     window.__apex = this.debug;
@@ -598,14 +618,21 @@ export class Game {
     const detail =
       this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
     const traffic = setup.mode === 'roam' && !attract ? trafficSlotsFor(detail.chunks) : 0;
+    // The police take slots after the traffic: the same body, white paint and a light bar.
+    const police = traffic > 0 ? policeSlotsFor(detail.chunks) : 0;
     return {
       fieldCars:
         setup.mode === 'race'
           ? this.pickField(setup, count, seed)
           : traffic > 0
-            ? [setup.carId, ...Array.from({ length: traffic }, (_, i) => trafficModel(i).id)]
+            ? [
+                setup.carId,
+                ...Array.from({ length: traffic }, (_, i) => trafficModel(i).id),
+                ...Array.from({ length: police }, () => policeModel().id),
+              ]
             : undefined,
       traffic: traffic || undefined,
+      police: police || undefined,
       mode: setup.mode,
       trackId:
         setup.mode === 'free' || setup.mode === 'roam' ? '' : setup.trackId || TRACKS[0]?.id || '',
@@ -654,10 +681,12 @@ export class Game {
       config.mode === 'race'
         ? config.opponents + 1
         : config.mode === 'roam'
-          ? 1 + (config.traffic ?? 0)
+          ? 1 + (config.traffic ?? 0) + (config.police ?? 0)
           : 1;
     // A change of world means a change of paint scheme (liveries or plain traffic): rebuild.
-    if (changed) this.buildCars([]);
+    // So does a change in the traffic and police slots, which decide who wears the light bar.
+    const slots = previous?.traffic !== config.traffic || previous?.police !== config.police;
+    if (changed || (roam && slots)) this.buildCars([]);
     this.buildCars(
       Array.from({ length: count }, (_, i) => carById(config.fieldCars?.[i] ?? config.carId)),
     );
@@ -672,6 +701,10 @@ export class Game {
     this.tv?.cut();
     await this.sim.start(config);
     this.race = null;
+    this.policeStatus = null;
+    this.hud.setHeat(null);
+    this.strips.clear();
+    this.menuAudio.siren(0);
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -828,11 +861,14 @@ export class Game {
     for (let i = 0; i < models.length; i++) {
       const model = models[i]!;
       if (this.carModels[i]?.id === model.id) continue;
-      // Traffic wears plain paint; everyone else a livery.
+      // Traffic wears plain paint and the police white with a light bar; everyone else a livery.
       const traffic = this.session?.mode === 'roam' && i > 0;
-      const view = traffic
-        ? new CarView(model.spec, trafficPaint(i - 1), model.style)
-        : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
+      const police = traffic && i > (this.session?.traffic ?? 0);
+      const view = police
+        ? new CarView(model.spec, POLICE_PAINT, model.style, undefined, false, true)
+        : traffic
+          ? new CarView(model.spec, trafficPaint(i - 1), model.style)
+          : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
       const old = this.cars[i];
       if (old) {
         old.root.removeFromParent();
@@ -865,8 +901,8 @@ export class Game {
     for (let i = 0; i < this.cars.length; i++) {
       const dot = this.minimapCars[i];
       if (roam && i > 0) {
-        // Traffic keeps its plain paint; it shows as pale dots on the map.
-        if (dot) dot.color = '#d8dce2';
+        // Traffic keeps its plain paint; it shows as pale dots on the map, the police as blue.
+        if (dot) dot.color = i > (this.session?.traffic ?? 0) ? '#4f8dff' : '#d8dce2';
         continue;
       }
       const livery = this.liveryFor(i);
@@ -914,7 +950,7 @@ export class Game {
   private applyHudVisibility(): void {
     const driving =
       this.driving && !this.menus.open && !this.photo && !this.flyover && !this.podium;
-    this.hud.root.hidden = !driving;
+    this.hud.setVisible(driving);
     const mode = this.session?.mode;
     this.raceHud.setVisible(driving && mode !== 'free' && mode !== 'roam' && !this.school);
     this.minimap?.setVisible(driving);
@@ -971,8 +1007,10 @@ export class Game {
     }
     const snapshot = this.sim.latest;
     const view = this.sim.latestView;
-    if (this.replay) this.updateReplay(dt);
-    else if (snapshot && view) {
+    if (this.replay) {
+      this.menuAudio.siren(0);
+      this.updateReplay(dt);
+    } else if (snapshot && view) {
       const count = Math.min(snapshot.carCount, this.cars.length);
       for (let i = 0; i < count; i++) {
         interpolateCar(view, i, snapshot.alpha, this.states[i]!);
@@ -997,6 +1035,8 @@ export class Game {
       else this.camera.update(dt, player);
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
+      if (this.session?.mode === 'roam')
+        this.updatePolice(snapshot.police ?? null, count, controls);
       if (this.replayRecorder && snapshot.race && !this.paused) {
         this.replayRecorder.record(snapshot.simTime, this.states);
       }
@@ -1042,6 +1082,71 @@ export class Game {
     if (this.frames === 2) document.body.classList.add('running');
     this.updateStats(realDt);
     this.updateDebug(snapshot !== null);
+  }
+
+  /**
+   * Free roam: the wanted level on the HUD (with a notice when it changes), the sirens' volume
+   * from the nearest police car with its lights on, and the spike strips laid on the road.
+   */
+  private updatePolice(status: PoliceStatus | null, count: number, controls: boolean): void {
+    const previous = this.policeStatus;
+    this.policeStatus = status;
+    this.hud.setHeat(status);
+    if (status && previous && controls) {
+      if (status.heat > previous.heat) {
+        this.toasts.show(
+          previous.heat === 0
+            ? 'The police are after you. Lose them, or pull over and pay the fine.'
+            : `Wanted level ${status.heat}: ${status.heat >= 4 ? 'roadblocks and spike strips ahead.' : status.heat >= 3 ? 'expect roadblocks.' : 'more units on the way.'}`,
+          { timeout: 5 },
+        );
+      } else if (status.state !== previous.state) {
+        if (status.state === 'busted') {
+          this.toasts.show(
+            `Busted. Fine paid: $${Math.round(previous.fine).toLocaleString('en-US')}.`,
+            {
+              timeout: 6,
+            },
+          );
+        } else if (status.state === 'escaped') {
+          this.toasts.show('You got away. Heat cleared.', { timeout: 5 });
+        }
+      }
+    }
+    const scene = this.scenery.scene;
+    if (this.strips.root.parent !== scene) scene.add(this.strips.root);
+    this.strips.update(status?.strips ?? [], (x, z) => {
+      const map = cityMap();
+      const deck = map.deckAt(x, z, 0.5);
+      return deck ? deck.height : map.groundHeight(x, z);
+    });
+    // The sirens: loudest right beside a police car with its lights on, fading with distance.
+    let level = 0;
+    if (controls && status && status.state === 'pursuit') {
+      const player = this.states[0]!;
+      for (let i = 1; i < count; i++) {
+        const car = this.states[i]!;
+        if ((car.flags & FLAG_SIREN) === 0) continue;
+        const d = Math.hypot(car.pos.x - player.pos.x, car.pos.z - player.pos.z);
+        level = Math.max(level, 1 / (1 + d / 45));
+      }
+    }
+    this.menuAudio.siren(level);
+    // For the tests: where the units are.
+    const first = 1 + (this.session?.traffic ?? 0);
+    const player = this.states[0]!;
+    this.debug.police = status
+      ? {
+          heat: status.heat,
+          state: status.state,
+          units: this.states.slice(first, count).map((car) => ({
+            x: Math.round(car.pos.x),
+            z: Math.round(car.pos.z),
+            d: Math.round(Math.hypot(car.pos.x - player.pos.x, car.pos.z - player.pos.z)),
+            siren: (car.flags & FLAG_SIREN) !== 0,
+          })),
+        }
+      : null;
   }
 
   /** Rain around the camera and spray behind the cars (does nothing in the dry). */

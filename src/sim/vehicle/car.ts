@@ -159,6 +159,8 @@ class Wheel {
   prevSpin = 0;
   omega = 0;
   contact = false;
+  /** Grip left in the tyre: 1 whole, 0.3 burst on a spike strip. */
+  burst = 1;
   load = 0;
   slip = 0;
   slipRatio = 0;
@@ -344,6 +346,17 @@ export class Car {
     this.horn = input.horn;
   }
 
+  /** A spike strip: the tyre keeps a third of its grip until the car is reset. */
+  burstTyre(wheel: number): void {
+    const w = this.wheels[wheel];
+    if (w) w.burst = 0.3;
+  }
+
+  /** Any tyre burst. */
+  get tyresBurst(): boolean {
+    return this.wheels.some((w) => w.burst < 1);
+  }
+
   /** An indicator press: on, or off again when it was already showing that side. */
   setIndicator(side: -1 | 1): void {
     this.indicator = this.indicator === side ? 0 : side;
@@ -412,6 +425,7 @@ export class Car {
   }
 
   private place(spawn: Spawn): void {
+    for (const w of this.wheels) w.burst = 1;
     const normal = setV(this.t0, 0, 1, 0);
     let groundY = 0;
     const ground = this.ground;
@@ -620,7 +634,7 @@ export class Car {
       addScaledV(this.t1, this.t1, this.vel, 1);
       w.lengthRate = dotV(this.t1, w.normal) / w.cosAngle;
       const props = SURFACE_PROPS[hit.surface];
-      w.grip = props.grip * (surface.gripScale ?? 1);
+      w.grip = props.grip * (surface.gripScale ?? 1) * w.burst;
       w.rollingResistance = props.rollingResistance;
       w.surface = hit.surface;
     } else {

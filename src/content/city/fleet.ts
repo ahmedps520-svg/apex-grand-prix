@@ -29,3 +29,15 @@ export function trafficPaint(slot: number): number {
 export function trafficSlotsFor(chunks: number): number {
   return chunks <= 2 ? 8 : chunks === 3 ? 14 : 20;
 }
+
+/** Police cars for a detail level. */
+export function policeSlotsFor(chunks: number): number {
+  return chunks <= 2 ? 3 : chunks === 3 ? 4 : 5;
+}
+
+/** The police drive the first sedan of the fleet. */
+export function policeModel(): CarModel {
+  return TRAFFIC_MODELS.find((m) => m.className === 'Touring') ?? TRAFFIC_MODELS[0] ?? CARS[0]!;
+}
+
+export const POLICE_PAINT = 0xf4f5f7;

@@ -41,6 +41,8 @@ export class MenuAudio {
   private failed = false;
   private hornGain: GainNode | null = null;
   private hornOscs: OscillatorNode[] = [];
+  private sirenGain: GainNode | null = null;
+  private sirenOscs: OscillatorNode[] = [];
 
   /** Creates or resumes the audio context; call from a user gesture. */
   unlock(): void {
@@ -130,6 +132,60 @@ export class MenuAudio {
       for (const osc of this.hornOscs) osc.stop(t + 0.1);
       this.hornOscs = [];
       this.hornGain = null;
+    }
+  }
+
+  /**
+   * A police siren's wail at `level` (0 … 1, by the nearest siren's distance; 0 stops it): a
+   * sawtooth swept up and down by a slow LFO, with a thinner octave above it.
+   */
+  siren(level: number): void {
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus) return;
+    const t = ctx.currentTime;
+    const gain = Math.min(Math.max(level, 0), 1) * 0.16;
+    if (gain > 0.001) {
+      if (!this.sirenGain) {
+        const out = ctx.createGain();
+        out.gain.setValueAtTime(0, t);
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 2600;
+        filter.Q.value = 0.7;
+        filter.connect(out).connect(bus);
+        const lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.45;
+        const voices: Array<[OscillatorType, number, number]> = [
+          ['sawtooth', 760, 1],
+          ['triangle', 1520, 0.35],
+        ];
+        this.sirenOscs = [lfo];
+        for (const [type, base, level] of voices) {
+          const osc = ctx.createOscillator();
+          osc.type = type;
+          osc.frequency.value = base;
+          const depth = ctx.createGain();
+          depth.gain.value = base * 0.34;
+          lfo.connect(depth).connect(osc.frequency);
+          const mix = ctx.createGain();
+          mix.gain.value = level;
+          osc.connect(mix).connect(filter);
+          osc.start(t);
+          this.sirenOscs.push(osc);
+        }
+        lfo.start(t);
+        this.sirenGain = out;
+      }
+      this.sirenGain.gain.setTargetAtTime(gain, t, 0.1);
+    } else if (this.sirenGain) {
+      this.sirenGain.gain.cancelScheduledValues(t);
+      this.sirenGain.gain.setValueAtTime(this.sirenGain.gain.value, t);
+      this.sirenGain.gain.linearRampToValueAtTime(0, t + 0.25);
+      for (const osc of this.sirenOscs) osc.stop(t + 0.3);
+      this.sirenOscs = [];
+      this.sirenGain = null;
     }
   }
 

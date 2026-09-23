@@ -74,6 +74,7 @@ function tick(time: number): void {
       carCount: world.snapshotCount,
       buffer,
       race: world.director?.status ?? null,
+      police: world.police?.status ?? null,
     },
     [buffer],
   );
