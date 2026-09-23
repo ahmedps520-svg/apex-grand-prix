@@ -211,6 +211,45 @@ export class CityMap {
     return best;
   }
 
+  /** The point a distance along a road (clamped to its ends; wrapping on a loop). */
+  pointAlong(
+    road: Road,
+    s: number,
+  ): { x: number; z: number; y: number; tx: number; tz: number; s: number } | null {
+    const u = road.loop
+      ? ((s % road.length) + road.length) % road.length
+      : Math.min(Math.max(s, 0), road.length);
+    let piece: RoadPiece | null = null;
+    for (const p of this.pieces) {
+      if (p.road !== road) continue;
+      if (u >= p.s0 && u <= p.s0 + p.len) {
+        piece = p;
+        break;
+      }
+    }
+    if (!piece) return null;
+    const t = piece.len > 0 ? (u - piece.s0) / piece.len : 0;
+    return {
+      x: piece.ax + piece.tx * piece.len * t,
+      z: piece.az + piece.tz * piece.len * t,
+      y: piece.ay + (piece.by - piece.ay) * t,
+      tx: piece.tx,
+      tz: piece.tz,
+      s: u,
+    };
+  }
+
+  /** Where along a road a point falls (its nearest piece), with the sideways offset. */
+  alongRoad(road: Road, x: number, z: number): RoadProjection | null {
+    let best: RoadProjection | null = null;
+    for (const piece of this.pieces) {
+      if (piece.road !== road) continue;
+      const p = projectOnPiece(piece, x, z);
+      if (!best || p.dist < best.dist) best = p;
+    }
+    return best;
+  }
+
   /** The deck (highway or ramp) over a point, when the point is within its paved width. */
   deckAt(x: number, z: number, margin = 0): RoadProjection | null {
     const p = this.project(x, z, { level: true, maxDist: 12 + margin });

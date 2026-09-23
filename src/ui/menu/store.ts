@@ -28,6 +28,7 @@ export type ScreenId =
   | 'raceSetup'
   | 'freeSetup'
   | 'roamSetup'
+  | 'map'
   | 'pause'
   | 'results'
   | 'replay'
@@ -153,6 +154,23 @@ export interface SessionResults {
   championship?: boolean;
 }
 
+/** A place to fast-travel to: a spawn, or a festival event with its best result. */
+export interface FestivalDestination {
+  id: string;
+  kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump';
+  name: string;
+  best: string | null;
+  x: number;
+  z: number;
+}
+
+export interface FestivalInfo {
+  destinations: FestivalDestination[];
+  roads: ReadonlyArray<{ points: number[]; loop: boolean; elevated: boolean; kind: string }>;
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  player: { x: number; z: number };
+}
+
 /** What the menus can ask the game to do. */
 export interface MenuActions {
   startSession(setup: SessionSetup): void;
@@ -183,6 +201,8 @@ export interface MenuActions {
   watchReplay(): void;
   /** Opens photo mode (from the pause menu or a replay). */
   photoMode(): void;
+  /** Free roam: puts the car down at a spawn or an event (from the festival map). */
+  fastTravel(id: string): void;
   /** Starts the driving school. */
   startSchool(): void;
   replay(command: ReplayCommand): void;
@@ -223,6 +243,8 @@ export class MenuStore {
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);
+  /** Free roam: the festival map's roads, destinations and the car's spot (null elsewhere). */
+  readonly festival = signal<FestivalInfo | null>(null);
   readonly results = signal<SessionResults | null>(null);
   readonly championship = signal<Championship | null>(null);
   /** A replay of the session just finished can be watched. */

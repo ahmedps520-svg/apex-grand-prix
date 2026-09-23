@@ -71,6 +71,27 @@ describe('police', () => {
     expect(chasing.length).toBeGreaterThan(0);
   });
 
+  it('lets sanctioned speeding go (a festival event), but not a crash', () => {
+    const world = World.forSession(config());
+    const player = world.cars[0]!;
+    witness(world);
+    world.police!.sanctioned = true;
+    run(world, 4, () => {
+      player.vel.x = 0;
+      player.vel.z = -120 / 3.6;
+      player.pos.z = 380;
+    });
+    expect(world.police!.status.heat).toBe(0);
+    expect(world.police!.status.state).toBe('clear');
+    // A crash into the traffic is still an offence.
+    world.traffic!.playerHits++;
+    run(world, 0.2, () => {
+      player.vel.z = 0;
+      player.pos.z = 380;
+    });
+    expect(world.police!.status.heat).toBe(1);
+  });
+
   it('busts a player who stops next to a police car, and charges the fine', () => {
     const world = World.forSession(config());
     const player = world.cars[0]!;

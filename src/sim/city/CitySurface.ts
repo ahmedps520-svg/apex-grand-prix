@@ -5,6 +5,19 @@ import { SURFACE, type RayHit, type Surface, type SurfaceId } from '../track/sur
 /** Soft boundary wall this far inside the map's edge. */
 const EDGE = 40;
 
+/** A jump ramp: a wedge rising along its direction from its foot to its lip. */
+export interface Ramp {
+  x: number;
+  z: number;
+  /** Road height at the foot. */
+  y: number;
+  tx: number;
+  tz: number;
+  length: number;
+  rise: number;
+  width: number;
+}
+
 /**
  * The open world as the physics sees it: a height field with the roads cut into it, the
  * orbital's deck and ramps above it (a wheel finds whichever surface is under it), buildings and
@@ -12,6 +25,8 @@ const EDGE = 40;
  */
 export class CitySurface implements Surface {
   gripScale = 1;
+  /** The festival's jump ramps (none outside the festival). */
+  ramps: Ramp[] = [];
 
   constructor(readonly map: CityMap = cityMap()) {}
 
@@ -21,7 +36,23 @@ export class CitySurface implements Surface {
       const deck = this.map.deckAt(x, z, 0.5);
       if (deck && deck.height <= y + 0.6) return deck.height;
     }
+    const ramp = this.rampAt(x, z);
+    if (ramp) return Math.max(ramp.height, this.map.groundHeight(x, z));
     return this.map.groundHeight(x, z);
+  }
+
+  /** The ramp under a point, with the wedge's height there, or null off every ramp. */
+  rampAt(x: number, z: number): { ramp: Ramp; height: number; u: number } | null {
+    for (const ramp of this.ramps) {
+      const dx = x - ramp.x;
+      const dz = z - ramp.z;
+      const u = dx * ramp.tx + dz * ramp.tz;
+      if (u < 0 || u > ramp.length) continue;
+      const v = -dx * ramp.tz + dz * ramp.tx;
+      if (Math.abs(v) > ramp.width / 2) continue;
+      return { ramp, height: ramp.y + (ramp.rise * u) / ramp.length, u };
+    }
+    return null;
   }
 
   surfaceAt(x: number, z: number): SurfaceId {
@@ -96,6 +127,29 @@ export class CitySurface implements Surface {
           nx = dnx;
           ny = dny;
           nz = dnz;
+          surface = SURFACE.ASPHALT;
+        }
+      }
+    }
+
+    // A jump ramp under the ray's start: its sloped top face, like a small deck.
+    const onRamp = this.ramps.length > 0 ? this.rampAt(ox, oz) : null;
+    if (onRamp && oy >= onRamp.height - 0.05) {
+      const r = onRamp.ramp;
+      const grade = r.rise / r.length;
+      const len = Math.hypot(grade, 1);
+      const rnx = (-grade * r.tx) / len;
+      const rny = 1 / len;
+      const rnz = (-grade * r.tz) / len;
+      const denom = dx * rnx + dy * rny + dz * rnz;
+      if (denom < -1e-6) {
+        const tr = Math.max(((onRamp.height - oy) * rny) / denom, 0);
+        if (tr <= maxDist && tr < best) {
+          found = true;
+          best = tr;
+          nx = rnx;
+          ny = rny;
+          nz = rnz;
           surface = SURFACE.ASPHALT;
         }
       }

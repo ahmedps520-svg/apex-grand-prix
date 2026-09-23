@@ -8,7 +8,7 @@ import { FLAG_HAZARDS } from '../shared/protocol';
  * coming and is lost in a crash. Runs on the main thread from the render states.
  */
 
-export type SkillKind = 'drift' | 'nearMiss' | 'speed' | 'air' | 'smash' | 'crash';
+export type SkillKind = 'drift' | 'nearMiss' | 'speed' | 'air' | 'smash' | 'race' | 'crash';
 
 export interface SkillEvent {
   kind: SkillKind;

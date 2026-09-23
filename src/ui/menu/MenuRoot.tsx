@@ -11,6 +11,7 @@ import {
   ControlsScreen,
   FreeSetupScreen,
   RoamSetupScreen,
+  MapScreen,
   MainScreen,
   PauseScreen,
   RaceSetupScreen,
@@ -43,6 +44,7 @@ const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
   raceSetup: RaceSetupScreen,
   freeSetup: FreeSetupScreen,
   roamSetup: RoamSetupScreen,
+  map: MapScreen,
   pause: PauseScreen,
   results: ResultsScreen,
   replay: ReplayScreen,
@@ -67,6 +69,7 @@ const FOOTER: Record<ScreenId, Array<PromptAction | [PromptAction, string]>> = {
   raceSetup: ['confirm', 'adjust', 'back'],
   freeSetup: ['confirm', 'adjust', 'back'],
   roamSetup: ['confirm', 'adjust', 'back'],
+  map: ['confirm', 'back'],
   pause: ['confirm', 'back'],
   results: ['confirm'],
   replay: [

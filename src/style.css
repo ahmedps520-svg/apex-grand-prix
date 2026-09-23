@@ -1274,3 +1274,93 @@ body.fatal #loading-text {
     transform: translateY(-10px) scale(1);
   }
 }
+
+/* Free roam: the festival event under way, or the nearest one to go for, bottom centre. */
+.fest {
+  position: absolute;
+  bottom: calc(24px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 200px;
+  padding: 8px 18px 10px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  text-align: center;
+  pointer-events: none;
+}
+
+.fest[hidden] {
+  display: none;
+}
+
+.fest-kind {
+  font: 800 10px var(--font);
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.fest.race .fest-kind {
+  color: #ff3b2f;
+}
+
+.fest.drift .fest-kind {
+  color: #37d4ff;
+}
+
+.fest.camera .fest-kind {
+  color: #ffd166;
+}
+
+.fest.jump .fest-kind {
+  color: #ff8a5b;
+}
+
+.fest-name {
+  font: 700 13px var(--font);
+}
+
+.fest-line {
+  font: 900 24px var(--font);
+  line-height: 1.1;
+}
+
+.fest.hint .fest-line {
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.fest-detail {
+  font: 600 11px var(--font);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* The festival map screen: the map beside the list of places. */
+.mn-map-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.mn-map-svg {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: #0b0f16;
+  border: 1px solid var(--panel-border);
+}
+
+.mn-map-list {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .mn-map-body {
+    grid-template-columns: 1fr;
+  }
+}

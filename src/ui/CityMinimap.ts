@@ -9,6 +9,13 @@ import './minimap.css';
  * middle with a heading line; other cars are small dots.
  */
 
+/** A point of interest on the map (a festival event). */
+export interface MinimapMarker {
+  x: number;
+  z: number;
+  color: string;
+}
+
 /** Map pixels per metre in the offscreen drawing. */
 const SCALE = 0.32;
 /** Metres shown across the map. */
@@ -51,7 +58,7 @@ export class CityMinimap {
     }
   }
 
-  update(cars: ReadonlyArray<MinimapCar>): void {
+  update(cars: ReadonlyArray<MinimapCar>, markers: ReadonlyArray<MinimapMarker> = []): void {
     const ctx = this.ctx;
     if (!this.visible || !ctx) return;
     if (this.size === 0) this.layout();
@@ -73,6 +80,23 @@ export class CityMinimap {
     const wx = (me.x - this.originX) * SCALE - (SPAN / 2) * SCALE;
     const wz = (me.z - this.originZ) * SCALE - (SPAN / 2) * SCALE;
     ctx.drawImage(this.world, wx, wz, SPAN * SCALE, SPAN * SCALE, 0, 0, size, size);
+    // The festival's events within the window, as diamonds in their colours.
+    for (const m of markers) {
+      const x = size / 2 + (m.x - me.x) * pxPerM;
+      const y = size / 2 + (m.z - me.z) * pxPerM;
+      if (x < -6 || y < -6 || x > size + 6 || y > size + 6) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 5);
+      ctx.lineTo(x + 5, y);
+      ctx.lineTo(x, y + 5);
+      ctx.lineTo(x - 5, y);
+      ctx.closePath();
+      ctx.fillStyle = m.color;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
     for (let i = cars.length - 1; i >= 0; i--) {
       const car = cars[i]!;
       const x = size / 2 + (car.x - me.x) * pxPerM;

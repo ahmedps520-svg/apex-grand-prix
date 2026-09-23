@@ -33,5 +33,14 @@ test('drives into the open world from the menus', async ({ page }) => {
     .poll(() => page.evaluate(() => window.__apex!.speed), { timeout: 30_000 })
     .toBeGreaterThan(5);
   await page.keyboard.up('w');
+
+  // The festival map from the pause menu lists places to fast-travel to.
+  await page.keyboard.press('Escape');
+  await expect.poll(screen).toBe('pause');
+  await page.getByRole('button', { name: /Festival map/ }).click();
+  await expect.poll(screen).toBe('map');
+  await expect(page.getByRole('button', { name: /Speed trap: Avenue South/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect.poll(screen).toBe('pause');
   expect(errors).toEqual([]);
 });
