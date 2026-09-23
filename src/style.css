@@ -1337,6 +1337,124 @@ body.fatal #loading-text {
   color: #ff3b2f;
 }
 
+/* The race's field under the event: position, driver, gap or time. */
+.fest-standings {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1px 10px;
+  text-align: left;
+  font: 600 11px var(--font);
+  color: var(--muted);
+}
+
+.fest-standings[hidden] {
+  display: none;
+}
+
+.fest-row {
+  display: contents;
+}
+
+.fest-row.you {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.fest-pos {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.fest-row.you .fest-pos {
+  color: #ffd166;
+}
+
+.fest-gap {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Free roam: a street race's results, up for a few seconds after the flag. */
+.race-card {
+  position: absolute;
+  top: calc(120px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 260px;
+  padding: 12px 18px 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  animation: toast-in 0.25s ease;
+}
+
+.race-card[hidden] {
+  display: none;
+}
+
+.race-card-title {
+  font: 800 10px var(--font);
+  letter-spacing: 0.18em;
+  color: #ff3b2f;
+}
+
+.race-card-name {
+  font: 900 18px var(--font);
+  line-height: 1.2;
+}
+
+.race-card-sub {
+  font: 600 12px var(--font);
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.race-card-rows {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 3px 14px;
+  font: 600 13px var(--font);
+}
+
+.race-card-row {
+  display: contents;
+}
+
+.race-card-row.you {
+  color: #ffd166;
+  font-weight: 800;
+}
+
+.race-card-pos {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.race-card-row.you .race-card-pos {
+  color: #ffd166;
+}
+
+.race-card-gap {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Black over everything for a moment (the car being put on a grid). */
+.fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+  z-index: 8;
+}
+
+.fade.on {
+  opacity: 1;
+  transition-duration: 0.2s;
+}
+
 .fest-detail {
   font: 600 11px var(--font);
   letter-spacing: 0.06em;

@@ -38,6 +38,49 @@ function witness(world: World): void {
   unit.y = 0.5;
 }
 
+describe('traffic and the police', () => {
+  it('pulls over and stops for a siren close by', () => {
+    const world = World.forSession(config());
+    // The siren is worked by hand here, not by the police module (which would clear it).
+    world.police = null;
+    const player = world.cars[0]!;
+    run(world, 2);
+    const traffic = world.traffic!;
+    const car = traffic.vehicles.find(
+      (v) =>
+        v.active &&
+        !v.police &&
+        v.mode === 'lane' &&
+        Math.hypot(v.x - player.pos.x, v.z - player.pos.z) < 300,
+    )!;
+    expect(car).toBeDefined();
+    // A unit parked with its siren on, 20 m from it.
+    const unit = traffic.vehicles.find((v) => v.police)!;
+    unit.active = true;
+    unit.mode = 'block';
+    unit.siren = true;
+    const follow = () => {
+      unit.x = car.x + 15;
+      unit.z = car.z + 12;
+      unit.y = car.y;
+    };
+    follow();
+    run(world, 4, follow);
+    expect(car.active).toBe(true);
+    expect(car.pullOver).toBeGreaterThan(0.9);
+    expect(car.v).toBeLessThan(2.5);
+    // Off the lane's centre, to the right.
+    const p = traffic.graph.pointAt(car.link, car.s, { x: 0, z: 0, y: 0, tx: 0, tz: 0 });
+    const right = (car.x - p.x) * -p.tz + (car.z - p.z) * p.tx;
+    expect(right).toBeGreaterThan(1.2);
+    // The siren gone, it eases back and drives on.
+    unit.siren = false;
+    unit.active = false;
+    run(world, 4);
+    expect(car.pullOver).toBe(0);
+  });
+});
+
 describe('police', () => {
   it('starts clear with patrol cars and no fine', () => {
     const world = World.forSession(config());

@@ -154,6 +154,39 @@ describe('street racers', () => {
     expect(status.finished).toBe(-1);
   });
 
+  it('hold the player where it crossed while the screen fades, then put it on its slot', () => {
+    const { world, race } = atStart('race-avenue');
+    run(world, 1);
+    const player = world.cars[0]!;
+    player.teleport({
+      x: race.x - race.tx * 2,
+      z: race.z - race.tz * 2,
+      yaw: race.yaw,
+      y: race.y + 0.5,
+    });
+    // Step by step over the line.
+    for (let i = 0; i < 400 && world.racers!.active?.phase === 'grid'; i++) {
+      player.vel.x = race.tx * 10;
+      player.vel.z = race.tz * 10;
+      world.step(SIM_DT);
+    }
+    const status = world.racers!.status;
+    expect(status.phase).toBe('countdown');
+    expect(status.placed).toBe(false);
+    expect(status.countdown).toBeCloseTo(3, 1);
+    // Still about where it crossed, held.
+    let along = (player.pos.x - race.x) * race.tx + (player.pos.z - race.z) * race.tz;
+    expect(along).toBeLessThan(3);
+    expect(world.racers!.holding).toBe(true);
+    run(world, 0.4);
+    expect(status.placed).toBe(true);
+    along = (player.pos.x - race.x) * race.tx + (player.pos.z - race.z) * race.tz;
+    expect(along).toBeGreaterThan(8);
+    expect(along).toBeLessThan(16);
+    expect(status.countdown).toBeLessThan(3);
+    expect(status.countdown).toBeGreaterThan(2.5);
+  });
+
   it('give the player its finishing time and position at the line', () => {
     const { world, race } = atStart('race-avenue');
     run(world, 1);
