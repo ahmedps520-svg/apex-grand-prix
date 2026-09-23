@@ -27,6 +27,8 @@ export const LOOP_POINTS: ReadonlyArray<readonly [number, number]> = [
   [175, 185],
   [100, 212],
   [35, 195],
+  // Lines the last corner up with the main straight, so the start line is on the centre line.
+  [0, 165],
 ];
 
 /** Painted road width between the edge lines. */

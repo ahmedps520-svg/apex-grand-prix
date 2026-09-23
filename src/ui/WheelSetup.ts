@@ -254,7 +254,7 @@ export class WheelSetup {
           pedal.saturation = v / 100;
           save();
         }),
-        this.checkbox('Invert', false, () => {
+        this.button('Reverse direction', () => {
           invert(pedal);
           save();
         }),
@@ -344,16 +344,6 @@ export class WheelSetup {
     }
     select.addEventListener('change', () => onChange(select.value as CurveKind));
     return select;
-  }
-
-  private checkbox(label: string, checked: boolean, onChange: () => void): HTMLElement {
-    const wrap = el('label', 'ws-check');
-    const input = el('input');
-    input.type = 'checkbox';
-    input.checked = checked;
-    input.addEventListener('change', onChange);
-    wrap.append(input, el('span', undefined, label));
-    return wrap;
   }
 }
 

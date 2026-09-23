@@ -815,13 +815,6 @@ body.fatal #loading-text {
   border-radius: 8px;
 }
 
-.ws-check {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 14px;
-}
-
 .ws-bindings {
   display: grid;
   gap: 6px;
