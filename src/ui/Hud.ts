@@ -1,6 +1,7 @@
 import {
   FLAG_ABS,
   FLAG_LIMITER,
+  FLAG_NITRO,
   FLAG_SHIFT_DENIED,
   FLAG_TC,
   type PoliceStatus,
@@ -56,6 +57,11 @@ export class Hud {
   private readonly ers = el('span', 'hud-ers');
   private readonly ersFill = el('span');
   private hybridShown = '';
+  /** Arcade: the nitro tank and the badge that says the handling is arcade. */
+  private readonly nitro = el('div', 'hud-nitro');
+  private readonly nitroFill = el('span');
+  private readonly badge = el('div', 'hud-badge', 'ARCADE');
+  private nitroShown = '';
   /** Damage: wing, engine and alignment bars, shown once something is damaged. */
   private readonly damage = el('div', 'hud-damage');
   private readonly damageBars: HTMLElement[] = [];
@@ -93,6 +99,11 @@ export class Hud {
       this.damageBars.push(fill);
     }
     this.damage.hidden = true;
+    const nitroBar = el('span', 'hud-nitro-bar');
+    nitroBar.appendChild(this.nitroFill);
+    this.nitro.append(el('span', 'hud-nitro-label', 'NITRO'), nitroBar);
+    this.nitro.hidden = true;
+    this.badge.hidden = true;
     this.ers.appendChild(this.ersFill);
     this.hybrid.append(this.drs, this.ers);
     this.hybrid.hidden = true;
@@ -112,7 +123,17 @@ export class Hud {
     this.heatEvade.appendChild(this.heatEvadeFill);
     this.heat.append(stars, this.heatState, this.heatEvade, this.heatFine);
     this.heat.hidden = true;
-    this.root.append(this.damage, this.hybrid, this.lights, bar, readout, lamps, this.limit);
+    this.root.append(
+      this.badge,
+      this.damage,
+      this.nitro,
+      this.hybrid,
+      this.lights,
+      bar,
+      readout,
+      lamps,
+      this.limit,
+    );
     // The wanted level sits at the top of the screen, outside the panel.
     parent.append(this.root, this.heat);
   }
@@ -222,6 +243,17 @@ export class Hud {
   }
 
   private updateHybrid(car: CarRenderState): void {
+    const burning = (car.flags & FLAG_NITRO) !== 0;
+    const nitroKey = `${car.nitro < 0 ? -1 : Math.round(car.nitro * 40)},${burning}`;
+    if (nitroKey !== this.nitroShown) {
+      this.nitroShown = nitroKey;
+      this.nitro.hidden = car.nitro < 0;
+      this.badge.hidden = car.nitro < 0;
+      if (car.nitro >= 0) {
+        this.nitroFill.style.width = `${Math.round(car.nitro * 100)}%`;
+        this.nitro.classList.toggle('burning', burning);
+      }
+    }
     const key = `${car.ers < 0 ? -1 : Math.round(car.ers * 40)},${car.drs},${car.ersBoost}`;
     if (key === this.hybridShown) return;
     this.hybridShown = key;

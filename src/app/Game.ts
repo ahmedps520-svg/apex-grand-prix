@@ -15,11 +15,11 @@ import { ChaseCamera, type CameraMode } from '../render/ChaseCamera';
 import { Cones } from '../render/Cones';
 import { createCarRenderState, interpolateCar, type CarRenderState } from '../render/interpolate';
 import type { RendererHost } from '../render/RendererHost';
-import { TestGroundScene } from '../render/TestGroundScene';
+import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap } from '../ui/CityMinimap';
-import { cityMap } from '../content/city/map';
+import { cityMap, type CityMap } from '../content/city/map';
 import {
   POLICE_PAINT,
   policeModel,
@@ -29,6 +29,8 @@ import {
   trafficSlotsFor,
 } from '../content/city/fleet';
 import { SpikeStrips } from '../render/SpikeStrips';
+import { Skill } from './Skill';
+import { SkillHud } from '../ui/SkillHud';
 import { MAP_MAX_X, MAP_MAX_Z, MAP_MIN_X, MAP_MIN_Z } from '../content/city/terrain';
 import {
   PhotoCamera,
@@ -117,6 +119,8 @@ export interface DebugApi {
   /** Simulated seconds; compare with wall time to check the physics runs in real time. */
   simTime: number;
   speed: number;
+  /** The larger rear tyre slip angle, radians (for the tests). */
+  rearSlip: number;
   /** Car position on the ground plane, metres. */
   x: number;
   z: number;
@@ -150,6 +154,21 @@ const cityHeightAt = (x: number, z: number): number => {
   const deck = map.deckAt(x, z, 0.5);
   return deck ? deck.height : map.groundHeight(x, z);
 };
+
+/** Arcade: cones on the corners of the flat junctions (the cones lie on the ground plane). */
+function cityConePlacements(map: CityMap): ConePlacement[] {
+  const out: ConePlacement[] = [];
+  for (const j of map.junctions) {
+    if (j.control === 'none' || Math.abs(map.groundHeight(j.x, j.z)) > 0.05) continue;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        out.push({ x: j.x + sx * 7.5, z: j.z + sz * 7.5 });
+      }
+    }
+    if (out.length >= 480) break;
+  }
+  return out;
+}
 
 declare global {
   interface Window {
@@ -428,6 +447,9 @@ export class Game {
   /** Free roam: what the police make of the player, and their spike strips on the road. */
   private policeStatus: PoliceStatus | null = null;
   private readonly strips = new SpikeStrips();
+  /** Arcade: the skill points of the session, and their HUD. */
+  private skill: Skill | null = null;
+  private readonly skillHud: SkillHud;
   private lastPadName = '';
   private lastWheelId = '';
   private soundCheckAt = -1;
@@ -461,6 +483,7 @@ export class Game {
 
     const upshift = TEST_MULE.gearbox.upshiftRpm;
     this.hud = new Hud(ui, { upshiftRpm: upshift, shiftLightsFrom: upshift - SHIFT_LIGHT_RANGE });
+    this.skillHud = new SkillHud(ui);
     this.raceHud = new RaceHud(ui);
     this.radioBox = new RadioBox(ui);
     this.radio.onMessage = (text) => this.radioBox.show(text);
@@ -511,6 +534,7 @@ export class Game {
       simSteps: 0,
       simTime: 0,
       speed: 0,
+      rearSlip: 0,
       x: 0,
       z: 0,
       gear: 0,
@@ -666,6 +690,7 @@ export class Game {
       damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
       grip: gripFactor(setup.weather),
       conditions: { time: setup.time, weather: setup.weather },
+      handling: attract ? 'sim' : setup.handling,
     };
   }
 
@@ -724,6 +749,10 @@ export class Game {
     this.menuAudio.siren(0);
     this.cars[0]?.repairView();
     this.debug.soft = null;
+    // Arcade: skill points, with smashed cones counting too.
+    this.skill = config.handling === 'arcade' && !idle && !attract ? new Skill() : null;
+    this.skillHud.reset();
+    if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -838,6 +867,11 @@ export class Game {
       const detail =
         this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
       this.scenery = new CityScene(map, config.conditions, detail);
+      if (config.handling === 'arcade') {
+        // Festival cones on the junction corners, to send flying for points.
+        this.cones = new Cones(cityConePlacements(map), TEST_MULE.body);
+        this.scenery.scene.add(this.cones.mesh);
+      }
       this.minimap = new CityMinimap(this.ui, map, {
         minX: MAP_MIN_X,
         maxX: MAP_MAX_X,
@@ -970,6 +1004,7 @@ export class Game {
     const driving =
       this.driving && !this.menus.open && !this.photo && !this.flyover && !this.podium;
     this.hud.setVisible(driving);
+    this.skillHud.setVisible(driving && this.skill !== null);
     const mode = this.session?.mode;
     this.raceHud.setVisible(driving && mode !== 'free' && mode !== 'roam' && !this.school);
     this.minimap?.setVisible(driving);
@@ -1069,6 +1104,10 @@ export class Game {
           roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
         );
         this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
+        if (this.skill) {
+          this.skill.update(dt, player, this.states, count);
+          this.skillHud.update(this.skill);
+        }
         this.telemetry.update(dt, player, {
           steer: input.raw.steer,
           throttle: input.raw.throttle,
@@ -2563,6 +2602,10 @@ export class Game {
       debug.gear = state.gear;
       debug.manualGearbox = state.manualGearbox;
       debug.tcLevel = state.tcLevel;
+      debug.rearSlip = Math.max(
+        Math.abs(state.wheels[2]?.slipAngle ?? 0),
+        Math.abs(state.wheels[3]?.slipAngle ?? 0),
+      );
     }
     debug.telemetry = this.telemetry.visible;
     debug.menu.visible = this.quickMenu.visible;

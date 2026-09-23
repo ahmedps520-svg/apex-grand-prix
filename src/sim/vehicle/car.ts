@@ -29,6 +29,7 @@ import {
   FLAG_HAZARDS,
   FLAG_HEADLIGHTS,
   FLAG_HORN,
+  FLAG_NITRO,
   FLAG_INDICATOR_LEFT,
   FLAG_INDICATOR_RIGHT,
   FLAG_LIMITER,
@@ -93,6 +94,24 @@ export interface CarDamage {
 const WALL_STIFFNESS = 900_000;
 const WALL_DAMPING = 60_000;
 const WALL_FRICTION = 0.35;
+/**
+ * Arcade handling: extra grip, less drag, the share of the peak grip a sliding tyre keeps, the
+ * nitro's extra torque and its burn and refill times (s), the lift and the stick's pitch and
+ * yaw authority in the air (rad/s²), and the drift assist (the rear slip that starts it, the
+ * yaw damping (1/s) and the steering's turning authority (rad/s²)).
+ */
+const ARCADE_GRIP = 1.3;
+const ARCADE_DRAG = 0.85;
+const ARCADE_SLIDE_GRIP = 0.85;
+const ARCADE_NITRO_TORQUE = 0.6;
+const NITRO_BURN_TIME = 4;
+const NITRO_REFILL_TIME = 18;
+const ARCADE_AIR_LIFT = 0.15;
+const ARCADE_AIR_PITCH = 3;
+const ARCADE_AIR_YAW = 2.5;
+const ARCADE_DRIFT_SLIP = 0.12;
+const ARCADE_YAW_DAMPING = 1.5;
+const ARCADE_DRIFT_TORQUE = 2;
 /** Wheel steering is smoothed only enough to hide the display-rate input steps. */
 const WHEEL_INPUT_SMOOTHING = 0.008;
 /** Manual gearbox: a downshift is refused if it would put the engine this far past the limiter. */
@@ -279,6 +298,11 @@ export class Car {
   damageScale = 0;
   /** Free roam: the deformable shell (null elsewhere). */
   soft: SoftBody | null = null;
+  /** Arcade handling: more grip, slides that hold, nitro, air control. */
+  arcade = false;
+  /** Arcade: nitro in the tank, 0 … 1, and whether it is burning. */
+  nitro = 1;
+  nitroOn = false;
   /** On the grid before the start: the handbrake is held on whatever the driver does. */
   holdForStart = false;
   private readonly wheelbase: number;
@@ -504,6 +528,7 @@ export class Car {
     for (const w of this.wheels) this.tyreForces(w, dt);
     this.aero();
     this.bodyContacts(surface);
+    if (this.arcade) this.arcadeAssist(dt);
     this.measureAcceleration(dt);
     this.integrate(dt);
     this.afterStep(dt);
@@ -646,7 +671,7 @@ export class Car {
       addScaledV(this.t1, this.t1, this.vel, 1);
       w.lengthRate = dotV(this.t1, w.normal) / w.cosAngle;
       const props = SURFACE_PROPS[hit.surface];
-      w.grip = props.grip * (surface.gripScale ?? 1) * w.burst;
+      w.grip = props.grip * (surface.gripScale ?? 1) * w.burst * (this.arcade ? ARCADE_GRIP : 1);
       w.rollingResistance = props.rollingResistance;
       w.surface = hit.surface;
     } else {
@@ -730,8 +755,10 @@ export class Car {
       this.ersBoost && this.spec.hybrid
         ? this.spec.hybrid.ersPower / Math.max(rpm / RPM_PER_RAD_S, 150)
         : 0;
+    // Nitro (arcade): a big shot of torque while the button is held and the tank lasts.
+    const nitro = this.nitroOn ? full * ARCADE_NITRO_TORQUE : 0;
     return (
-      throttle * (full * (1 - DAMAGE_TORQUE * this.damage.engine) + boost) -
+      throttle * (full * (1 - DAMAGE_TORQUE * this.damage.engine) + boost + nitro) -
       (1 - throttle) * friction
     );
   }
@@ -925,7 +952,9 @@ export class Car {
         this.absActive = true;
       }
     }
-    const tc = ASSISTS.tc[this.aids.tc];
+    // Arcade drives without traction control: the power keeps a drift going, and the assist
+    // keeps it from turning into a spin.
+    const tc = ASSISTS.tc[this.arcade ? 'off' : this.aids.tc];
     if (tc && driveTorque > 0 && vLong > -1) {
       const room = Math.sqrt(Math.max(tc.fraction ** 2 - lateralUse ** 2, 0.2 ** 2));
       const omegaTarget = (vLong + w.tyre.kappaPeak * room * longRef) / radius;
@@ -986,6 +1015,12 @@ export class Car {
 
     // Slow tyres get extra sideways damping so a parked car settles instead of rocking.
     let fy = out.fy;
+    if (this.arcade && Math.abs(alpha) > w.tyre.alphaPeak) {
+      // Arcade: a sliding tyre keeps most of its peak grip instead of falling away, so a slide
+      // is something to steer, not a spin.
+      const keep = out.fxMax * ARCADE_SLIDE_GRIP;
+      if (Math.abs(fy) < keep) fy = (fy !== 0 ? Math.sign(fy) : -Math.sign(alpha)) * keep;
+    }
     const slowBlend = 1 - Math.min(Math.abs(vLong) / LOW_SPEED_DAMPING_BELOW, 1);
     if (slowBlend > 0) {
       const loadShare = Math.min(w.load / w.staticLoad, 2);
@@ -1020,6 +1055,7 @@ export class Car {
       -0.5 *
       AIR_DENSITY *
       a.dragArea *
+      (this.arcade ? ARCADE_DRAG : 1) *
       (1 + DAMAGE_DRAG * hurt) *
       (1 - (drs?.drsDrag ?? 0)) *
       speed;
@@ -1133,6 +1169,41 @@ export class Car {
         const speed = Math.min((j / this.spec.mass) * 2.5, 20) * this.damageScale;
         this.soft.impact(at.x, at.y, at.z, dir.x, dir.y, dir.z, speed);
       }
+    }
+  }
+
+  /**
+   * Arcade handling, on top of the real physics: the nitro tank, a drift that holds (the yaw is
+   * damped while the rear slides, and the steering turns the car so the driver can hold it) and,
+   * in the air, a lighter car that the stick pitches and yaws for the landing.
+   */
+  private arcadeAssist(dt: number): void {
+    const input = this.input;
+    this.nitroOn = input.nitro && this.nitro > 0 && this.throttle > 0.2;
+    this.nitro = clamp(
+      this.nitro + (this.nitroOn ? -dt / NITRO_BURN_TIME : dt / NITRO_REFILL_TIME),
+      0,
+      1,
+    );
+    const I = this.spec.inertia;
+    const speed = this.forwardSpeed();
+    let contacts = 0;
+    for (const w of this.wheels) if (w.contact) contacts++;
+    if (contacts === 0) {
+      addScaledV(this.force, this.force, UP, this.spec.mass * GRAVITY * ARCADE_AIR_LIFT);
+      const pitch = (this.brake - this.throttle) * ARCADE_AIR_PITCH * I.pitch;
+      addScaledV(this.torque, this.torque, this.right, pitch);
+      addScaledV(this.torque, this.torque, this.up, -this.steer * ARCADE_AIR_YAW * I.yaw);
+      return;
+    }
+    const rl = this.wheels[2]!;
+    const rr = this.wheels[3]!;
+    const rearSlip = (Math.abs(rl.slipAngle) + Math.abs(rr.slipAngle)) / 2;
+    if (rearSlip > ARCADE_DRIFT_SLIP && Math.abs(speed) > 5) {
+      const w = invRotateV(vScratch, this.rot, this.angVel);
+      const damping = -w.y * ARCADE_YAW_DAMPING * I.yaw;
+      const hold = -this.steer * ARCADE_DRIFT_TORQUE * I.yaw * Math.min(Math.abs(speed) / 20, 1);
+      addScaledV(this.torque, this.torque, this.up, damping + hold);
     }
   }
 
@@ -1385,7 +1456,8 @@ export class Car {
       (this.indicator < 0 ? FLAG_INDICATOR_LEFT : 0) |
       (this.indicator > 0 ? FLAG_INDICATOR_RIGHT : 0) |
       (this.hazards ? FLAG_HAZARDS : 0) |
-      (this.horn ? FLAG_HORN : 0);
+      (this.horn ? FLAG_HORN : 0) |
+      (this.nitroOn ? FLAG_NITRO : 0);
     out[base + C.ACCEL_LONG] = this.accelLong;
     out[base + C.ACCEL_LAT] = this.accelLat;
     out[base + C.STEER_ANGLE] = (this.wheels[0]!.steer + this.wheels[1]!.steer) / 2;
@@ -1401,6 +1473,7 @@ export class Car {
     out[base + C.DRS] = !hybrid ? 0 : this.drsOpen ? 2 : this.drsAllowed ? 1 : 0;
     out[base + C.ERS] = hybrid ? this.ersEnergy / hybrid.ersCapacity : -1;
     out[base + C.ERS_BOOST] = this.ersBoost ? 1 : 0;
+    out[base + C.NITRO] = this.arcade ? this.nitro : -1;
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i]!;
       const o = base + C.WHEELS + i * WHEEL_STRIDE;

@@ -1,7 +1,13 @@
 import { signal } from '@preact/signals';
 import type { Settings } from '../../app/settings';
 import type { Conditions, Weather } from '../../content/conditions';
-import type { Difficulty, GameMode, RoamStart, SpawnPoint } from '../../shared/protocol';
+import type {
+  Difficulty,
+  GameMode,
+  HandlingMode,
+  RoamStart,
+  SpawnPoint,
+} from '../../shared/protocol';
 import type { PromptFamily } from './prompts';
 
 /**
@@ -55,6 +61,8 @@ export interface SessionSetup {
   field: FieldMode;
   /** The other class in a two-class race. */
   secondClass: string;
+  /** Sim or arcade handling, for any mode. */
+  handling: HandlingMode;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
@@ -211,6 +219,7 @@ export class MenuStore {
     weather: 'clear',
     field: 'same',
     secondClass: 'Touring',
+    handling: 'sim',
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

@@ -16,6 +16,8 @@ test('drives into the open world from the menus', async ({ page }) => {
   await expect.poll(screen).toBe('main');
   await page.getByRole('button', { name: /Free Roam/ }).click();
   await expect.poll(screen).toBe('roamSetup');
+  // The handling choice (sim / arcade) is offered here like everywhere else.
+  await expect(page.locator('.mn-choice', { hasText: 'Handling' })).toBeVisible();
   await page.keyboard.press('Enter'); // Drive (focused first)
   await expect.poll(screen, { timeout: 120_000 }).toBe('');
   await expect.poll(() => page.evaluate(() => window.__apex!.mode)).toBe('roam');

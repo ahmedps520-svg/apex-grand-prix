@@ -52,6 +52,8 @@ export interface CarRenderState {
   drs: number;
   ers: number;
   ersBoost: boolean;
+  /** Arcade: nitro left, 0 … 1 (-1 outside arcade handling). */
+  nitro: number;
   wheels: WheelRenderState[];
 }
 
@@ -99,6 +101,7 @@ export function createCarRenderState(): CarRenderState {
     drs: 0,
     ers: -1,
     ersBoost: false,
+    nitro: -1,
     wheels,
   };
 }
@@ -153,6 +156,7 @@ export function interpolateCar(
   out.drs = buf[b + C.DRS]!;
   out.ers = buf[b + C.ERS]!;
   out.ersBoost = buf[b + C.ERS_BOOST]! > 0.5;
+  out.nitro = buf[b + C.NITRO]!;
   for (let i = 0; i < WHEEL_COUNT; i++) {
     const o = b + C.WHEELS + i * WHEEL_STRIDE;
     const w = out.wheels[i]!;

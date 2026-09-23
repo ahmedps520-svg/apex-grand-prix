@@ -1117,3 +1117,160 @@ body.fatal #loading-text {
 .hud-heat[hidden] {
   display: none;
 }
+
+/* Arcade: the nitro tank in the HUD panel, and the badge on its corner. */
+.hud-nitro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.hud-nitro[hidden] {
+  display: none;
+}
+
+.hud-nitro-label {
+  font: 800 11px var(--font);
+  letter-spacing: 0.1em;
+  color: #ff9f1a;
+}
+
+.hud-nitro-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-nitro-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ff7a00, #ffd166);
+  transition: width 0.1s linear;
+}
+
+.hud-nitro.burning .hud-nitro-bar span {
+  animation: hud-boost 0.25s ease-in-out infinite alternate;
+}
+
+.hud-badge {
+  position: absolute;
+  top: -10px;
+  left: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #ff7a00;
+  color: #1a0d00;
+  font: 900 10px var(--font);
+  letter-spacing: 0.14em;
+}
+
+.hud-badge[hidden] {
+  display: none;
+}
+
+/* Arcade: the skill score and its pop-ups, under the race HUD on the left. */
+.skill {
+  position: absolute;
+  top: calc(124px + var(--safe-top));
+  left: calc(18px + var(--safe-left));
+  min-width: 150px;
+  padding: 8px 14px 10px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.skill[hidden] {
+  display: none;
+}
+
+.skill-label {
+  font: 800 10px var(--font);
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.skill-score {
+  font: 900 26px var(--font);
+  line-height: 1.1;
+  color: #ffd166;
+}
+
+.skill-combo {
+  font: 700 12px var(--font);
+  letter-spacing: 0.06em;
+  color: #ff9f1a;
+}
+
+.skill-combo[hidden] {
+  display: none;
+}
+
+.skill-pops {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.skill-pop {
+  font: 800 14px var(--font);
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  animation: skill-pop 1.8s ease-out forwards;
+}
+
+.skill-pop.drift {
+  color: #37d4ff;
+}
+
+.skill-pop.nearMiss {
+  color: #ffd166;
+}
+
+.skill-pop.speed {
+  color: #ff9f1a;
+}
+
+.skill-pop.air {
+  color: #b7ff9a;
+}
+
+.skill-pop.smash {
+  color: #ff8a5b;
+}
+
+.skill-pop.crash {
+  color: #ff4a4a;
+}
+
+@keyframes skill-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.9);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1.08);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(1);
+  }
+}
