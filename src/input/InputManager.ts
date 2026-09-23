@@ -277,6 +277,7 @@ export class InputManager {
     const k = this.keys;
     const keysDown = (codes: readonly string[]) => codes.some((c) => k.has(c));
     d.horn = keysDown(this.bindings.keys.horn);
+    d.nitro = keysDown(this.bindings.keys.boost);
     const kb = this.bindings.keys;
     const kbSteer = (keysDown(kb.steerRight) ? 1 : 0) - (keysDown(kb.steerLeft) ? 1 : 0);
     let throttle = keysDown(kb.throttle) ? 1 : 0;
@@ -341,6 +342,7 @@ export class InputManager {
         if (pressed(b.shiftUp)) d.shiftUp++;
         if (pressed(b.drs)) d.drs++;
         if (pressed(b.boost)) d.boost++;
+        if (now2[b.boost]) d.nitro = true;
         if (pressed(b.shiftDown)) d.shiftDown++;
         // L3 + R3 together also toggle the telemetry (for pads without a touchpad).
         if ((pressed(PAD.L3) && now2[PAD.R3]) || (pressed(PAD.R3) && now2[PAD.L3])) {

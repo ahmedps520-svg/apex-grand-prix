@@ -26,6 +26,8 @@ interface Cone {
  */
 export class Cones {
   readonly mesh: THREE.InstancedMesh;
+  /** Called for each cone the car sends flying (arcade skill points). */
+  onKnock: (() => void) | null = null;
   private readonly cones: Cone[];
   private readonly rand = mulberry32(99);
   private readonly matrix = new THREE.Matrix4();
@@ -117,6 +119,7 @@ export class Cones {
       .multiplyScalar(6 + r() * 10);
     cone.flying = true;
     cone.timer = 0;
+    this.onKnock?.();
   }
 
   private fly(cone: Cone, dt: number): void {

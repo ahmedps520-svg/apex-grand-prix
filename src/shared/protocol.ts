@@ -47,6 +47,8 @@ export interface DriverInput {
   hazards: number;
   /** The horn is held. */
   horn: boolean;
+  /** Arcade: the nitro button is held. */
+  nitro: boolean;
 }
 
 export const neutralInput = (): DriverInput => ({
@@ -66,7 +68,14 @@ export const neutralInput = (): DriverInput => ({
   indicatorRight: 0,
   hazards: 0,
   horn: false,
+  nitro: false,
 });
+
+/**
+ * Sim handling is the real thing; arcade is the forgiving one for every mode: more grip, slides
+ * that hold instead of spinning, nitro, air control, and skill points for driving with style.
+ */
+export type HandlingMode = 'sim' | 'arcade';
 
 export type AidLevel = 'off' | 'low' | 'high';
 export type GearboxMode = 'auto' | 'manual';
@@ -131,6 +140,8 @@ export interface SessionConfig {
   damage?: number;
   /** Time of day and weather, for the scenery (the simulation only uses `grip`). */
   conditions?: Conditions;
+  /** Sim (the default) or arcade handling, for every car in the session. */
+  handling?: HandlingMode;
 }
 
 export type SimCommand =
@@ -266,7 +277,9 @@ export const C = {
   /** Traffic's simple damage: how dented each end is, 0 … 1 (the player's car has a lattice). */
   DENT_FRONT: 39,
   DENT_REAR: 40,
-  WHEELS: 41,
+  /** Arcade: nitro left in the tank, 0 … 1 (-1 outside arcade handling). */
+  NITRO: 41,
+  WHEELS: 42,
 } as const;
 export const CAR_STRIDE = C.WHEELS + WHEEL_COUNT * WHEEL_STRIDE;
 
@@ -285,6 +298,8 @@ export const FLAG_HAZARDS = 512;
 export const FLAG_HORN = 1024;
 /** A police car with its lights and siren going. */
 export const FLAG_SIREN = 2048;
+/** Arcade: the nitro is burning. */
+export const FLAG_NITRO = 4096;
 
 export const aidLevelNumber = (level: AidLevel): number =>
   level === 'off' ? 0 : level === 'low' ? 1 : 2;

@@ -88,6 +88,7 @@ scope.onmessage = (event) => {
       case 'session':
         session = msg.session;
         world = World.forSession(msg.session);
+        world.setHandling(msg.session.handling ?? 'sim');
         bufferBytes = snapshotBytes(world.snapshotCount);
         pool.length = 0;
         clock.resetBaseline();

@@ -9,6 +9,7 @@ import {
   type Difficulty,
   type DriverAids,
   type DriverInput,
+  type HandlingMode,
   type SessionConfig,
   type SpawnPoint,
 } from '../shared/protocol';
@@ -166,6 +167,11 @@ export class World {
 
   setAids(car: number, aids: DriverAids): void {
     this.cars[car]?.setAids(aids);
+  }
+
+  /** Sim or arcade handling, for every car (the AI drives the same physics as the player). */
+  setHandling(mode: HandlingMode): void {
+    for (const car of this.cars) car.arcade = mode === 'arcade';
   }
 
   teleport(car: number, to: SpawnPoint): void {

@@ -16,7 +16,7 @@ import {
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
 import type { Detail } from '../../app/settings';
-import type { AidLevel, RoamStart, SpawnPoint } from '../../shared/protocol';
+import type { AidLevel, HandlingMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
@@ -719,9 +719,20 @@ function ConditionChoices({ store }: ScreenProps) {
   );
 }
 
+const HANDLING: ReadonlyArray<{ value: HandlingMode; text: string }> = [
+  { value: 'sim', text: 'Sim' },
+  { value: 'arcade', text: 'Arcade: grip, drifts, nitro, skill points' },
+];
+
 function AidChoices({ store, aids }: { store: MenuStore; aids: MenuStore['settings']['aids'] }) {
   return (
     <>
+      <Choice
+        label="Handling"
+        value={store.setup.value.handling}
+        options={HANDLING}
+        onChange={(handling) => store.update({ handling })}
+      />
       <Choice
         label="Gearbox"
         value={aids.gearbox}
