@@ -40,7 +40,7 @@ describe('settings', () => {
     expect(s.aids.steerSensitivity).toBe(0.5);
     expect(s.pad.throttleCurve).toBe('progressive');
     expect(s.pad.steerDeadzone).toBe(defaultSettings().pad.steerDeadzone);
-    expect(s.audio).toEqual({ volume: 1, muted: false });
+    expect(s.audio).toEqual({ volume: 1, muted: false, music: 0.6, sfx: 0.7 });
     expect(s.wheels).toEqual({});
     expect(s.wheelsPrompted).toEqual(['G29']);
   });

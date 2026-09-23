@@ -46,7 +46,8 @@ export interface Settings {
   camera: CameraMode;
   aids: DriverAids;
   pad: PadSettings;
-  audio: { volume: number; muted: boolean };
+  /** Volume is the engine and race sound; music and sfx are the menus'. */
+  audio: { volume: number; muted: boolean; music: number; sfx: number };
   /** Time trial: show the best lap as a see-through car. */
   ghost: boolean;
   /** How much crashes damage the car. */
@@ -97,7 +98,7 @@ export const defaultSettings = (): Settings => ({
   camera: 'chase',
   aids: defaultAids(),
   pad: defaultPadSettings(),
-  audio: { volume: 0.7, muted: false },
+  audio: { volume: 0.7, muted: false, music: 0.6, sfx: 0.7 },
   ghost: true,
   damage: 'light',
   radio: { voice: true, subtitles: true, volume: 0.9 },
@@ -184,6 +185,8 @@ export function parseSettings(raw: unknown): Settings {
     audio: {
       volume: num(audio.volume, 0, 1, d.audio.volume),
       muted: typeof audio.muted === 'boolean' ? audio.muted : d.audio.muted,
+      music: num(audio.music, 0, 1, d.audio.music),
+      sfx: num(audio.sfx, 0, 1, d.audio.sfx),
     },
     ghost: typeof raw.ghost === 'boolean' ? raw.ghost : d.ghost,
     damage: oneOf(raw.damage, DAMAGE_LEVELS, d.damage),

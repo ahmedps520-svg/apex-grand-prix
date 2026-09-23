@@ -8,6 +8,8 @@ A browser racing game built with TypeScript, Vite and three.js. It renders with 
 
 ## The game
 
+Starts with a short studio and logo intro (any button skips it), then a title screen that circles your car on the grid while generated synthwave music plays. The menus are tiles and bars, not paragraphs, with sounds and a light rumble when you select.
+
 - **Quick Race:** pick a circuit and a car, 1–11 AI opponents, laps, difficulty and grid slot. Standing start with five red lights, positions, lap and sector timing, results.
 - **Championship:** a season of 3 to 6 races with points for the top ten (25-18-15-12-10-8-6-4-2-1); the grid lines up in championship order and a season in progress is saved.
 - **Time Trial:** hot laps with sector splits against your best and the stored track record, chasing a ghost of your best lap.

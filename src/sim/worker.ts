@@ -114,6 +114,9 @@ scope.onmessage = (event) => {
         else if (command.kind === 'restart') world.restartSession(session?.gridSlot ?? 0);
         else if (command.kind === 'teleport') world.teleport(command.car, command.to);
         else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
+        else if (command.kind === 'holdStart' && world.director) {
+          world.director.holdGrid = command.hold;
+        }
         break;
       }
     }

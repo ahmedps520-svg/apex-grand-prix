@@ -986,3 +986,321 @@
   opacity: 0.7;
   font-size: 0.9em;
 }
+
+/* ---- Graphical menus: tiles, focus-only hints, stat bars ---- */
+
+.mn-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: min(460px, 100%);
+}
+
+.mn-tiles.small {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mn-tile {
+  position: relative;
+  display: grid;
+  align-content: end;
+  justify-items: start;
+  gap: 6px;
+  min-height: 96px;
+  padding: 14px 16px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: linear-gradient(160deg, rgba(28, 33, 46, 0.86), rgba(12, 15, 22, 0.86));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background 0.14s ease,
+    box-shadow 0.14s ease;
+  animation: rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.mn-tile.big {
+  grid-column: span 2;
+  min-height: 132px;
+  background: linear-gradient(135deg, rgba(255, 59, 47, 0.32), rgba(12, 15, 22, 0.86) 70%);
+}
+
+.mn-tile.small {
+  min-height: 64px;
+  padding: 10px;
+  justify-items: center;
+  text-align: center;
+}
+
+.mn-tiles > .mn-tile:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.mn-tiles > .mn-tile:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.mn-tiles > .mn-tile:nth-child(4) {
+  animation-delay: 0.15s;
+}
+.mn-tiles > .mn-tile:nth-child(5) {
+  animation-delay: 0.2s;
+}
+
+.mn-tile .mn-icon {
+  opacity: 0.85;
+  transition: transform 0.2s ease;
+}
+
+.mn-tile-label {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.mn-tile.big .mn-tile-label {
+  font-size: 26px;
+  font-style: italic;
+}
+
+.mn-tile.small .mn-tile-label {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+/* Hints only for the tile in focus. */
+.mn-tile-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  max-height: 0;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease,
+    max-height 0.2s ease;
+}
+
+.mn-tile.nav-focus,
+.mn-tile:hover {
+  border-color: var(--accent);
+  transform: translateY(-3px) scale(1.02);
+  box-shadow:
+    0 0 0 2px rgba(255, 59, 47, 0.4),
+    0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.mn-tile.nav-focus .mn-icon {
+  transform: scale(1.12);
+  color: var(--accent);
+}
+
+.mn-tile.nav-focus .mn-tile-hint {
+  max-height: 2em;
+  opacity: 1;
+}
+
+/* Track cards: the description only for the card in focus. */
+.mn-card .mn-card-text {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.mn-card.nav-focus .mn-card-text,
+.mn-card:hover .mn-card-text {
+  opacity: 1;
+}
+
+/* Car select: a list on the left, the car itself (the 3D backdrop) on the right. */
+.mn-panel.mn-cars {
+  width: min(420px, 100%);
+  margin-right: auto;
+}
+
+.mn-car-list {
+  display: grid;
+  gap: 6px;
+}
+
+.mn-car-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 14px;
+  font: inherit;
+  color: var(--text);
+  background: rgba(16, 19, 28, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  cursor: pointer;
+  animation: rise 0.3s ease both;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.mn-car-row.selected {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.mn-car-row.nav-focus,
+.mn-car-row:hover {
+  border-color: var(--accent);
+  background: rgba(255, 59, 47, 0.16);
+  transform: translateX(6px);
+}
+
+.mn-car-name {
+  font-weight: 800;
+}
+
+.mn-car-power {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.mn-car-info {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(10, 13, 20, 0.7);
+  animation: rise 0.3s ease both;
+}
+
+.mn-car-class {
+  font: 800 11px var(--font);
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.mn-car-title {
+  font: italic 900 26px var(--font);
+}
+
+.mn-car-meta {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.mn-car-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
+.mn-stats {
+  display: grid;
+  gap: 6px;
+}
+
+.mn-stat {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  align-items: center;
+  gap: 10px;
+  font: 700 11px var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mn-stat-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.mn-stat-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff3b2f, #ffb000);
+  transition: width 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Title: drifting points of light. */
+.mn-particles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.mn-particles span {
+  position: absolute;
+  bottom: -10px;
+  border-radius: 50%;
+  background: rgba(255, 200, 150, 0.8);
+  box-shadow: 0 0 8px rgba(255, 170, 110, 0.9);
+  animation: mn-float linear infinite;
+}
+
+@keyframes mn-float {
+  from {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.9;
+  }
+  to {
+    transform: translate(40px, -105vh);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mn-particles {
+    display: none;
+  }
+}
+
+.mn-title-start {
+  width: min(320px, 80vw);
+}
+
+.logo.big {
+  white-space: nowrap;
+  font-size: clamp(34px, 7.5vw, 96px);
+}
+
+/* Short screens (landscape phones, small windows): tighter menus. */
+@media (max-height: 640px) {
+  .mn-tile {
+    min-height: 72px;
+    padding: 10px 14px;
+  }
+
+  .mn-tile.big {
+    min-height: 92px;
+  }
+
+  .mn-tile.small {
+    min-height: 48px;
+  }
+
+  .mn-car-row {
+    padding: 7px 12px;
+  }
+
+  .mn-car-text {
+    display: none;
+  }
+
+  .mn-car-title {
+    font-size: 20px;
+  }
+
+  .mn-car-info {
+    gap: 5px;
+    padding: 10px 12px;
+  }
+}

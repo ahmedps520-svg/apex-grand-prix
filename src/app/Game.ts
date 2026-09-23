@@ -1,6 +1,7 @@
 import { h, render } from 'preact';
 import * as THREE from 'three/webgpu';
 import { EngineAudio, type AudioFrame } from '../audio/EngineAudio';
+import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import { gripFactor, type Conditions, type Weather } from '../content/conditions';
 import { randomLivery, type Livery } from '../content/livery';
@@ -42,7 +43,7 @@ import { CARS, carById, type CarModel } from '../sim/vehicle/cars';
 import { TEST_MULE } from '../sim/vehicle/spec';
 import { HelpPanel } from '../ui/HelpPanel';
 import { Hud } from '../ui/Hud';
-import { FocusManager } from '../ui/menu/focus';
+import { FocusManager, type UiEvent } from '../ui/menu/focus';
 import { MenuRoot } from '../ui/menu/MenuRoot';
 import { PhotoScreen } from '../ui/menu/PhotoScreen';
 import { promptFamily } from '../ui/menu/prompts';
@@ -161,6 +162,8 @@ const CLASS_PACE: Record<string, number> = {
 const SHOWCASE_CARS = ['gt', 'formula', 'prototype', 'touring', 'street'];
 /** Seconds the backdrop race follows one car before the director picks another. */
 const ATTRACT_SHOT = 16;
+/** Field of view of the title screen's slow orbit around the hero car. */
+const HERO_FOV = 34;
 /** Engine sound level while the menus are open over the backdrop race. */
 const MENU_AUDIO = 0.35;
 
@@ -322,8 +325,19 @@ export class Game {
   private seasonRound = -1;
   /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
   private liverySeed = 1;
-  /** The livery editor is open: the camera circles the player's car wearing their livery. */
+  /** Title, car select and livery editor: the camera circles car 0 in the player's livery. */
   private showroom = false;
+  /** Car 0's view shows this model in the car select screen (null = the session's car). */
+  private previewModel: CarModel | null = null;
+  /** The backdrop race waits on the grid while the title screen is up. */
+  private gridHeld = false;
+  private heroTime = 0;
+  /** Screen changes nudge the camera (a short zoom), for a sense of motion. */
+  private lastTop: string | null = null;
+  private cameraKick = 0;
+  private readonly menuAudio = new MenuAudio();
+  /** The launch intro is playing: menu input waits for it. */
+  introActive = false;
   private finishedAt = -1;
   private bestLapSeen = Infinity;
   private records = loadRecords();
@@ -392,6 +406,12 @@ export class Game {
     this.menuHost = document.createElement('div');
     this.menuHost.className = 'menu-host';
     ui.appendChild(this.menuHost);
+    // Mouse and touch selections click too (keyboard and pad ones sound in handleMenuInput).
+    this.menuHost.addEventListener('click', (e) => {
+      if (e.detail > 0 && (e.target as HTMLElement).closest?.('[data-nav]')) {
+        this.menuAudio.play('select');
+      }
+    });
     this.photoHost = document.createElement('div');
     this.photoHost.className = 'photo-host';
     ui.appendChild(this.photoHost);
@@ -443,10 +463,12 @@ export class Game {
         this.pause();
         this.sim.pause();
         this.audio.suspend();
+        this.menuAudio.suspend();
         this.rumble.stop(this.input.activePad);
       } else {
         if (!this.paused) this.sim.resume();
         if (!this.paused) this.audio.resume();
+        this.menuAudio.resume();
       }
     });
     window.addEventListener('gamepadconnected', (event) => {
@@ -457,7 +479,10 @@ export class Game {
       this.toasts.show('Controller disconnected'),
     );
     // Browsers only start audio from a user gesture. (iPad only counts the end of a touch.)
-    const unlock = () => this.audio.unlock();
+    const unlock = () => {
+      this.audio.unlock();
+      this.menuAudio.unlock();
+    };
     for (const type of ['keydown', 'pointerdown', 'pointerup', 'touchend']) {
       window.addEventListener(type, unlock, { capture: true });
     }
@@ -825,6 +850,7 @@ export class Game {
     if (controls) this.applyHudVisibility();
     this.sim.tick(now, [controls ? input.driver : this.idleInput]);
 
+    this.menuAudio.setMusic(this.menus.open && !this.replay && this.menus.top !== 'pause');
     const duck = this.menus.open && !this.replay ? MENU_AUDIO : 1;
     if (duck !== this.audioDuck) {
       this.audioDuck = duck;
@@ -841,7 +867,8 @@ export class Game {
       }
       const player = this.states[0]!;
       this.cones?.update(dt, player);
-      const showroom = this.menus.top === 'livery';
+      const top = this.menus.top;
+      const showroom = top === 'livery' || top === 'carSelect' || top === 'title';
       if (showroom !== this.showroom) {
         this.showroom = showroom;
         this.repaint();
@@ -849,8 +876,11 @@ export class Game {
         this.camera.mode = showroom || !this.driving ? 'orbit' : this.settings.camera;
         this.tv?.cut();
       }
-      if (this.attract && !showroom) this.updateAttractCamera(dt, count, snapshot.race);
+      this.updateShowroom();
+      if (top === 'title' && this.attract) this.updateHeroCamera(dt, player);
+      else if (this.attract && !showroom) this.updateAttractCamera(dt, count, snapshot.race);
       else this.camera.update(dt, player);
+      this.applyCameraKick(dt, top);
       this.race = snapshot.race;
       if (this.replayRecorder && snapshot.race && !this.paused) {
         this.replayRecorder.record(snapshot.simTime, this.states);
@@ -902,6 +932,86 @@ export class Game {
       const s = this.states[i]!;
       scene.spray(s.pos.x, s.pos.y, s.pos.z, s.vel.x, s.vel.z);
     }
+  }
+
+  /** Title screen: the backdrop race waits on the grid while the camera slowly circles car 0. */
+  private updateHeroCamera(dt: number, car: CarRenderState): void {
+    this.heroTime += dt;
+    const t = this.heroTime;
+    const angle = 0.6 + t * 0.12;
+    const radius = 5.6 + Math.sin(t * 0.21) * 0.9;
+    const height = 0.9 + Math.sin(t * 0.13) * 0.35;
+    const cam = this.camera.camera;
+    cam.up.set(0, 1, 0);
+    cam.position.set(
+      car.pos.x + Math.cos(angle) * radius,
+      car.pos.y + height,
+      car.pos.z + Math.sin(angle) * radius,
+    );
+    cam.lookAt(car.pos.x, car.pos.y + 0.45, car.pos.z);
+    if (cam.fov !== HERO_FOV) {
+      cam.fov = HERO_FOV;
+      cam.updateProjectionMatrix();
+    }
+  }
+
+  /**
+   * Holds the backdrop race on the grid while the title is up, and in car select swaps car 0's
+   * body for the car in focus, so the backdrop previews it.
+   */
+  private updateShowroom(): void {
+    const hold = this.attract && this.menus.top === 'title';
+    if (hold !== this.gridHeld) {
+      this.gridHeld = hold;
+      this.sim.command({ kind: 'holdStart', hold });
+    }
+    const session = this.session;
+    if (!session) return;
+    const preview =
+      this.menus.top === 'carSelect'
+        ? carById(this.menus.previewCar.value || this.menus.setup.value.carId)
+        : null;
+    if ((preview?.id ?? null) === (this.previewModel?.id ?? null)) return;
+    this.previewModel = preview;
+    const own = carById(session.fieldCars?.[0] ?? session.carId);
+    this.buildCars(this.carModels.map((m, i) => (i === 0 ? (preview ?? own) : m)));
+  }
+
+  /** A short zoom when the menu screen changes: the backdrop moves with the menus. */
+  private applyCameraKick(dt: number, top: string | null): void {
+    if (top !== this.lastTop) {
+      if (this.lastTop !== null && top !== null) this.cameraKick = 1;
+      this.lastTop = top;
+    }
+    if (this.cameraKick <= 0) return;
+    const cam = this.camera.camera;
+    const k = this.cameraKick;
+    cam.fov *= 1 - 0.05 * k * k;
+    cam.updateProjectionMatrix();
+    this.cameraKick = Math.max(k - dt * 2.5, 0);
+  }
+
+  /** Sound (and a light rumble on select) for a menu event the focus engine handled. */
+  private menuFeedback(event: UiEvent): void {
+    if (event === 'confirm') {
+      this.menuAudio.play('select');
+      this.menuPulse();
+    } else if (event === 'tabPrev' || event === 'tabNext') this.menuAudio.play('tab');
+    else if (event !== 'pause' && event !== 'back') this.menuAudio.play('move');
+  }
+
+  /** A short, light rumble for menu selections (when rumble is on). */
+  private menuPulse(): void {
+    const pad = this.input.activePad as (Gamepad & { vibrationActuator?: unknown }) | null;
+    const rumble = this.settings.rumble;
+    const actuator = pad?.vibrationActuator as
+      | { playEffect?: (type: string, params: Record<string, number>) => Promise<unknown> }
+      | undefined;
+    if (!rumble.enabled || !actuator?.playEffect) return;
+    const s = rumble.strength;
+    void actuator
+      .playEffect('dual-rumble', { duration: 45, strongMagnitude: 0.1 * s, weakMagnitude: 0.5 * s })
+      .catch(() => undefined);
   }
 
   /** Backdrop race: the TV cameras follow one car, then another. */
@@ -1399,16 +1509,25 @@ export class Game {
       }
       return;
     }
+    if (this.introActive) return;
     for (const { event, source } of this.input.ui) {
       if (top === 'title') {
         this.menus.set(['main']);
+        this.menuAudio.play('start');
+        this.menuPulse();
         break;
       }
       if (top === 'tester' && source === 'pad' && event !== 'up' && event !== 'down') continue;
-      if (this.focus.handle(event)) continue;
+      if (this.focus.handle(event)) {
+        this.menuFeedback(event);
+        continue;
+      }
       if (event === 'back' || event === 'pause') {
         if (top === 'pause') this.resume();
-        else if (top !== 'results' && top !== 'main') this.menus.pop();
+        else if (top !== 'results' && top !== 'main') {
+          this.menus.pop();
+          this.menuAudio.play('back');
+        }
       }
     }
     this.focus.sync();
@@ -1579,6 +1698,7 @@ export class Game {
     this.input.wheelProfiles = s.wheels;
     this.hud.setUnits(s.units);
     this.audio.setVolume(s.audio.volume * this.audioDuck);
+    this.menuAudio.setLevels(s.audio.music, s.audio.sfx, s.audio.muted);
     this.audio.setMuted(s.audio.muted);
     this.rumble.settings = s.rumble;
     s.paint = s.livery.primary;

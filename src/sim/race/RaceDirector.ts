@@ -168,9 +168,19 @@ export class RaceDirector {
   }
 
   /** Call every sim step after the cars moved. */
+  /** While true, the cars wait on the grid and the lights don't start (the title screen). */
+  holdGrid = false;
+
   update(dt: number, cars: readonly Car[]): void {
     const status = this.status;
     if (status.phase === 'grid' || status.phase === 'countdown') {
+      if (this.holdGrid) {
+        this.countdown = 0;
+        status.phase = 'grid';
+        status.lights = 0;
+        this.project(cars, false);
+        return;
+      }
       this.countdown += dt;
       const lit = this.countdown - GRID_TIME;
       if (lit < 0) {

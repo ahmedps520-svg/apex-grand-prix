@@ -112,7 +112,9 @@ export type SimCommand =
   | { kind: 'resetCar'; car: number }
   | { kind: 'teleport'; car: number; to: SpawnPoint }
   | { kind: 'setAids'; car: number; aids: DriverAids }
-  | { kind: 'restart' };
+  | { kind: 'restart' }
+  /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
+  | { kind: 'holdStart'; hold: boolean };
 
 export type MainToWorker =
   | { type: 'init'; session: SessionConfig }
