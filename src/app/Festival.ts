@@ -1,4 +1,5 @@
 import { MEDALS, type EventKind, type FestivalEvent } from '../content/city/events';
+import { racerName } from '../content/drivers';
 import type { CarRenderState } from '../render/interpolate';
 import type { RoamRaceStatus } from '../shared/protocol';
 
@@ -16,11 +17,20 @@ export type Medal = 'gold' | 'silver' | 'bronze' | null;
 export interface FestivalNotice {
   event: FestivalEvent;
   text: string;
-  /** A finished race's medal, when it is one, and the finishing position. */
+  /** A finished race's medal, when it is one, the finishing position and the field. */
   medal?: Medal;
   position?: number;
+  results?: Standing[];
   /** A new best. */
   best: boolean;
+}
+
+/** A car's place in a race: its time once home, else its gap to the player in metres. */
+export interface Standing {
+  position: number;
+  name: string;
+  you: boolean;
+  gap: string;
 }
 
 /** What the HUD shows: the event under way, or the nearest one to head for. */
@@ -32,6 +42,8 @@ export interface FestivalView {
     detail: string;
     /** A race's countdown is showing. */
     countdown?: boolean;
+    /** A race's field in order. */
+    standings?: Standing[];
   } | null;
   hint: { kind: EventKind; name: string; distance: number } | null;
 }
@@ -78,6 +90,7 @@ export class Festival {
   private started = false;
   /** A race the sim still reports after this finished or abandoned it (until it is reset). */
   private ignoreId = '';
+  private race: RoamRaceStatus | null = null;
 
   constructor(
     readonly events: readonly FestivalEvent[],
@@ -127,6 +140,7 @@ export class Festival {
       this.prevZ = z;
     }
     const speed = Math.abs(player.speed);
+    this.race = race;
     // A race starts in the simulation (the grid, the countdown): follow it.
     if (!race || race.phase === 'grid' || race.phase === 'countdown') this.ignoreId = '';
     if (
@@ -227,6 +241,7 @@ export class Festival {
           best,
           medal,
           race.position,
+          this.standings(),
         );
         return;
       }
@@ -317,6 +332,7 @@ export class Festival {
                   a.time < 1.5
                     ? 'GO!'
                     : `Checkpoint ${a.next} / ${a.event.checkpoints.length - 1} · ${Math.round(Math.hypot(cp.x - x, cp.z - z))} m`,
+                standings: this.standings(),
               };
       } else if (a.kind === 'drift') {
         view.active = {
@@ -346,6 +362,37 @@ export class Festival {
       }
     }
     view.hint = nearest ? { kind: nearest.kind, name: nearest.name, distance: nearestD } : null;
+  }
+
+  /** The field in order: home first by time, then by progress; gaps relative to the player. */
+  private standings(): Standing[] {
+    const race = this.race;
+    if (!race) return [];
+    const rows = [
+      { name: 'You', you: true, progress: race.progress, time: race.finished },
+      ...race.rivals.map((r, i) => ({
+        name: racerName(i),
+        you: false,
+        progress: r.progress,
+        time: r.time,
+      })),
+    ];
+    rows.sort((p, q) => {
+      if (p.time >= 0 && q.time >= 0) return p.time - q.time;
+      if (p.time >= 0 || q.time >= 0) return p.time >= 0 ? -1 : 1;
+      return q.progress - p.progress;
+    });
+    return rows.map((r, i) => ({
+      position: i + 1,
+      name: r.name,
+      you: r.you,
+      gap:
+        r.time >= 0
+          ? formatTime(r.time)
+          : r.you
+            ? ''
+            : `${r.progress >= race.progress ? '+' : '−'}${Math.round(Math.abs(r.progress - race.progress))} m`,
+    }));
   }
 
   /** Whether the car crossed an event's line this frame (either way, within its width). */
@@ -411,6 +458,7 @@ export class Festival {
     best: boolean,
     medal: Medal = null,
     position?: number,
+    results?: Standing[],
   ): void {
     this.notices.push({
       event,
@@ -418,6 +466,7 @@ export class Festival {
       best,
       medal,
       position,
+      results,
     });
   }
 }

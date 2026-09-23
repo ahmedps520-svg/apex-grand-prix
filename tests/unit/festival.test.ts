@@ -58,6 +58,7 @@ describe("the festival's rules", () => {
       id: race.id,
       phase: 'countdown',
       countdown: 2.4,
+      placed: true,
       time: 0,
       count: 4,
       position: 4,
@@ -70,15 +71,24 @@ describe("the festival's rules", () => {
     expect(fest.view.active?.countdown).toBe(true);
     expect(fest.view.active?.line).toBe('3');
     expect(fest.view.active?.detail).toContain('3 rivals');
-    // Racing: through the checkpoints in second place.
+    // Racing: through the checkpoints in second place, one rival ahead and two behind.
     status.phase = 'racing';
     status.countdown = 0;
     status.position = 2;
+    status.rivals = [
+      { slot: 9, progress: 0, time: -1 },
+      { slot: 10, progress: 0, time: -1 },
+      { slot: 11, progress: 0, time: -1 },
+    ];
     let t = 0;
     for (let i = 1; i < race.checkpoints.length; i++) {
       const cp = race.checkpoints[i]!;
       t += 5;
       status.time = t;
+      status.progress = 200 * i;
+      status.rivals[0]!.progress = 200 * i + 48;
+      status.rivals[1]!.progress = 200 * i - 30;
+      status.rivals[2]!.progress = 200 * i - 120;
       p.speed = 20;
       p.pos.x = cp.x;
       p.pos.z = cp.z;
@@ -89,16 +99,33 @@ describe("the festival's rules", () => {
     expect(fest.view.active?.line).toContain('P2');
     expect(fest.view.active?.line).toContain(formatTime(t));
     expect(fest.nextCheckpoint()).toEqual(race.checkpoints.at(-1));
-    // The flag (and the position) come from the sim.
+    // The field in order, with the gaps to the player.
+    const standings = fest.view.active?.standings ?? [];
+    expect(standings.map((s) => s.position)).toEqual([1, 2, 3, 4]);
+    expect(standings[0]!.gap).toBe('+48 m');
+    expect(standings[1]!.you).toBe(true);
+    expect(standings[1]!.name).toBe('You');
+    expect(standings[2]!.gap).toBe('−30 m');
+    expect(standings[3]!.gap).toBe('−120 m');
+    expect(new Set(standings.map((s) => s.name)).size).toBe(4);
+    // The flag (and the position) come from the sim: the leader is home, the rest behind.
     status.finished = t;
-    status.position = 1;
+    status.position = 2;
+    status.rivals[0]!.time = t - 3;
     fest.update(0.05, p, status);
     expect(fest.view.active).toBeNull();
     const notice = fest.notices.at(-1)!;
     expect(notice.event.id).toBe('race-avenue');
     expect(notice.best).toBe(true);
-    expect(notice.position).toBe(1);
-    expect(notice.text).toContain('P1 of 4');
+    expect(notice.position).toBe(2);
+    expect(notice.text).toContain('P2 of 4');
+    expect(notice.results?.map((r) => r.gap)).toEqual([
+      formatTime(t - 3),
+      formatTime(t),
+      '−30 m',
+      '−120 m',
+    ]);
+    expect(notice.results?.[1]?.you).toBe(true);
     expect(notice.text).toContain(formatTime(t));
     expect(fest.records['race-avenue']).toBe(t);
     expect(notice.medal).toBe(medalFor(race, t));
@@ -121,6 +148,7 @@ describe("the festival's rules", () => {
       id: race.id,
       phase: 'racing',
       countdown: 0,
+      placed: true,
       time: 1,
       count: 4,
       position: 4,

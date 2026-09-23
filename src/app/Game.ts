@@ -4,6 +4,7 @@ import { EngineAudio, type AudioFrame } from '../audio/EngineAudio';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import { gripFactor, type Conditions, type Weather } from '../content/conditions';
+import { rivalName } from '../content/drivers';
 import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
 import { TRACKS, trackById } from '../content/tracks';
@@ -110,6 +111,7 @@ import {
 } from './records';
 import { Festival } from './Festival';
 import { EventHud } from '../ui/EventHud';
+import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
 import { festivalEvents, type EventKind } from '../content/city/events';
 import type { FestivalInfo } from '../ui/menu/store';
@@ -164,6 +166,7 @@ export interface DebugApi {
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
     phase: string;
+    placed: boolean;
     position: number;
     count: number;
     progress: number;
@@ -225,19 +228,6 @@ const STATS_INTERVAL = 0.5;
 const SHIFT_LIGHT_RANGE = 1900;
 /** Rival colours: every paint the player can pick, plus a few more. */
 const AI_PAINTS = [...PAINTS.map((p) => p.hex), 0x2a9d4a, 0x6d4c41, 0x8e1b1b, 0x4a6fa5];
-const AI_NAMES = [
-  'K. Arvidsen',
-  'M. Okonkwo',
-  'L. Castellane',
-  'T. Varga',
-  'R. Holloway',
-  'S. Moravec',
-  'D. Quintero',
-  'J. Lindqvist',
-  'A. Ferreira',
-  'N. Tanabe',
-  'E. Brandt',
-];
 const AID_OPTIONS: ReadonlyArray<{ value: AidLevel; text: string }> = [
   { value: 'off', text: 'Off' },
   { value: 'low', text: 'Low' },
@@ -497,6 +487,9 @@ export class Game {
   /** Free roam: the festival's events and rules, their HUD, their furniture and their bests. */
   private festival: Festival | null = null;
   private readonly eventHud: EventHud;
+  private readonly raceCard: RaceCard;
+  /** Black over the screen for a moment (the car being put on a race's grid). */
+  private readonly fade: HTMLElement;
   private festivalScene: FestivalScene | null = null;
   private festivalRecords = loadFestivalRecords();
   private festivalMarkers: MinimapMarker[] = [];
@@ -537,6 +530,9 @@ export class Game {
     this.hud = new Hud(ui, { upshiftRpm: upshift, shiftLightsFrom: upshift - SHIFT_LIGHT_RANGE });
     this.skillHud = new SkillHud(ui);
     this.eventHud = new EventHud(ui);
+    this.raceCard = new RaceCard(ui);
+    this.fade = el('div', 'fade');
+    ui.appendChild(this.fade);
     this.raceHud = new RaceHud(ui);
     this.radioBox = new RadioBox(ui);
     this.radio.onMessage = (text) => this.radioBox.show(text);
@@ -829,6 +825,8 @@ export class Game {
         : null;
     this.roamRace = null;
     this.eventHud.reset();
+    this.raceCard.hide();
+    this.fade.classList.remove('on');
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
     this.menus.festival.value = roam ? this.festivalInfo() : null;
@@ -1099,6 +1097,7 @@ export class Game {
     this.hud.setVisible(driving);
     this.skillHud.setVisible(driving && this.skill !== null);
     this.eventHud.setVisible(driving && this.festival !== null);
+    this.raceCard.setVisible(driving && this.festival !== null);
     const mode = this.session?.mode;
     this.raceHud.setVisible(driving && mode !== 'free' && mode !== 'roam' && !this.school);
     this.minimap?.setVisible(driving);
@@ -1207,7 +1206,11 @@ export class Game {
           this.festival.update(dt, player, snapshot.roamRace ?? null);
           this.eventHud.update(this.festival.view);
           for (const n of this.festival.notices.splice(0)) {
-            this.toasts.show(n.text, { timeout: 6 });
+            if (n.results) {
+              this.raceCard.show(n.event.name, n.text.replace(`${n.event.name}: `, ''), n.results);
+            } else {
+              this.toasts.show(n.text, { timeout: 6 });
+            }
             if (n.position === 1 && this.skill) this.skill.award('race', 1000, 'WIN');
             else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
           }
@@ -1275,17 +1278,25 @@ export class Game {
         { timeout: 5 },
       );
     } else if (phase === 'countdown' && before !== 'countdown') {
-      this.camera.reset();
+      // Black while the sim puts the car on the grid; back once it is there.
+      this.fade.classList.add('on');
+      this.raceCard.hide();
       this.menuAudio.play('move');
     } else if (phase === 'countdown' && status && previous) {
+      if (status.placed && !previous.placed) {
+        this.camera.reset();
+        this.fade.classList.remove('on');
+      }
       if (Math.ceil(status.countdown) !== Math.ceil(previous.countdown))
         this.menuAudio.play('move');
     } else if (phase === 'racing' && before === 'countdown') {
       this.menuAudio.play('start');
     }
+    if (phase !== 'countdown') this.fade.classList.remove('on');
     this.debug.roamRace = status
       ? {
           phase: status.phase,
+          placed: status.placed,
           position: status.position,
           count: status.count,
           progress: Math.round(status.progress),
@@ -2168,7 +2179,7 @@ export class Game {
     const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
     const name = season?.names[car];
     if (name) return name;
-    return car === 0 ? 'You' : (AI_NAMES[(car - 1) % AI_NAMES.length] ?? `Driver ${car}`);
+    return rivalName(car);
   }
 
   /** Championship points for the race just finished (finishers only). */
@@ -2201,7 +2212,7 @@ export class Game {
     const names = ['You'];
     const paints = [this.settings.paint];
     for (let car = 1; car < field; car++) {
-      names.push(AI_NAMES[(car - 1) % AI_NAMES.length] ?? `Driver ${car}`);
+      names.push(rivalName(car));
       paints.push(rivals[(car - 1) % rivals.length] ?? 0x9e9e9e);
     }
     const season: Championship = {
@@ -2754,6 +2765,7 @@ export class Game {
     }
     if (!spot) return;
     this.festival?.abandon();
+    this.raceCard.hide();
     this.sim.command({ kind: 'place', car: 0, x: spot.x, z: spot.z, yaw: spot.yaw, y: spot.y });
     this.sim.command({ kind: 'repair', car: 0 });
     this.cars[0]?.repairView();
@@ -2773,6 +2785,7 @@ export class Game {
     // Free roam: the quick repair comes with the reset (and a race under way is off).
     if (this.session?.mode === 'roam') {
       this.festival?.abandon();
+      this.raceCard.hide();
       this.sim.command({ kind: 'repair', car: 0 });
       this.cars[0]?.repairView();
       this.toasts.show('Repaired and reset.', { timeout: 2 });

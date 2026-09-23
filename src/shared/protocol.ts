@@ -203,6 +203,8 @@ export interface RoamRaceStatus {
   phase: 'grid' | 'countdown' | 'racing' | 'done';
   /** Seconds to the start while counting down. */
   countdown: number;
+  /** The player has been put on its grid slot (false while the screen covers the move). */
+  placed: boolean;
   /** Seconds since the start. */
   time: number;
   /** Cars in the race, the player included, and the player's position among them. */

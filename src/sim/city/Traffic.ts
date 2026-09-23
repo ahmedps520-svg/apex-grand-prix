@@ -47,6 +47,10 @@ const HARD_BRAKE = 4.5;
 /** Seconds a car waits at a stop line, and shows its hazards after a crash. */
 const STOP_WAIT = 0.9;
 const HAZARD_TIME = 12;
+/** A siren this close: slow to this (m/s) and ease this far over to the right. */
+const SIREN_RANGE = 70;
+const PULL_OVER_SPEED = 2;
+const PULL_OVER_OFFSET = 1.7;
 
 export type VehicleMode = 'lane' | 'free' | 'block' | 'race';
 
@@ -85,6 +89,8 @@ export interface Vehicle {
   brake: number;
   indicator: -1 | 0 | 1;
   hazards: number;
+  /** Pulled over for a siren, 0 … 1 (its sideways offset and its brake). */
+  pullOver: number;
   /** Seconds stood at a stop line. */
   waited: number;
   /** Sideways shove after a crash, decaying. */
@@ -168,6 +174,7 @@ export class Traffic {
         brake: 0,
         indicator: 0,
         hazards: 0,
+        pullOver: 0,
         waited: 0,
         shoveX: 0,
         shoveZ: 0,
@@ -334,6 +341,13 @@ export class Traffic {
         );
     }
 
+    // A siren close by: slow right down and ease over to the right until it has gone.
+    if (!car.police && this.sirenNear(car)) {
+      target = Math.min(target, PULL_OVER_SPEED);
+      car.pullOver = Math.min(car.pullOver + dt * 1.2, 1);
+    } else if (car.pullOver > 0) {
+      car.pullOver = Math.max(car.pullOver - dt * 0.8, 0);
+    }
     // The nearest thing ahead: a car on this link or the next, the player, or a stop line.
     let gap = Infinity;
     let leadSpeed = 0;
@@ -403,6 +417,17 @@ export class Traffic {
           ? car.next.turn
           : 0;
     car.indicator = turning;
+  }
+
+  /** A police car with its siren on within reach (ahead or behind). */
+  private sirenNear(car: Vehicle): boolean {
+    for (const unit of this.vehicles) {
+      if (!unit.police || !unit.siren || !unit.active) continue;
+      if (Math.abs(unit.x - car.x) > SIREN_RANGE || Math.abs(unit.z - car.z) > SIREN_RANGE)
+        continue;
+      if (Math.hypot(unit.x - car.x, unit.z - car.z) < SIREN_RANGE) return true;
+    }
+    return false;
   }
 
   /** The player as a leader when it is in this car's lane ahead. */
@@ -578,6 +603,7 @@ export class Traffic {
       car.shoveZ = 0;
       car.dentFront = 0;
       car.dentRear = 0;
+      car.pullOver = 0;
       car.yaw = Math.atan2(-point.tx, -point.tz);
       car.heading = car.yaw;
       car.steer = 0;
@@ -621,8 +647,10 @@ export class Traffic {
     const wanted = Math.max(-1, Math.min(1, (rate * 2.6) / Math.max(car.v, 3)));
     car.steer += (wanted - car.steer) * Math.min(dt * 12, 1);
     car.yaw = yaw;
-    car.x = point.x + car.shoveX;
-    car.z = point.z + car.shoveZ;
+    // Over to the right of the lane when pulled over for a siren.
+    const over = car.pullOver * PULL_OVER_OFFSET;
+    car.x = point.x + car.shoveX - point.tz * over;
+    car.z = point.z + car.shoveZ + point.tx * over;
     car.y = point.y + car.spec.cogHeight;
     car.spin += (car.v * dt) / car.spec.front.wheelRadius;
   }

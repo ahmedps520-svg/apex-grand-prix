@@ -22,7 +22,9 @@ const GRID_RANGE = 160;
 /** The last row of the grid this far past the line (clear of a car crossing it); rows this far apart. */
 const GRID_FIRST = 12;
 const GRID_ROW = 7;
-const COUNTDOWN = 3.5;
+const COUNTDOWN = 3;
+/** The player is put on its slot this long after crossing the line (the screen fades first). */
+const PLACE_DELAY = 0.35;
 /** Kinematic cornering: lateral acceleration, m/s²; straight-line acceleration and braking. */
 const A_LAT = 7;
 const BRAKE = 8.5;
@@ -77,6 +79,7 @@ export class Racers {
     id: '',
     phase: 'grid',
     countdown: 0,
+    placed: false,
     time: 0,
     count: 1,
     position: 1,
@@ -92,6 +95,8 @@ export class Racers {
   private phase: 'idle' | 'grid' | 'countdown' | 'racing' | 'done' = 'idle';
   private timer = 0;
   private countdown = 0;
+  private placeIn = -1;
+  private placed = false;
   private time = 0;
   private doneFor = 0;
   private playerProgress = 0;
@@ -134,6 +139,10 @@ export class Racers {
   step(dt: number, player: Car): void {
     this.timer += dt;
     if (this.phase === 'countdown') {
+      if (this.placeIn > 0) {
+        this.placeIn -= dt;
+        if (this.placeIn <= 0) this.place(player);
+      }
       this.countdown -= dt;
       if (this.countdown <= 0) {
         this.phase = 'racing';
@@ -279,8 +288,23 @@ export class Racers {
     });
   }
 
-  /** The player crossed the line: onto its grid slot, held, and the countdown starts. */
+  /**
+   * The player crossed the line: held where it is while the screen fades, then onto its grid
+   * slot, and the countdown starts once it is there.
+   */
   private lineUp(player: Car): void {
+    player.holdForStart = true;
+    this.phase = 'countdown';
+    this.countdown = COUNTDOWN + PLACE_DELAY;
+    this.placeIn = PLACE_DELAY;
+    this.placed = false;
+    this.holding = true;
+    this.time = 0;
+    this.playerProgress = GRID_FIRST;
+  }
+
+  /** Puts the player on its slot: the last row, the column after the rivals'. */
+  private place(player: Car): void {
     const route = this.route!;
     const n = this.racers.length;
     const columns = route.columns.length;
@@ -294,11 +318,8 @@ export class Racers {
       yaw: Math.atan2(-point.tx, -point.tz),
       y: point.y + 0.5,
     });
-    this.phase = 'countdown';
-    this.countdown = COUNTDOWN;
-    this.holding = true;
-    this.time = 0;
-    this.playerProgress = GRID_FIRST;
+    this.placed = true;
+    this.placeIn = -1;
   }
 
   private standDown(): void {
@@ -318,6 +339,8 @@ export class Racers {
     this.route = null;
     this.holding = false;
     this.countdown = 0;
+    this.placeIn = -1;
+    this.placed = false;
     this.time = 0;
     this.playerFinished = -1;
   }
@@ -563,11 +586,14 @@ export class Racers {
       st.finished = -1;
       st.time = 0;
       st.countdown = 0;
+      st.placed = false;
       return;
     }
     st.id = route.event.id;
     st.phase = this.phase;
-    st.countdown = this.countdown;
+    // The count shown starts once the car is on the grid.
+    st.countdown = Math.min(this.countdown, COUNTDOWN);
+    st.placed = this.placed;
     st.time = this.time;
     st.count = this.racers.length + 1;
     st.progress = this.playerProgress;

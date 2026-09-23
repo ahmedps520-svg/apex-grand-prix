@@ -1,4 +1,4 @@
-import type { FestivalView } from '../app/Festival';
+import type { FestivalView, Standing } from '../app/Festival';
 import type { EventKind } from '../content/city/events';
 import { el, setText } from './dom';
 
@@ -16,12 +16,14 @@ export class EventHud {
   private readonly name = el('div', 'fest-name');
   private readonly line = el('div', 'fest-line');
   private readonly detail = el('div', 'fest-detail');
+  private readonly standings = el('div', 'fest-standings');
   private shown = '';
+  private shownRows = '';
   private visible = true;
   private active = false;
 
   constructor(parent: HTMLElement) {
-    this.root.append(this.kind, this.name, this.line, this.detail);
+    this.root.append(this.kind, this.name, this.line, this.detail, this.standings);
     this.root.hidden = true;
     parent.appendChild(this.root);
   }
@@ -33,6 +35,8 @@ export class EventHud {
 
   reset(): void {
     this.shown = '';
+    this.shownRows = '';
+    this.standings.replaceChildren();
     this.active = false;
     this.root.hidden = true;
   }
@@ -45,6 +49,7 @@ export class EventHud {
       : h
         ? `h:${h.kind}:${h.name}:${Math.round(h.distance / 10)}`
         : '';
+    this.updateStandings(a?.standings ?? []);
     if (key === this.shown) return;
     this.shown = key;
     this.active = key !== '';
@@ -61,6 +66,24 @@ export class EventHud {
       setText(this.name, h.name);
       setText(this.line, `${Math.round(h.distance)} m`);
       setText(this.detail, 'ahead');
+    }
+  }
+
+  /** The race's field, a row each, rebuilt only when something in it changed. */
+  private updateStandings(rows: ReadonlyArray<Standing>): void {
+    const key = rows.map((r) => `${r.position}|${r.name}|${r.you ? 1 : 0}|${r.gap}`).join(';');
+    if (key === this.shownRows) return;
+    this.shownRows = key;
+    this.standings.replaceChildren();
+    this.standings.hidden = rows.length === 0;
+    for (const r of rows) {
+      const row = el('div', `fest-row${r.you ? ' you' : ''}`);
+      row.append(
+        el('span', 'fest-pos', `P${r.position}`),
+        el('span', 'fest-driver', r.name),
+        el('span', 'fest-gap', r.gap),
+      );
+      this.standings.appendChild(row);
     }
   }
 }
