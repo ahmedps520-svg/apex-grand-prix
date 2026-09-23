@@ -23,6 +23,7 @@ import { festivalEvents, rampOf } from '../content/city/events';
 import { cityMap } from '../content/city/map';
 import { CitySurface } from './city/CitySurface';
 import { Police } from './city/Police';
+import { Racers } from './city/Racers';
 import { Traffic } from './city/Traffic';
 import { Car, type Spawn } from './vehicle/car';
 import { carById, peakPower, topSpeed } from './vehicle/cars';
@@ -70,6 +71,8 @@ export class World {
   traffic: Traffic | null = null;
   /** Free roam: the police, driving some of the traffic's slots. */
   police: Police | null = null;
+  /** Free roam: the street racers for the festival's races (slots after the police). */
+  racers: Racers | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
   private readonly hints: number[] = [];
@@ -108,15 +111,18 @@ export class World {
       world.cars[0]!.enableSoftBody();
       const time = config.conditions?.time;
       const police = config.police ?? 0;
-      if ((config.traffic ?? 0) + police > 0) {
+      const racers = config.racers ?? 0;
+      if ((config.traffic ?? 0) + police + racers > 0) {
         world.traffic = new Traffic(
           surface.map,
           config.traffic ?? 0,
           police,
           config.seed,
           time === 'night' || time === 'dusk',
+          racers,
         );
         if (police > 0) world.police = new Police(world.traffic, surface.map);
+        if (racers > 0) world.racers = new Racers(world.traffic, surface.map);
       }
       return world;
     }
@@ -223,7 +229,8 @@ export class World {
           ai.needsReset = false;
         }
       }
-      car.holdForStart = director?.holding(i) ?? false;
+      car.holdForStart =
+        (director?.holding(i) ?? false) || (i === 0 && this.racers?.holding === true);
       car.step(dt, this.surface);
       if (!car.isFinite()) {
         // Never let invalid numbers reach the renderer. This is a bug if it ever happens.
@@ -234,6 +241,7 @@ export class World {
     if (cars.length > 1) resolveCarContacts(cars);
     this.traffic?.step(dt, cars[0]!);
     this.police?.step(dt, cars[0]!);
+    this.racers?.step(dt, cars[0]!);
     director?.update(dt, cars);
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {

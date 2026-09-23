@@ -35,6 +35,20 @@ export function policeSlotsFor(chunks: number): number {
   return chunks <= 2 ? 3 : chunks === 3 ? 4 : 5;
 }
 
+/** Street racers for the festival's races: the street and touring classes, in loud paints. */
+export const RACER_MODELS: readonly CarModel[] = CARS.filter(
+  (c) => c.className === 'Street' || c.className === 'Touring',
+);
+
+export function racerModel(index: number): CarModel {
+  return RACER_MODELS[(index * 3) % RACER_MODELS.length] ?? CARS[0]!;
+}
+
+/** Racers for a detail level (rivals in a festival race). */
+export function racerSlotsFor(chunks: number): number {
+  return chunks <= 2 ? 3 : chunks === 3 ? 4 : 5;
+}
+
 /** The police drive the first sedan of the fleet. */
 export function policeModel(): CarModel {
   return TRAFFIC_MODELS.find((m) => m.className === 'Touring') ?? TRAFFIC_MODELS[0] ?? CARS[0]!;

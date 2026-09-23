@@ -41,7 +41,7 @@ export class EventHud {
     const a = view.active;
     const h = view.hint;
     const key = a
-      ? `a:${a.kind}:${a.name}:${a.line}:${a.detail}`
+      ? `a:${a.kind}:${a.name}:${a.line}:${a.detail}:${a.countdown ? 1 : 0}`
       : h
         ? `h:${h.kind}:${h.name}:${Math.round(h.distance / 10)}`
         : '';
@@ -50,7 +50,7 @@ export class EventHud {
     this.active = key !== '';
     this.root.hidden = !(this.visible && this.active);
     if (!this.active) return;
-    this.root.className = `fest ${a ? 'active' : 'hint'} ${a ? a.kind : h!.kind}`;
+    this.root.className = `fest ${a ? 'active' : 'hint'} ${a ? a.kind : h!.kind}${a?.countdown ? ' countdown' : ''}`;
     if (a) {
       setText(this.kind, KIND_LABEL[a.kind]);
       setText(this.name, a.name);

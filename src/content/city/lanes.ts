@@ -84,7 +84,7 @@ export function signalState(
 }
 
 /** Lane centre offsets from the road's centre line, rightmost first, by road kind. */
-function laneOffsets(kind: RoadKind, lanes: number): number[] {
+export function laneOffsets(kind: RoadKind, lanes: number): number[] {
   switch (kind) {
     case 'avenue':
       return [5.4, 1.8].slice(0, lanes);

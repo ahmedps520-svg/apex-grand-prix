@@ -125,6 +125,8 @@ export interface SessionConfig {
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
   police?: number;
+  /** Free roam: street racers for the festival's races (slots after the police). */
+  racers?: number;
   opponents: number;
   laps: number;
   difficulty: Difficulty;
@@ -155,6 +157,8 @@ export type SimCommand =
   | { kind: 'place'; car: number; x: number; z: number; yaw: number; y?: number }
   /** Free roam: a festival event is on (or near): the police let the speed go. */
   | { kind: 'sanction'; on: boolean }
+  /** Free roam: the race under way is off (abandoned or reset): the rivals stand down. */
+  | { kind: 'endRace' }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 
@@ -184,6 +188,31 @@ export interface SnapshotMessage {
   race: RaceStatus | null;
   /** Free roam: the police's view of the player (null elsewhere). */
   police?: PoliceStatus | null;
+  /** Free roam: the festival race with rivals under way (null when none). */
+  roamRace?: RoamRaceStatus | null;
+}
+
+/**
+ * Free roam: a festival race against rivals. The simulation forms the grid, runs the countdown
+ * and drives the rivals; the main thread keeps the checkpoints, the records and the notices.
+ */
+export interface RoamRaceStatus {
+  /** The race event. */
+  id: string;
+  /** Lined up at the start, counting down, under way, or over (the rivals coasting in). */
+  phase: 'grid' | 'countdown' | 'racing' | 'done';
+  /** Seconds to the start while counting down. */
+  countdown: number;
+  /** Seconds since the start. */
+  time: number;
+  /** Cars in the race, the player included, and the player's position among them. */
+  count: number;
+  position: number;
+  /** The player's distance along the route, m, and its time once it has finished (else -1). */
+  progress: number;
+  finished: number;
+  /** Each rival: its traffic slot, its progress along the route and its time (-1 while racing). */
+  rivals: Array<{ slot: number; progress: number; time: number }>;
 }
 
 /** What the police make of the player, for the HUD. */

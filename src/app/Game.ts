@@ -24,6 +24,8 @@ import {
   POLICE_PAINT,
   policeModel,
   policeSlotsFor,
+  racerModel,
+  racerSlotsFor,
   trafficModel,
   trafficPaint,
   trafficSlotsFor,
@@ -53,6 +55,7 @@ import {
   neutralInput,
   type AidLevel,
   type PoliceStatus,
+  type RoamRaceStatus,
   type SessionConfig,
   type RoamStart,
   type SpawnPoint,
@@ -158,6 +161,14 @@ export interface DebugApi {
    * far the drawn body has moved with it.
    */
   soft: { crush: number; parts: number; moved: number } | null;
+  /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
+  roamRace: {
+    phase: string;
+    position: number;
+    count: number;
+    progress: number;
+    rivals: number[];
+  } | null;
   errors: string[];
 }
 
@@ -477,6 +488,8 @@ export class Game {
   private frames = 0;
   /** Free roam: what the police make of the player, and their spike strips on the road. */
   private policeStatus: PoliceStatus | null = null;
+  /** Free roam: the festival race with rivals under way, as the sim last reported it. */
+  private roamRace: RoamRaceStatus | null = null;
   private readonly strips = new SpikeStrips();
   /** Arcade: the skill points of the session, and their HUD. */
   private skill: Skill | null = null;
@@ -588,6 +601,7 @@ export class Game {
       race: null,
       police: null,
       soft: null,
+      roamRace: null,
       errors: [],
     };
     window.__apex = this.debug;
@@ -699,8 +713,10 @@ export class Game {
     const detail =
       this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
     const traffic = setup.mode === 'roam' && !attract ? trafficSlotsFor(detail.chunks) : 0;
-    // The police take slots after the traffic: the same body, white paint and a light bar.
+    // The police take slots after the traffic: the same body, white paint and a light bar;
+    // the festival's street racers the slots after them.
     const police = traffic > 0 ? policeSlotsFor(detail.chunks) : 0;
+    const racers = traffic > 0 ? racerSlotsFor(detail.chunks) : 0;
     return {
       fieldCars:
         setup.mode === 'race'
@@ -710,10 +726,12 @@ export class Game {
                 setup.carId,
                 ...Array.from({ length: traffic }, (_, i) => trafficModel(i).id),
                 ...Array.from({ length: police }, () => policeModel().id),
+                ...Array.from({ length: racers }, (_, i) => racerModel(i).id),
               ]
             : undefined,
       traffic: traffic || undefined,
       police: police || undefined,
+      racers: racers || undefined,
       mode: setup.mode,
       trackId:
         setup.mode === 'free' || setup.mode === 'roam' ? '' : setup.trackId || TRACKS[0]?.id || '',
@@ -763,11 +781,14 @@ export class Game {
       config.mode === 'race'
         ? config.opponents + 1
         : config.mode === 'roam'
-          ? 1 + (config.traffic ?? 0) + (config.police ?? 0)
+          ? 1 + (config.traffic ?? 0) + (config.police ?? 0) + (config.racers ?? 0)
           : 1;
     // A change of world means a change of paint scheme (liveries or plain traffic): rebuild.
     // So does a change in the traffic and police slots, which decide who wears the light bar.
-    const slots = previous?.traffic !== config.traffic || previous?.police !== config.police;
+    const slots =
+      previous?.traffic !== config.traffic ||
+      previous?.police !== config.police ||
+      previous?.racers !== config.racers;
     if (changed || (roam && slots)) this.buildCars([]);
     this.buildCars(
       Array.from({ length: count }, (_, i) => carById(config.fieldCars?.[i] ?? config.carId)),
@@ -797,10 +818,16 @@ export class Game {
     const events = roam ? festivalEvents(cityMap()) : [];
     this.festival =
       roam && !idle && !attract
-        ? new Festival(events, this.festivalRecords, (id, value) => {
-            this.festivalRecords = saveFestivalRecord(id, value);
-          })
+        ? new Festival(
+            events,
+            this.festivalRecords,
+            (id, value) => {
+              this.festivalRecords = saveFestivalRecord(id, value);
+            },
+            () => this.sim.command({ kind: 'endRace' }),
+          )
         : null;
+    this.roamRace = null;
     this.eventHud.reset();
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
@@ -970,14 +997,16 @@ export class Game {
     for (let i = 0; i < models.length; i++) {
       const model = models[i]!;
       if (this.carModels[i]?.id === model.id) continue;
-      // Traffic wears plain paint and the police white with a light bar; everyone else a livery.
-      const traffic = this.session?.mode === 'roam' && i > 0;
-      const police = traffic && i > (this.session?.traffic ?? 0);
-      const view = police
-        ? new CarView(model.spec, POLICE_PAINT, model.style, undefined, false, true)
-        : traffic
-          ? new CarView(model.spec, trafficPaint(i - 1), model.style)
-          : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
+      // Traffic wears plain paint and the police white with a light bar; the street racers
+      // and everyone else a livery.
+      const roam = this.session?.mode === 'roam' && i > 0;
+      const role = roam ? this.roamRole(i) : 'car';
+      const view =
+        role === 'police'
+          ? new CarView(model.spec, POLICE_PAINT, model.style, undefined, false, true)
+          : role === 'traffic'
+            ? new CarView(model.spec, trafficPaint(i - 1), model.style)
+            : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
       const old = this.cars[i];
       if (old) {
         old.root.removeFromParent();
@@ -997,6 +1026,13 @@ export class Game {
     this.repaint();
   }
 
+  /** Free roam: what a snapshot slot after the player is (traffic, then police, then racers). */
+  private roamRole(car: number): 'traffic' | 'police' | 'racer' {
+    const traffic = this.session?.traffic ?? 0;
+    const police = this.session?.police ?? 0;
+    return car <= traffic ? 'traffic' : car <= traffic + police ? 'police' : 'racer';
+  }
+
   /** The player's livery, or a rival's: random but the same all session (and all season). */
   private liveryFor(car: number): Livery {
     const player = this.settings.livery;
@@ -1009,9 +1045,9 @@ export class Game {
     const roam = this.session?.mode === 'roam';
     for (let i = 0; i < this.cars.length; i++) {
       const dot = this.minimapCars[i];
-      if (roam && i > 0) {
+      if (roam && i > 0 && this.roamRole(i) !== 'racer') {
         // Traffic keeps its plain paint; it shows as pale dots on the map, the police as blue.
-        if (dot) dot.color = i > (this.session?.traffic ?? 0) ? '#4f8dff' : '#d8dce2';
+        if (dot) dot.color = this.roamRole(i) === 'police' ? '#4f8dff' : '#d8dce2';
         continue;
       }
       const livery = this.liveryFor(i);
@@ -1167,11 +1203,13 @@ export class Game {
           this.skillHud.update(this.skill);
         }
         if (this.festival) {
-          this.festival.update(dt, snapshot.simTime, player);
+          this.updateRoamRace(snapshot.roamRace ?? null);
+          this.festival.update(dt, player, snapshot.roamRace ?? null);
           this.eventHud.update(this.festival.view);
           for (const n of this.festival.notices.splice(0)) {
             this.toasts.show(n.text, { timeout: 6 });
-            if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
+            if (n.position === 1 && this.skill) this.skill.award('race', 1000, 'WIN');
+            else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
           }
           this.festivalScene?.setNextCheckpoint(this.festival.nextCheckpoint(), dt);
           // An event on, or close ahead, is sanctioned: the police let the speed go.
@@ -1218,6 +1256,42 @@ export class Game {
     if (this.frames === 2) document.body.classList.add('running');
     this.updateStats(realDt);
     this.updateDebug(snapshot !== null);
+  }
+
+  /**
+   * Free roam: a festival race's grid and countdown: a notice when the rivals line up, the
+   * camera behind the car once it is put on the grid, and the beeps of the countdown.
+   */
+  private updateRoamRace(status: RoamRaceStatus | null): void {
+    const previous = this.roamRace;
+    this.roamRace = status;
+    const phase = status?.phase ?? null;
+    const before = previous?.phase ?? null;
+    if (phase === 'grid' && before !== 'grid') {
+      const name = festivalEvents(cityMap()).find((e) => e.id === status!.id)?.name ?? 'the race';
+      const rivals = status!.count - 1;
+      this.toasts.show(
+        `${rivals} rival${rivals === 1 ? '' : 's'} lined up for ${name}. Cross the line to race.`,
+        { timeout: 5 },
+      );
+    } else if (phase === 'countdown' && before !== 'countdown') {
+      this.camera.reset();
+      this.menuAudio.play('move');
+    } else if (phase === 'countdown' && status && previous) {
+      if (Math.ceil(status.countdown) !== Math.ceil(previous.countdown))
+        this.menuAudio.play('move');
+    } else if (phase === 'racing' && before === 'countdown') {
+      this.menuAudio.play('start');
+    }
+    this.debug.roamRace = status
+      ? {
+          phase: status.phase,
+          position: status.position,
+          count: status.count,
+          progress: Math.round(status.progress),
+          rivals: status.rivals.map((r) => Math.round(r.progress)),
+        }
+      : null;
   }
 
   /**
