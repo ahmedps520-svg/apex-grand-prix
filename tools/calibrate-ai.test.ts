@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { it } from 'vitest';
 import { trackById } from '../src/content/tracks';
 import { SIM_DT, defaultAids } from '../src/shared/protocol';
@@ -11,9 +12,11 @@ import { lineOptionsFor } from '../src/sim/world';
 /**
  * Measures `aiGrip` for every car: the largest share of its estimated grip the AI's racing
  * line can plan with while a flat-out AI (skill 1.01) laps five circuits without leaving the
- * road. Prints the table for AI_GRIP in src/sim/vehicle/cars.ts. Takes about 20 minutes:
+ * road. Writes the table for AI_GRIP in src/sim/vehicle/cars.ts to tools/ai-grip.txt. Takes about 20 minutes for
+ * every car (about a minute a car):
  *
  *   npx vitest run -c tools/vitest.config.ts
+ *   CARS=suv,suv-trx npx vitest run -c tools/vitest.config.ts
  */
 
 const TRACK_IDS = ['merriford-park', 'solmara', 'sunhaven', 'lake-vireska', 'veltmoor'];
@@ -56,7 +59,9 @@ function badness(model: CarModel, tracks: readonly Track[], f: number): number {
 it('calibrates the AI grip of every car', () => {
   const tracks = TRACK_IDS.map((id) => new Track(trackById(id)!));
   const rows: string[] = [];
-  for (const model of CARS) {
+  // CARS=suv,suv-trx limits the run to those cars.
+  const only = process.env.CARS?.split(',');
+  for (const model of CARS.filter((c) => !only || only.includes(c.id))) {
     let lo = 0.55;
     let hi = 1.05;
     for (let i = 0; i < 6; i++) {
@@ -66,5 +71,7 @@ it('calibrates the AI grip of every car', () => {
     }
     rows.push(`  '${model.id}': ${Math.floor(lo * 100) / 100},`);
   }
-  console.log(`const AI_GRIP: Record<string, number> = {\n${rows.join('\n')}\n};`);
+  const table = `const AI_GRIP: Record<string, number> = {\n${rows.join('\n')}\n};\n`;
+  writeFileSync('tools/ai-grip.txt', table);
+  console.log(table);
 });

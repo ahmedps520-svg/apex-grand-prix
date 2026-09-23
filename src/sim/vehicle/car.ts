@@ -646,19 +646,28 @@ export class Car {
     return throttle * full * (1 - DAMAGE_TORQUE * this.damage.engine) - (1 - throttle) * friction;
   }
 
+  /** Share of the drive torque going to the front axle (0 = rear drive). */
+  private get frontShare(): number {
+    const s = this.spec;
+    if (s.drive) return clamp(s.drive.frontShare, 0, 1);
+    if (s.front.driven && s.rear.driven) return 0.4;
+    return s.front.driven ? 1 : 0;
+  }
+
   /** Engine speed the driven wheels would give in `gear`. */
   drivenRpm(gear: number): number {
-    const left = this.wheels[2]!;
-    const right = this.wheels[3]!;
-    return ((left.omega + right.omega) / 2) * this.ratioFor(gear) * RPM_PER_RAD_S;
+    const [fl, fr, rl, rr] = this.wheels as [Wheel, Wheel, Wheel, Wheel];
+    const f = this.frontShare;
+    const omega = (f * (fl.omega + fr.omega) + (1 - f) * (rl.omega + rr.omega)) / 2;
+    return omega * this.ratioFor(gear) * RPM_PER_RAD_S;
   }
 
   private drivetrain(dt: number): void {
     const spec = this.spec;
     const e = spec.engine;
     const gb = spec.gearbox;
-    const left = this.wheels[2]!;
-    const right = this.wheels[3]!;
+    const [fl, fr, rl, rr] = this.wheels as [Wheel, Wheel, Wheel, Wheel];
+    const front = this.frontShare;
     for (const w of this.wheels) {
       w.driveTorque = 0;
       w.extraInertia = 0;
@@ -694,25 +703,48 @@ export class Car {
         clutchTorque = this.engineTorque(this.engineRpm, throttle) * engagement;
         // With the clutch closed, the engine's inertia is felt at the driven wheels.
         const reflected = (e.inertia * ratio * ratio * engagement) / 2;
-        left.extraInertia = reflected;
-        right.extraInertia = reflected;
+        fl.extraInertia = reflected * front;
+        fr.extraInertia = reflected * front;
+        rl.extraInertia = reflected * (1 - front);
+        rr.extraInertia = reflected * (1 - front);
       }
     }
     const axleTorque = clutchTorque * ratio * gb.efficiency;
+    if (front <= 0) {
+      this.axleDrive(rl, rr, axleTorque, dt);
+      return;
+    }
+    if (front >= 1) {
+      this.axleDrive(fl, fr, axleTorque, dt);
+      return;
+    }
+    // All-wheel drive: a fixed split plus a centre coupling that resists the front and rear
+    // axles turning at different speeds (so one axle can't spin away on its own).
+    const lock = (spec.drive?.centreLock ?? 0.3) * Math.abs(axleTorque) + spec.diff.preload;
+    const inertia =
+      spec.front.wheelInertia + spec.rear.wheelInertia + fl.extraInertia + rl.extraInertia;
+    const slip = (rl.omega + rr.omega - fl.omega - fr.omega) / 2;
+    const centre = clamp((slip * inertia) / (4 * dt), -lock, lock);
+    this.axleDrive(fl, fr, axleTorque * front + centre, dt);
+    this.axleDrive(rl, rr, axleTorque * (1 - front) - centre, dt);
+  }
 
-    // Clutch-pack limited-slip differential: resists a speed difference between the driven
-    // wheels, up to a locking torque that grows with the torque going through it.
-    const diff = spec.diff;
+  /**
+   * One driven axle's clutch-pack limited-slip differential: it resists a speed difference
+   * between the two wheels, up to a locking torque that grows with the torque through it.
+   */
+  private axleDrive(left: Wheel, right: Wheel, torque: number, dt: number): void {
+    const diff = this.spec.diff;
     const lockTorque =
-      diff.preload + (axleTorque >= 0 ? diff.powerLock : diff.coastLock) * Math.abs(axleTorque);
-    const inertia = spec.rear.wheelInertia + left.extraInertia;
+      diff.preload + (torque >= 0 ? diff.powerLock : diff.coastLock) * Math.abs(torque);
+    const inertia = left.axle.wheelInertia + left.extraInertia;
     const coupling = clamp(
       ((right.omega - left.omega) * inertia) / (4 * dt),
       -lockTorque,
       lockTorque,
     );
-    left.driveTorque = axleTorque / 2 + coupling;
-    right.driveTorque = axleTorque / 2 - coupling;
+    left.driveTorque = torque / 2 + coupling;
+    right.driveTorque = torque / 2 - coupling;
   }
 
   // ---------------------------------------------------------------- tyres

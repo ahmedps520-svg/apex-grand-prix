@@ -100,6 +100,14 @@ export interface GearboxSpec {
 }
 
 /** Clutch-pack limited-slip differential. */
+/** Where the engine's torque goes; without it, the axles marked `driven` share it. */
+export interface DriveSpec {
+  /** Share of the torque sent to the front axle: 0 = rear drive, 1 = front drive. */
+  frontShare: number;
+  /** Centre coupling's locking torque on top of the split, as a fraction of drive torque. */
+  centreLock: number;
+}
+
 export interface DiffSpec {
   /** Locking torque that is always there, N·m. */
   preload: number;
@@ -140,6 +148,8 @@ export interface CarSpec {
   engine: EngineSpec;
   gearbox: GearboxSpec;
   diff: DiffSpec;
+  /** All-wheel drive split (optional; rear drive when absent and only the rear is driven). */
+  drive?: DriveSpec;
   aero: AeroSpec;
   body: BodySpec;
 }

@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Rounds 1–2 and Pushes 3–4 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
+> **Status:** Rounds 1–2 and Pushes 3–5 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -828,3 +828,13 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - **Controller menus:** gamepad buttons are polled, so a quick tap between two frames could be missed. Presses are now sampled between frames too and never lost. A new browser test plays from the title to a race and back with only a mocked DualSense.
   - **HUD:** the driving HUD no longer shows faintly behind menus.
   - **Settings screens:** they now redraw immediately after a change.
+
+### Push 5: SUVs, sedans, mixed-class grids and real car bodies (v0.5.0)
+- **From the v0.4.0 review:**
+  - **SUV class:** 5 all-wheel-drive SUVs: heavy (1.8–2.4 t), a high centre of gravity and soft, long-travel suspension, so they lean and pitch.
+    - The driveline now supports a front/rear torque split with a centre coupling and a limited-slip diff on each axle. Rear-drive cars behave exactly as before.
+    - AI grip is calibrated for all five.
+  - **Touring = sedans:** three-box saloon bodies and descriptions.
+  - **Mixed-class grids:** race setup and championships offer Same car, Mixed cars from one class, or Two classes. Each car gets its own model and AI racing line, the faster class lines up in front, and rivals keep their cars all season. Results show each driver's car.
+  - **Car bodies:** closed cars are no longer boxes. The shell is a side profile (nose, bonnet, deck and tail) extruded with rounded edges, and the glasshouse has a raked windscreen and rear window, a narrower top and a painted roof. Each style has its own proportions: fastback GT, low prototype, three-box sedan, coupé and upright SUV. The player's car and the AI cars use the same bodies.
+
