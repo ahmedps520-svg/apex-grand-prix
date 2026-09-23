@@ -1,0 +1,117 @@
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.touch-controls[hidden] {
+  display: none;
+}
+
+.tc-steer-zone {
+  position: absolute;
+  left: 0;
+  top: 18%;
+  bottom: 0;
+  width: 48%;
+  pointer-events: auto;
+}
+
+.tc-knob {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.tc-pedals {
+  position: absolute;
+  right: calc(18px + var(--safe-right));
+  bottom: calc(150px + var(--safe-bottom));
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+}
+
+.tc-pedal,
+.tc-small,
+.tc-pause {
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  font: 800 14px var(--font);
+  color: #fff;
+  letter-spacing: 0.06em;
+  background: rgba(20, 24, 34, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 16px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition:
+    transform 0.08s ease,
+    background 0.08s ease;
+}
+
+.tc-pedal {
+  width: 96px;
+  height: 150px;
+}
+
+.tc-throttle {
+  height: 170px;
+  border-color: rgba(57, 217, 138, 0.8);
+}
+
+.tc-brake {
+  border-color: rgba(255, 59, 47, 0.8);
+}
+
+.tc-pedal.down,
+.tc-small.down,
+.tc-pause.down {
+  transform: scale(0.94);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.tc-paddles {
+  position: absolute;
+  right: calc(18px + var(--safe-right));
+  bottom: calc(340px + var(--safe-bottom));
+  display: flex;
+  gap: 10px;
+}
+
+.tc-small {
+  width: 64px;
+  height: 52px;
+  font-size: 22px;
+}
+
+.tc-hb {
+  font-size: 14px;
+}
+
+.tc-pause {
+  position: absolute;
+  top: calc(12px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 44px;
+  font-size: 16px;
+}
+
+.tc-pause.down {
+  transform: translateX(-50%) scale(0.94);
+}

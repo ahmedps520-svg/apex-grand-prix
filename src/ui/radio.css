@@ -1,0 +1,66 @@
+.radio-box {
+  position: absolute;
+  left: calc(16px + var(--safe-left));
+  top: 34%;
+  max-width: min(360px, 60vw);
+  padding: 10px 14px 12px;
+  border-radius: 12px;
+  background: rgba(10, 13, 20, 0.72);
+  border-left: 4px solid #39d98a;
+  color: #fff;
+  font: 600 15px/1.35 var(--font);
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 2;
+}
+
+.radio-box[hidden] {
+  display: none;
+}
+
+.radio-box.in {
+  animation: radio-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.radio-label {
+  font: 800 10px var(--font);
+  letter-spacing: 0.16em;
+  color: #39d98a;
+  margin-bottom: 4px;
+}
+
+.radio-label::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #39d98a;
+  animation: radio-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes radio-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes radio-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radio-box.in,
+  .radio-label::before {
+    animation: none;
+  }
+}

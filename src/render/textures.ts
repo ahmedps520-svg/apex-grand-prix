@@ -171,3 +171,203 @@ export function labelTexture(text: string, options: LabelOptions = {}): THREE.Ca
   texture.anisotropy = 8;
   return texture;
 }
+
+// ---------------------------------------------------------------- race tracks
+
+const srgbToLinear = (c: number): number =>
+  c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+
+/**
+ * Neutral, near-grey turf to tint with a material colour, so every track's grass shares one
+ * texture. `userData.mean` is its average linear brightness, to divide out of the tint.
+ */
+export function turfTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const [canvas, ctx] = makeCanvas(size);
+  // Mostly fine detail: broad patches would repeat visibly with the tile, so they come from
+  // the ground mesh's vertex colours instead.
+  const patches = tileableNoise(size, 13, 4, 8);
+  const blades = tileableNoise(size, 17, 2, 64);
+  const image = ctx.createImageData(size, size);
+  let sum = 0;
+  for (let i = 0; i < size * size; i++) {
+    const n = patches[i]!;
+    const v = Math.min(146 + n * 52 + blades[i]! * 56, 255);
+    // Patches drift a little towards straw or a cooler green, around neutral.
+    const warm = (n - 0.5) * 20;
+    image.data[i * 4] = v + warm;
+    image.data[i * 4 + 1] = v;
+    image.data[i * 4 + 2] = v - warm * 1.5;
+    image.data[i * 4 + 3] = 255;
+    sum += srgbToLinear(v / 255);
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = toTexture(canvas, 1, 1, true);
+  texture.userData.mean = sum / (size * size);
+  return texture;
+}
+
+/** Tileable gravel trap: tan stones of mixed sizes and shades on a sandy base. */
+export function gravelTexture(): THREE.CanvasTexture {
+  const size = 512;
+  const [canvas, ctx] = makeCanvas(size);
+  const noise = tileableNoise(size, 19, 4, 8);
+  const image = ctx.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    const v = 0.72 + noise[i]! * 0.36;
+    image.data[i * 4] = 176 * v;
+    image.data[i * 4 + 1] = 156 * v;
+    image.data[i * 4 + 2] = 122 * v;
+    image.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  const rand = mulberry32(29);
+  for (let k = 0; k < 3400; k++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const r = 1.3 + rand() * rand() * 4.5;
+    const squash = 0.55 + rand() * 0.45;
+    const angle = rand() * Math.PI;
+    const shade = 0.62 + rand() * 0.6;
+    const warm = rand() * 14;
+    const stone = `rgb(${(188 + warm) * shade}, ${170 * shade}, ${(138 - warm) * shade})`;
+    // Wrapped copies near the edges keep the tile seamless.
+    for (const ox of [-size, 0, size]) {
+      for (const oy of [-size, 0, size]) {
+        const cx = x + ox;
+        const cy = y + oy;
+        if (cx < -r - 2 || cx > size + r + 2 || cy < -r - 2 || cy > size + r + 2) continue;
+        ctx.fillStyle = 'rgba(40, 32, 24, 0.35)';
+        ctx.beginPath();
+        ctx.ellipse(cx + 0.9, cy + 0.9, r, r * squash, angle, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = stone;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r, r * squash, angle, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  return toTexture(canvas, 1, 1, true);
+}
+
+/**
+ * Barrier wall: panels in `color` under a red and white band along the top. One tile spans a
+ * red and a white block along the wall (u) and the wall from its foot (v = 0) to its top (v = 1).
+ */
+export function barrierTexture(color: number): THREE.CanvasTexture {
+  const width = 256;
+  const height = 128;
+  const [canvas, ctx] = makeCanvas(width, height);
+  const band = Math.round(height * 0.26);
+  const joint = width / 4;
+  const noise = tileableNoise(width, 31, 3, 16);
+  // Every pixel computed here and written once: reading a canvas back is slow on some GPUs.
+  const image = ctx.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    // Grime thrown up from the track darkens the foot of the wall.
+    const grime = Math.max(0, (y - height * 0.55) / (height * 0.45)) * 0.38;
+    for (let x = 0; x < width; x++) {
+      let r = (color >> 16) & 255;
+      let g = (color >> 8) & 255;
+      let b = color & 255;
+      if (y < band) {
+        // The band: a red block, then a white one.
+        [r, g, b] = x < width / 2 ? [212, 42, 32] : [241, 241, 236];
+      } else if (y < band + 2 || x % joint < 2) {
+        // Shadow under the band, and the joints between metre-wide panels.
+        r *= 0.68;
+        g *= 0.68;
+        b *= 0.68;
+      }
+      const m = 0.9 + noise[y * width + x]! * 0.2;
+      const k = (y * width + x) * 4;
+      image.data[k] = (r * (1 - grime) + 20 * grime) * m;
+      image.data[k + 1] = (g * (1 - grime) + 18 * grime) * m;
+      image.data[k + 2] = (b * (1 - grime) + 16 * grime) * m;
+      image.data[k + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = toTexture(canvas, 1, 1, true);
+  // The top face samples the band's top row: don't let it wrap round to the foot.
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+/** Seats per crowd tile, and how wide one seat is on the grandstand, metres. */
+export const CROWD_SEATS = 16;
+export const CROWD_SEAT_WIDTH = 0.5;
+
+/**
+ * Spectators on grandstand seating: `rows` rows of `CROWD_SEATS` seats per tile, front row at the
+ * bottom (v = 0), shirts and faces in random colours with a few empty seats.
+ */
+export function crowdTexture(rows: number): THREE.CanvasTexture {
+  const seat = 32;
+  const width = seat * CROWD_SEATS;
+  const height = seat * rows;
+  const [canvas, ctx] = makeCanvas(width, height);
+  const rand = mulberry32(37);
+  const shirts = [
+    '#d62828',
+    '#f2f2f2',
+    '#1d4ed8',
+    '#facc15',
+    '#f97316',
+    '#16a34a',
+    '#111827',
+    '#e11d48',
+    '#0ea5e9',
+    '#9ca3af',
+    '#7c3aed',
+    '#fb7185',
+  ];
+  const skins = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac', '#d9a066'];
+  const pick = (list: readonly string[]): string => list[Math.floor(rand() * list.length)]!;
+  ctx.fillStyle = '#262c36';
+  ctx.fillRect(0, 0, width, height);
+  for (let row = 0; row < rows; row++) {
+    const floor = (row + 1) * seat;
+    // Step edge under each row.
+    ctx.fillStyle = '#59606b';
+    ctx.fillRect(0, floor - 3, width, 3);
+    for (let col = 0; col < CROWD_SEATS; col++) {
+      const cx = col * seat + seat / 2 + (rand() - 0.5) * 6;
+      if (rand() < 0.12) {
+        // Empty seat.
+        ctx.fillStyle = '#2f4f86';
+        ctx.fillRect(cx - 9, floor - 17, 18, 13);
+        continue;
+      }
+      ctx.fillStyle = pick(shirts);
+      ctx.fillRect(cx - 10, floor - 18, 20, 15);
+      if (rand() < 0.1) {
+        // An arm in the air.
+        ctx.fillRect(cx + 7, floor - 31, 4, 14);
+      }
+      ctx.fillStyle = pick(skins);
+      ctx.beginPath();
+      ctx.arc(cx + (rand() - 0.5) * 2, floor - 23, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return toTexture(canvas, 1, 1, true);
+}
+
+/** Soft round glow for lamps: white, fading out from the centre (in alpha, for additive use). */
+export function glowTexture(): THREE.CanvasTexture {
+  const size = 128;
+  const [canvas, ctx] = makeCanvas(size);
+  const half = size / 2;
+  const glow = ctx.createRadialGradient(half, half, 0, half, half, half);
+  glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  glow.addColorStop(0.18, 'rgba(255, 255, 255, 0.6)');
+  glow.addColorStop(0.45, 'rgba(255, 255, 255, 0.14)');
+  glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}

@@ -1,3 +1,5 @@
+import type { RaceStatus } from '../sim/race/RaceDirector';
+
 /**
  * Messages between the main thread and the simulation worker, plus the layout of the snapshot
  * buffer. Snapshots are Float32Arrays handed back and forth (transferred, never copied); the
@@ -74,13 +76,36 @@ export const defaultAids = (): DriverAids => ({
 /** Named places on the proving ground to jump to. */
 export type SpawnPoint = 'loop' | 'drag' | 'skidpad';
 
+export type GameMode = 'race' | 'timeTrial' | 'free';
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
+
+/** Everything the simulation needs to set up a session. Car 0 is always the player. */
+export interface SessionConfig {
+  mode: GameMode;
+  /** Circuit for races and time trials ('' = the proving ground). */
+  trackId: string;
+  /** Car model for every car in the session (see sim/vehicle/cars). */
+  carId: string;
+  /** Free drive start on the proving ground. */
+  location: SpawnPoint;
+  opponents: number;
+  laps: number;
+  difficulty: Difficulty;
+  /** Player's grid position, 0 = pole. */
+  gridSlot: number;
+  aids: DriverAids;
+  seed: number;
+}
+
 export type SimCommand =
   | { kind: 'resetCar'; car: number }
   | { kind: 'teleport'; car: number; to: SpawnPoint }
-  | { kind: 'setAids'; car: number; aids: DriverAids };
+  | { kind: 'setAids'; car: number; aids: DriverAids }
+  | { kind: 'restart' };
 
 export type MainToWorker =
-  | { type: 'init'; playerCount: number }
+  | { type: 'init'; session: SessionConfig }
+  | { type: 'session'; session: SessionConfig }
   | { type: 'tick'; time: number; inputs: DriverInput[]; buffers: ArrayBuffer[] }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -100,6 +125,8 @@ export interface SnapshotMessage {
   stepCostUs: number;
   carCount: number;
   buffer: ArrayBuffer;
+  /** Race state for the HUD (null in free drive). */
+  race: RaceStatus | null;
 }
 
 export type WorkerToMain =

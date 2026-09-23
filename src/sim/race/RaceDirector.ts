@@ -1,0 +1,405 @@
+import { mulberry32 } from '../../shared/math';
+import type { Track } from '../track/Track';
+import type { Car } from '../vehicle/car';
+import { projectNear, trackPos, wrapDelta, type TrackPos } from './trackPos';
+
+export type RaceMode = 'race' | 'timeTrial' | 'free';
+export type RacePhase = 'grid' | 'countdown' | 'racing' | 'finished';
+
+/** One car's race and timing state. Times are seconds; 0 means "none yet". */
+export interface CarRaceState {
+  /** Laps completed. */
+  lap: number;
+  /** Race position, 1 = leading. */
+  position: number;
+  /** Laps done + s/length (negative while still behind the line before the first lap). */
+  progress: number;
+  lastLap: number;
+  bestLap: number;
+  /** Time on the lap being driven (0 until timing starts). */
+  currentLap: number;
+  finished: boolean;
+  /** Race clock when the car took the flag. */
+  finishTime: number;
+  /** Sector being driven: 0, 1 or 2 (three equal lengths of the lap). */
+  sector: number;
+  /** Latest time for each sector. */
+  sectorTimes: number[];
+  bestSectors: number[];
+  /** Time behind the leader at the last timing point passed (0 for the leader). */
+  gapToLeader: number;
+}
+
+/** Everything the HUD needs about the session, updated in place every step. */
+export interface RaceStatus {
+  mode: RaceMode;
+  phase: RacePhase;
+  /** Red start lights lit, 0–5. */
+  lights: number;
+  /** True from lights out. */
+  go: boolean;
+  /** Race distance in laps (0 = unlimited). */
+  laps: number;
+  /** Race clock: seconds since the start (time trial / free: since the session began). */
+  time: number;
+  cars: CarRaceState[];
+  /** Car indices by position. */
+  order: number[];
+}
+
+/** Seconds on the grid before the first red light. */
+const GRID_TIME = 2;
+/** Timing points per lap for the gaps between cars. */
+const GAP_POINTS = 16;
+/** A car that moves further than this in one step was teleported (reset or restart). */
+const JUMP = 30;
+/** After the player finishes, the session ends this long after (unless everyone is in). */
+const COOL_DOWN = 60;
+/** Time trial: the car starts this far before the line on a flying lap. */
+const RUN_UP = 150;
+
+interface Tracker {
+  pos: TrackPos;
+  lastX: number;
+  lastZ: number;
+  /** Passed half distance since the last counted crossing: the next crossing completes a lap. */
+  armed: boolean;
+  /** The lap clock is running. */
+  timing: boolean;
+  lapStart: number;
+  sectorStart: number;
+  /** Highest timing point passed (lap × GAP_POINTS + point). */
+  point: number;
+}
+
+/**
+ * Race rules and timing: the start countdown, lap counting and timing (to a fraction of a step)
+ * with three sectors, positions, gaps and the finish. Car 0 is the player.
+ */
+export class RaceDirector {
+  readonly status: RaceStatus;
+  private readonly trackers: Tracker[] = [];
+  private readonly rand: () => number;
+  private countdown = 0;
+  private startDelay = 1;
+  private leaderFinished = false;
+  private playerFinishedAt = -1;
+  /** Race clock when the leader first passed each timing point. */
+  private readonly pointTimes: number[] = [];
+  /** Sort keys for positions. */
+  private readonly keys: Float64Array;
+
+  constructor(
+    private readonly track: Track,
+    carCount: number,
+    mode: RaceMode,
+    laps: number,
+    seed = 1,
+  ) {
+    this.rand = mulberry32(seed ^ 0x51f15e);
+    this.status = {
+      mode,
+      phase: mode === 'race' ? 'grid' : 'racing',
+      lights: 0,
+      go: mode !== 'race',
+      laps: mode === 'race' ? Math.max(laps, 1) : 0,
+      time: 0,
+      cars: [],
+      order: [],
+    };
+    for (let i = 0; i < carCount; i++) {
+      this.status.cars.push(freshState());
+      this.status.order.push(i);
+      this.trackers.push(freshTracker());
+    }
+    this.keys = new Float64Array(carCount);
+  }
+
+  /** True while cars must be held on the grid (before the lights go out). */
+  holding(carIndex: number): boolean {
+    const phase = this.status.phase;
+    return (
+      this.status.mode === 'race' &&
+      carIndex < this.trackers.length &&
+      (phase === 'grid' || phase === 'countdown')
+    );
+  }
+
+  /**
+   * Puts all cars on the grid (player in slot `playerSlot`, the others in order) and restarts
+   * the countdown. Time trial: the player starts a run-up before the line.
+   */
+  restart(cars: readonly Car[], playerSlot: number): void {
+    const status = this.status;
+    const track = this.track;
+    const race = status.mode === 'race';
+    const slot = Math.max(0, Math.min(playerSlot, cars.length - 1));
+    let next = 0;
+    for (let i = 0; i < cars.length; i++) {
+      const car = cars[i]!;
+      if (status.mode === 'timeTrial') {
+        const p = track.at(track.length - RUN_UP - i * 30);
+        car.teleport({ x: p.x, z: p.z, yaw: Math.atan2(-p.tx, -p.tz) });
+      } else {
+        let gridSlot = slot;
+        if (i > 0) {
+          if (next === slot) next++;
+          gridSlot = next++;
+        }
+        car.teleport(track.gridSlot(gridSlot));
+      }
+    }
+    status.phase = race ? 'grid' : 'racing';
+    status.go = !race;
+    status.lights = 0;
+    status.time = 0;
+    this.countdown = 0;
+    this.startDelay = 0.4 + this.rand();
+    this.leaderFinished = false;
+    this.playerFinishedAt = -1;
+    this.pointTimes.length = 0;
+    for (let i = 0; i < this.trackers.length; i++) {
+      Object.assign(this.status.cars[i]!, freshState());
+      this.status.cars[i]!.position = i + 1;
+      Object.assign(this.trackers[i]!, freshTracker());
+    }
+    this.project(cars, true);
+    this.updateOrder();
+  }
+
+  /** Call every sim step after the cars moved. */
+  update(dt: number, cars: readonly Car[]): void {
+    const status = this.status;
+    if (status.phase === 'grid' || status.phase === 'countdown') {
+      this.countdown += dt;
+      const lit = this.countdown - GRID_TIME;
+      if (lit < 0) {
+        status.phase = 'grid';
+      } else if (lit < 4 + this.startDelay) {
+        status.phase = 'countdown';
+        status.lights = Math.min(Math.floor(lit) + 1, 5);
+      } else {
+        // Lights out: the race clock and every car's first lap start now.
+        status.phase = 'racing';
+        status.go = true;
+        status.lights = 0;
+        status.time = 0;
+        for (const t of this.trackers) {
+          t.timing = true;
+          t.lapStart = 0;
+          t.sectorStart = 0;
+        }
+      }
+      this.project(cars, false);
+      this.updateOrder();
+      return;
+    }
+
+    const start = status.time;
+    status.time += dt;
+    const n = Math.min(cars.length, this.trackers.length);
+    for (let i = 0; i < n; i++) this.advance(i, cars[i]!, start, dt);
+    this.updateOrder();
+
+    if (status.mode === 'race' && status.phase === 'racing') {
+      const player = status.cars[0];
+      if (player?.finished && this.playerFinishedAt < 0) this.playerFinishedAt = status.time;
+      let all = true;
+      for (let i = 0; i < n; i++) all &&= status.cars[i]!.finished;
+      if (all || (this.playerFinishedAt >= 0 && status.time - this.playerFinishedAt > COOL_DOWN)) {
+        status.phase = 'finished';
+      }
+    }
+  }
+
+  /** Projects every car onto the track (fresh lookups when `reset`). */
+  private project(cars: readonly Car[], reset: boolean): void {
+    const n = Math.min(cars.length, this.trackers.length);
+    for (let i = 0; i < n; i++) {
+      const car = cars[i]!;
+      const t = this.trackers[i]!;
+      projectNear(this.track, car.pos.x, car.pos.z, reset ? -1 : t.pos.index, t.pos);
+      t.lastX = car.pos.x;
+      t.lastZ = car.pos.z;
+      this.status.cars[i]!.progress = progressOf(t, this.status.cars[i]!.lap, this.track.length);
+    }
+  }
+
+  /** Lap, sector and gap bookkeeping for one car after a step that began at race time `t0`. */
+  private advance(i: number, car: Car, t0: number, dt: number): void {
+    const track = this.track;
+    const length = track.length;
+    const t = this.trackers[i]!;
+    const state = this.status.cars[i]!;
+    const jumped = Math.hypot(car.pos.x - t.lastX, car.pos.z - t.lastZ) > JUMP;
+    const s0 = t.pos.s;
+    projectNear(track, car.pos.x, car.pos.z, jumped ? -1 : t.pos.index, t.pos);
+    t.lastX = car.pos.x;
+    t.lastZ = car.pos.z;
+    const s1 = t.pos.s;
+    if (t.timing) state.currentLap = t0 + dt - t.lapStart;
+    if (jumped || state.finished) {
+      if (!state.finished) state.progress = progressOf(t, state.lap, length);
+      return;
+    }
+    const ds = wrapDelta(s1 - s0, length);
+    if (ds > 0) {
+      if (s1 < s0) {
+        // Crossed the start/finish line forwards.
+        const crossing = crossTime(s0, ds, 0, length, t0, dt);
+        if (t.armed) this.completeLap(i, t, state, crossing);
+        else if (!t.timing) {
+          // Flying lap (time trial, free): the clock starts at the first crossing.
+          t.timing = true;
+          t.lapStart = crossing;
+          t.sectorStart = crossing;
+          state.sector = 0;
+        }
+      }
+      if (t.timing && !state.finished) {
+        for (let k = 1; k <= 2; k++) {
+          const boundary = (length * k) / 3;
+          if (state.sector === k - 1 && passed(s0, s1, boundary)) {
+            const crossing = crossTime(s0, ds, boundary, length, t0, dt);
+            recordSector(state, k - 1, crossing - t.sectorStart);
+            t.sectorStart = crossing;
+            state.sector = k;
+          }
+        }
+      }
+      if (passed(s0, s1, length / 2)) t.armed = true;
+    }
+    if (!state.finished) state.progress = progressOf(t, state.lap, length);
+    this.updateGap(t, state, t0, dt);
+  }
+
+  private completeLap(i: number, t: Tracker, state: CarRaceState, crossing: number): void {
+    const status = this.status;
+    const lapTime = crossing - t.lapStart;
+    state.lap++;
+    state.lastLap = lapTime;
+    if (state.bestLap <= 0 || lapTime < state.bestLap) state.bestLap = lapTime;
+    if (state.sector === 2) recordSector(state, 2, crossing - t.sectorStart);
+    state.sector = 0;
+    state.currentLap = status.time - crossing;
+    t.lapStart = crossing;
+    t.sectorStart = crossing;
+    t.armed = false;
+    if (status.mode !== 'race') return;
+    if (this.leaderFinished || state.lap >= status.laps) {
+      this.leaderFinished = true;
+      state.finished = true;
+      state.finishTime = crossing;
+      state.progress = state.lap;
+      state.currentLap = 0;
+      if (i === 0 && this.playerFinishedAt < 0) this.playerFinishedAt = crossing;
+    }
+  }
+
+  /** Gap to the leader from the race time each car passes a set of timing points. */
+  private updateGap(t: Tracker, state: CarRaceState, t0: number, dt: number): void {
+    if (this.status.mode !== 'race') return;
+    const reached = Math.floor(state.progress * GAP_POINTS);
+    if (reached <= t.point) return;
+    t.point = reached;
+    if (reached < 0) return;
+    const time = t0 + dt;
+    const first = this.pointTimes[reached];
+    if (first === undefined) {
+      // First car here: it leads. (Points can be skipped by a reset; fill them in.)
+      for (let p = this.pointTimes.length; p <= reached; p++) this.pointTimes[p] = time;
+      state.gapToLeader = 0;
+    } else {
+      state.gapToLeader = time - first;
+    }
+  }
+
+  /** Positions: finished cars by laps then finish time, the rest by progress. */
+  private updateOrder(): void {
+    const { cars, order } = this.status;
+    const keys = this.keys;
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i]!;
+      keys[i] = c.finished ? c.lap : c.progress;
+    }
+    // Insertion sort: the order barely changes from one step to the next.
+    for (let a = 1; a < order.length; a++) {
+      const car = order[a]!;
+      let b = a - 1;
+      while (b >= 0 && ahead(cars, keys, car, order[b]!)) {
+        order[b + 1] = order[b]!;
+        b--;
+      }
+      order[b + 1] = car;
+    }
+    for (let p = 0; p < order.length; p++) cars[order[p]!]!.position = p + 1;
+  }
+}
+
+/** Is car `a` ahead of car `b`? */
+function ahead(cars: CarRaceState[], keys: Float64Array, a: number, b: number): boolean {
+  const ka = keys[a]!;
+  const kb = keys[b]!;
+  if (ka !== kb) return ka > kb;
+  const ca = cars[a]!;
+  const cb = cars[b]!;
+  if (ca.finished !== cb.finished) return ca.finished;
+  if (ca.finished) return ca.finishTime < cb.finishTime;
+  return a < b;
+}
+
+/** Race time at which a car that moved `ds` forwards from `s0` during the step passed `at`. */
+function crossTime(
+  s0: number,
+  ds: number,
+  at: number,
+  length: number,
+  t0: number,
+  dt: number,
+): number {
+  const into = wrapDelta(at - s0, length);
+  return t0 + dt * Math.min(Math.max(into / ds, 0), 1);
+}
+
+/** Did the car pass distance `at` going forwards from s0 to s1 (no line crossing)? */
+function passed(s0: number, s1: number, at: number): boolean {
+  return s0 < at && s1 >= at && s1 > s0;
+}
+
+function progressOf(t: Tracker, lap: number, length: number): number {
+  // Behind the line without having done the lap (grid, run-up, or backwards over the line).
+  const behind = !t.armed && t.pos.s > length / 2;
+  return lap + t.pos.s / length - (behind ? 1 : 0);
+}
+
+function recordSector(state: CarRaceState, sector: number, time: number): void {
+  state.sectorTimes[sector] = time;
+  const best = state.bestSectors[sector] ?? 0;
+  if (best <= 0 || time < best) state.bestSectors[sector] = time;
+}
+
+const freshState = (): CarRaceState => ({
+  lap: 0,
+  position: 1,
+  progress: 0,
+  lastLap: 0,
+  bestLap: 0,
+  currentLap: 0,
+  finished: false,
+  finishTime: 0,
+  sector: 0,
+  sectorTimes: [0, 0, 0],
+  bestSectors: [0, 0, 0],
+  gapToLeader: 0,
+});
+
+const freshTracker = (): Tracker => ({
+  pos: trackPos(),
+  lastX: 0,
+  lastZ: 0,
+  armed: false,
+  timing: false,
+  lapStart: 0,
+  sectorStart: 0,
+  point: -1_000_000,
+});

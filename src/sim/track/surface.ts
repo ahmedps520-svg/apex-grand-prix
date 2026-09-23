@@ -8,6 +8,8 @@ import { PAD_HALF_X, PAD_HALF_Z } from '../../content/testGround';
 export const SURFACE = {
   ASPHALT: 0,
   GRASS: 1,
+  KERB: 2,
+  GRAVEL: 3,
 } as const;
 export type SurfaceId = (typeof SURFACE)[keyof typeof SURFACE];
 
@@ -22,6 +24,8 @@ export interface SurfaceProps {
 export const SURFACE_PROPS: Record<SurfaceId, SurfaceProps> = {
   [SURFACE.ASPHALT]: { name: 'asphalt', grip: 1, rollingResistance: 0.012 },
   [SURFACE.GRASS]: { name: 'grass', grip: 0.6, rollingResistance: 0.07 },
+  [SURFACE.KERB]: { name: 'kerb', grip: 0.92, rollingResistance: 0.02 },
+  [SURFACE.GRAVEL]: { name: 'gravel', grip: 0.45, rollingResistance: 0.28 },
 };
 
 export interface RayHit {
@@ -59,6 +63,11 @@ export interface Surface {
   ): boolean;
   heightAt(x: number, z: number): number;
   surfaceAt(x: number, z: number): SurfaceId;
+  /**
+   * Optional barriers: how far a body point is through a wall (0 = clear) and the horizontal
+   * direction that pushes it back out.
+   */
+  wallContact?(x: number, z: number, out: { nx: number; nz: number }): number;
 }
 
 /** Flat test ground: a rectangular asphalt pad surrounded by grass, all at height 0. */

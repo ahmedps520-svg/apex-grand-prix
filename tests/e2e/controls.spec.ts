@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Round 2 controls: telemetry, quick menu, manual gears, teleports and wheel setup. */
 
-async function boot(page: Page, query = '?renderer=webgl'): Promise<string[]> {
+async function boot(page: Page, query = '?renderer=webgl&drive'): Promise<string[]> {
   const errors: string[] = [];
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
@@ -10,7 +10,6 @@ async function boot(page: Page, query = '?renderer=webgl'): Promise<string[]> {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`/${query}`);
   await page.waitForFunction(() => window.__apex?.ready === true, null, { timeout: 60_000 });
-  await page.keyboard.press('KeyH'); // hide the help card
   return errors;
 }
 

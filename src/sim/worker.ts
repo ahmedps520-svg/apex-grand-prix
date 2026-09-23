@@ -4,6 +4,7 @@ import {
   SIM_HZ,
   snapshotBytes,
   type MainToWorker,
+  type SessionConfig,
   type WorkerToMain,
 } from '../shared/protocol';
 import { FixedStepClock } from './clock';
@@ -23,6 +24,7 @@ const scope = self as unknown as WorkerScope;
 const clock = new FixedStepClock(SIM_HZ, MAX_FRAME_DELTA);
 const pool: ArrayBuffer[] = [];
 let world: World | null = null;
+let session: SessionConfig | null = null;
 let bufferBytes = 0;
 let paused = false;
 
@@ -71,6 +73,7 @@ function tick(time: number): void {
       stepCostUs,
       carCount: world.cars.length,
       buffer,
+      race: world.director?.status ?? null,
     },
     [buffer],
   );
@@ -81,8 +84,12 @@ scope.onmessage = (event) => {
   try {
     switch (msg.type) {
       case 'init':
-        world = new World(msg.playerCount);
+      case 'session':
+        session = msg.session;
+        world = World.forSession(msg.session);
         bufferBytes = snapshotBytes(world.cars.length);
+        pool.length = 0;
+        clock.resetBaseline();
         post({ type: 'ready', carCount: world.cars.length });
         break;
       case 'tick':
@@ -103,7 +110,8 @@ scope.onmessage = (event) => {
       case 'command': {
         const command = msg.command;
         if (!world) break;
-        if (command.kind === 'resetCar') world.cars[command.car]?.reset();
+        if (command.kind === 'resetCar') world.resetCar(command.car);
+        else if (command.kind === 'restart') world.restartSession(session?.gridSlot ?? 0);
         else if (command.kind === 'teleport') world.teleport(command.car, command.to);
         else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
         break;

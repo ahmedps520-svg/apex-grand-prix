@@ -1,6 +1,7 @@
 import type {
   DriverInput,
   MainToWorker,
+  SessionConfig,
   SimCommand,
   SnapshotMessage,
   WorkerToMain,
@@ -22,6 +23,7 @@ export class SimClient {
   private readonly worker: Worker;
   private returned: ArrayBuffer[] = [];
   private readyResolve: (() => void) | null = null;
+  private started = false;
 
   constructor() {
     this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });
@@ -29,10 +31,16 @@ export class SimClient {
     this.worker.onerror = (event) => this.onError(`Simulation worker failed: ${event.message}`);
   }
 
-  init(playerCount: number): Promise<void> {
+  /** Starts (or replaces) the simulated session; resolves when the worker has built it. */
+  start(session: SessionConfig): Promise<void> {
     return new Promise((resolve) => {
       this.readyResolve = resolve;
-      this.post({ type: 'init', playerCount });
+      // Snapshots of the previous session have a different size: drop them.
+      this.latest = null;
+      this.latestView = null;
+      this.returned = [];
+      this.post({ type: this.started ? 'session' : 'init', session });
+      this.started = true;
     });
   }
 

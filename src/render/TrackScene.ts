@@ -1,0 +1,795 @@
+import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import * as THREE from 'three/webgpu';
+import { mulberry32 } from '../shared/math';
+import { KERB_WIDTH, type Track } from '../sim/track/Track';
+import type { ConePlacement } from './TestGroundScene';
+import {
+  CROWD_SEAT_WIDTH,
+  CROWD_SEATS,
+  asphaltTexture,
+  barrierTexture,
+  checkerTexture,
+  crowdTexture,
+  glowTexture,
+  gravelTexture,
+  labelTexture,
+  turfTexture,
+} from './textures';
+import { LINE_Y, MeshBuilder, TrackMeshBuilder } from './trackMeshes';
+
+const SHADOW_EXTENT = 40;
+const FOG_NEAR = 350;
+const FOG_FAR = 2600;
+/** The sky is a box around the car; it draws at the far plane whatever its size. */
+const SKY_SIZE = 2800;
+/** Metres per texture tile (asphalt is adjusted to a whole number of tiles per lap). */
+const ASPHALT_TILE = 7;
+const TURF_TILE = 9;
+const GRAVEL_TILE = 4;
+const BARRIER_HEIGHT = 1;
+const BARRIER_THICKNESS = 0.5;
+/** Length of each red or white block along the barrier top. */
+const BARRIER_BLOCK = 2;
+/** Start lights: columns across the gantry (they light one by one), lamps per column. */
+const LIGHT_COLUMNS = 5;
+const LIGHT_ROWS = 2;
+const LIGHT_SPACING = 1.1;
+/**
+ * Lamp colours, and the additive glow around them. Kept near 1: brighter values come out of
+ * the neutral tone mapping desaturated (pink rather than red).
+ */
+const LAMP_OFF = new THREE.Color(0.04, 0.028, 0.028);
+const LAMP_RED = new THREE.Color(1, 0.02, 0.012);
+const LAMP_GREEN = new THREE.Color(0.04, 1, 0.22);
+const GLOW_OFF = new THREE.Color(0, 0, 0);
+const GLOW_RED = new THREE.Color(0.9, 0.08, 0.03);
+const GLOW_GREEN = new THREE.Color(0.08, 0.85, 0.25);
+const GANTRY_BEAM_Y = 7.75;
+const BANNER_HEIGHT = 1.35;
+/** Grandstands: length along the track, rows of seats, and the front wall they sit on. */
+const STAND_LENGTH = 48;
+const STAND_SPACING = 54;
+const STAND_ROWS = 10;
+const ROW_DEPTH = 0.85;
+const ROW_RISE = 0.42;
+const STAND_FRONT = 1.6;
+/** Gap between the back of the barrier and the front of a grandstand. */
+const STAND_GAP = 3.5;
+const STAND_DEPTH = 0.3 + STAND_ROWS * ROW_DEPTH;
+const STAND_TOP = STAND_FRONT + STAND_ROWS * ROW_RISE;
+const ROOF_Y = STAND_TOP + 3.4;
+/** Trees stand 25–400 m beyond the barriers and never nearer the track than this past them. */
+const TREE_NEAREST = 25;
+const TREE_FARTHEST = 400;
+const TREE_CLEARANCE = 15;
+
+interface StandPlacement {
+  /** Front centre of the stand, on the ground. */
+  x: number;
+  z: number;
+  /** Unit direction along the stand (its local x); local z points away from the track. */
+  ax: number;
+  az: number;
+}
+
+/** Circle that trees keep out of. */
+interface Footprint {
+  x: number;
+  z: number;
+  r: number;
+}
+
+/**
+ * Scenery for a circuit, built from its Track: road, kerbs, run-off, barriers, a start gantry
+ * with working start lights, grandstands, trees, and sun, sky and fog from the track's theme.
+ * Static geometry is merged per material and repeated props are instanced: 18 draw calls at
+ * most, plus 3 in the shadow pass.
+ */
+export class TrackScene {
+  readonly scene = new THREE.Scene();
+  /** Circuits have no cones. */
+  readonly conePlacements: ConePlacement[] = [];
+  private readonly sun: THREE.DirectionalLight;
+  private readonly sky: SkyMesh;
+  private readonly sunDirection = new THREE.Vector3();
+  /** 0 for a high sun, up to 1 for a low golden-hour one. */
+  private readonly lowSun: number;
+  private readonly disposables: Array<{ dispose(): void }> = [];
+  private readonly lamps: THREE.InstancedMesh;
+  private readonly glows: THREE.InstancedMesh;
+  /** What the start lights show now: lit columns, or -1 for green. */
+  private lightsShown = -2;
+
+  constructor(private readonly track: Track) {
+    const theme = track.def.theme;
+    const elevation = THREE.MathUtils.degToRad(theme.sunElevation);
+    const azimuth = THREE.MathUtils.degToRad(theme.sunAzimuth);
+    this.sunDirection.set(
+      Math.cos(elevation) * Math.sin(azimuth),
+      Math.sin(elevation),
+      Math.cos(elevation) * Math.cos(azimuth),
+    );
+    this.lowSun = 1 - THREE.MathUtils.smoothstep(theme.sunElevation, 5, 40);
+
+    this.sky = createSky(this.sunDirection, this.lowSun);
+    // Last of all: the sky shader then only runs where nothing else was drawn.
+    this.sky.renderOrder = 2;
+    this.scene.add(this.sky);
+    this.scene.fog = new THREE.Fog(theme.fog, FOG_NEAR, FOG_FAR);
+
+    const skyFill = new THREE.Color(0xc3d8ff).lerp(new THREE.Color(0xf2cfae), this.lowSun * 0.6);
+    const groundBounce = new THREE.Color(theme.grass).multiplyScalar(0.6);
+    this.scene.add(new THREE.HemisphereLight(skyFill, groundBounce, 0.35 + this.lowSun * 0.15));
+
+    const sunColor = new THREE.Color(0xfff1dd).lerp(new THREE.Color(0xffb46e), this.lowSun);
+    this.sun = new THREE.DirectionalLight(sunColor, 3.2 - this.lowSun * 0.7);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const cam = this.sun.shadow.camera;
+    cam.left = -SHADOW_EXTENT;
+    cam.right = SHADOW_EXTENT;
+    cam.top = SHADOW_EXTENT;
+    cam.bottom = -SHADOW_EXTENT;
+    cam.near = 1;
+    cam.far = 400;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.03;
+    this.scene.add(this.sun, this.sun.target);
+    this.follow(new THREE.Vector3(track.samples[0]!.x, 0, track.samples[0]!.z));
+
+    const meshes = new TrackMeshBuilder(track);
+    const turf = turfTexture();
+    this.disposables.push(turf);
+    this.buildGround(turf);
+    this.buildSurfaces(meshes, turf);
+    this.buildBarriers(meshes);
+    [this.lamps, this.glows] = this.buildGantry();
+    const stands = this.buildGrandstands();
+    this.buildTrees(stands);
+    this.setStartLights(0, false);
+  }
+
+  /** Reflections for shiny surfaces: a pre-filtered copy of the sky. */
+  buildEnvironment(renderer: THREE.WebGPURenderer): void {
+    try {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const envScene = new THREE.Scene();
+      const sky = createSky(this.sunDirection, this.lowSun);
+      // Without the sun disc and with a softer glow round it: blurred into the map, they make
+      // anything facing a low sun (the start lights' panel, a car's paint) glare pale.
+      sky.showSunDisc.value = 0;
+      sky.mieCoefficient.value *= 0.3;
+      sky.mieDirectionalG.value = 0.7;
+      envScene.add(sky);
+      const target = pmrem.fromScene(envScene, 0.02);
+      this.scene.environment = target.texture;
+      this.scene.environmentIntensity = 0.55;
+      this.disposables.push(target, pmrem);
+    } catch (error) {
+      console.warn('Environment map unavailable; continuing without reflections.', error);
+    }
+  }
+
+  /** Keeps the shadow-casting light (and the sky box) centred on the car. */
+  follow(target: THREE.Vector3): void {
+    this.sun.target.position.copy(target);
+    this.sun.position.copy(target).addScaledVector(this.sunDirection, 150);
+    this.sun.target.updateMatrixWorld();
+    // A circuit can be bigger than the sky box: keep the viewer inside it.
+    this.sky.position.set(target.x, 0, target.z);
+  }
+
+  /**
+   * Start lights on the gantry over the start line: `lit` red lights (0–5), or all green when
+   * `go`. Cheap to call every frame; the lamps only change when the state does.
+   */
+  setStartLights(lit: number, go: boolean): void {
+    const columns = Number.isFinite(lit)
+      ? THREE.MathUtils.clamp(Math.floor(lit), 0, LIGHT_COLUMNS)
+      : 0;
+    const shown = go ? -1 : columns;
+    if (shown === this.lightsShown) return;
+    this.lightsShown = shown;
+    for (let c = 0; c < LIGHT_COLUMNS; c++) {
+      const on = go || c < columns;
+      const lamp = go ? LAMP_GREEN : on ? LAMP_RED : LAMP_OFF;
+      const glow = go ? GLOW_GREEN : on ? GLOW_RED : GLOW_OFF;
+      for (let r = 0; r < LIGHT_ROWS; r++) {
+        this.lamps.setColorAt(c * LIGHT_ROWS + r, lamp);
+        this.glows.setColorAt(c * LIGHT_ROWS + r, glow);
+      }
+    }
+    for (const mesh of [this.lamps, this.glows]) {
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  dispose(): void {
+    this.scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material?.dispose();
+      if (object instanceof THREE.InstancedMesh) object.dispose();
+    });
+    for (const d of this.disposables) d.dispose();
+  }
+
+  // ------------------------------------------------------------------ build
+
+  /**
+   * Grass under and around everything, out to where the fog hides its edge. Big, gentle
+   * patches of lighter and darker grass (vertex colours) keep the distance from looking flat.
+   */
+  private buildGround(turf: THREE.Texture): void {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const p of this.track.samples) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    const margin = Math.max(600, FOG_FAR) + this.track.wallOffset;
+    const x0 = minX - margin;
+    const z0 = minZ - margin;
+    const width = maxX - minX + 2 * margin;
+    const depth = maxZ - minZ + 2 * margin;
+    const cells = 64;
+    const patches = valueNoise(hashString(this.track.def.id), 260);
+    const detail = valueNoise(hashString(this.track.def.id) + 1, 90);
+    const mb = new MeshBuilder(true);
+    const color = new THREE.Color();
+    for (let j = 0; j <= cells; j++) {
+      for (let i = 0; i <= cells; i++) {
+        const x = x0 + (i / cells) * width;
+        const z = z0 + (j / cells) * depth;
+        const shade = 0.84 + patches(x, z) * 0.22 + detail(x, z) * 0.08;
+        // Lighter patches are a little drier (warmer), darker ones a little lusher.
+        const dry = patches(x, z) - 0.5;
+        color.setRGB(shade * (1 + dry * 0.12), shade, shade * (1 - dry * 0.2));
+        mb.vertex(x, 0, z, 0, 1, 0, x / TURF_TILE, z / TURF_TILE, color);
+      }
+    }
+    for (let j = 0; j < cells; j++) {
+      for (let i = 0; i < cells; i++) {
+        const a = j * (cells + 1) + i;
+        mb.quad(a, a + 1, a + cells + 2, a + cells + 1);
+      }
+    }
+    const ground = new THREE.Mesh(
+      mb.build(),
+      new THREE.MeshStandardMaterial({
+        map: turf,
+        color: turfTint(this.track.def.theme.grass, turf),
+        vertexColors: true,
+        roughness: 1,
+        metalness: 0,
+      }),
+    );
+    ground.receiveShadow = true;
+    // After the track surfaces lying on it, so the depth test skips shading what they cover.
+    ground.renderOrder = 1;
+    this.scene.add(ground);
+  }
+
+  /** Road, run-off, kerbs and paint: flat layers, each lifted and polygon-offset over the last. */
+  private buildSurfaces(meshes: TrackMeshBuilder, turf: THREE.Texture): void {
+    const track = this.track;
+    const theme = track.def.theme;
+
+    const tile = track.length / Math.max(1, Math.round(track.length / ASPHALT_TILE));
+    const asphalt = asphaltTexture(1, 1);
+    this.disposables.push(asphalt);
+    this.addFlat(
+      meshes.road(tile),
+      new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.93, metalness: 0, ...layer(1) }),
+    );
+
+    // Gravel where the physics has it: in the corners, when the track uses gravel traps.
+    const gravelTraps = theme.runoffSurface === 'gravel';
+    const isGravel = (i: number) => gravelTraps && track.kerbs[i]?.left === true;
+    // Run-off grass is mown shorter and a touch lighter than the fields, so the edge reads.
+    const runoffGrass = new THREE.Color(theme.grass).offsetHSL(0.01, -0.08, 0.03);
+    this.addFlat(
+      meshes.runoff(isGravel, false, TURF_TILE),
+      new THREE.MeshStandardMaterial({
+        map: turf,
+        color: turfTint(runoffGrass.getHex(), turf),
+        roughness: 1,
+        metalness: 0,
+        ...layer(1),
+      }),
+    );
+    if (gravelTraps) {
+      const gravel = gravelTexture();
+      this.disposables.push(gravel);
+      this.addFlat(
+        meshes.runoff(isGravel, true, GRAVEL_TILE),
+        new THREE.MeshStandardMaterial({ map: gravel, roughness: 1, metalness: 0, ...layer(1) }),
+      );
+    }
+
+    this.addFlat(
+      meshes.kerbs(),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, ...layer(2) }),
+    );
+    this.addFlat(
+      meshes.lines(),
+      new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.7, ...layer(2) }),
+    );
+
+    // Two rows of 0.8 m squares.
+    const checker = checkerTexture(Math.max(2, Math.round((track.halfWidth * 2) / 0.8)), 2);
+    this.disposables.push(checker);
+    this.addFlat(
+      meshes.startLine(1.6, LINE_Y + 0.002),
+      new THREE.MeshStandardMaterial({ map: checker, roughness: 0.7, ...layer(3) }),
+    );
+  }
+
+  private addFlat(geometry: THREE.BufferGeometry, material: THREE.Material): void {
+    if (!geometry.index || geometry.index.count === 0) {
+      geometry.dispose();
+      material.dispose();
+      return;
+    }
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    this.scene.add(mesh);
+  }
+
+  private buildBarriers(meshes: TrackMeshBuilder): void {
+    const texture = barrierTexture(this.track.def.theme.barrier);
+    this.disposables.push(texture);
+    const walls = new THREE.Mesh(
+      meshes.barriers(BARRIER_HEIGHT, BARRIER_THICKNESS, BARRIER_BLOCK),
+      new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0 }),
+    );
+    // One draw call more in the shadow pass; the walls' shadows ground the track nicely.
+    walls.castShadow = true;
+    walls.receiveShadow = true;
+    this.scene.add(walls);
+  }
+
+  /**
+   * The start/finish gantry spanning the track at s = 0, with its banner and start lights.
+   * Returns the lamps and their glows (instanced, coloured per lamp by setStartLights).
+   */
+  private buildGantry(): [THREE.InstancedMesh, THREE.InstancedMesh] {
+    const track = this.track;
+    const p = track.samples[0]!;
+    // Local x across the track to the right, y up, z back towards the grid.
+    const basis = groundBasis(p.x, p.z, -p.tz, p.tx);
+    const post = track.wallOffset + BARRIER_THICKNESS + 0.6;
+    const panelWidth = LIGHT_COLUMNS * LIGHT_SPACING + 0.4;
+    const height = GANTRY_BEAM_Y + 0.85;
+    const steel = 0x2c3036;
+    const frame = merge([
+      painted(box(0.8, height, 0.8, -post, height / 2, 0), steel),
+      painted(box(0.8, height, 0.8, post, height / 2, 0), steel),
+      painted(box(2 * post + 0.8, 1.7, 0.9, 0, GANTRY_BEAM_Y, 0), steel),
+      // The light panel hangs under the beam, facing the grid: matt black, so lit lamps stand
+      // out even with a low sun shining straight at it.
+      painted(box(panelWidth, 1.75, 0.36, 0, GANTRY_BEAM_Y - 1.7, 0.1), 0x0a0b0d),
+    ]).applyMatrix4(basis);
+    const structure = new THREE.Mesh(
+      frame,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 }),
+    );
+    structure.castShadow = true;
+    structure.receiveShadow = true;
+    this.scene.add(structure);
+
+    // The banner reads from both sides of the beam.
+    const bannerWidth = Math.min(2 * post - 2, 2 * (track.halfWidth + KERB_WIDTH) + 4);
+    const texture = labelTexture('APEX GRAND PRIX', {
+      width: 2048,
+      height: Math.round((2048 * BANNER_HEIGHT) / bannerWidth),
+      background: '#b3101a',
+      color: '#ffffff',
+    });
+    this.disposables.push(texture);
+    const banner = new THREE.Mesh(
+      merge([
+        new THREE.PlaneGeometry(bannerWidth, BANNER_HEIGHT).translate(0, GANTRY_BEAM_Y, 0.47),
+        new THREE.PlaneGeometry(bannerWidth, BANNER_HEIGHT)
+          .rotateY(Math.PI)
+          .translate(0, GANTRY_BEAM_Y, -0.47),
+      ]).applyMatrix4(basis),
+      new THREE.MeshStandardMaterial({
+        map: texture,
+        roughness: 0.6,
+        // Slightly self-lit so it stays readable with the sun behind it.
+        emissive: 0xffffff,
+        emissiveMap: texture,
+        emissiveIntensity: 0.12,
+      }),
+    );
+    this.scene.add(banner);
+
+    const count = LIGHT_COLUMNS * LIGHT_ROWS;
+    const lamps = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.24, 14, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      count,
+    );
+    // No bloom pass: a soft additive halo in front of each lamp makes a lit one glow.
+    const glowMap = glowTexture();
+    this.disposables.push(glowMap);
+    const glows = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1.5, 1.5),
+      new THREE.MeshBasicMaterial({
+        map: glowMap,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      count,
+    );
+    const matrix = new THREE.Matrix4();
+    for (let c = 0; c < LIGHT_COLUMNS; c++) {
+      for (let r = 0; r < LIGHT_ROWS; r++) {
+        // Column 0 on the left as the grid sees it.
+        const x = (c - (LIGHT_COLUMNS - 1) / 2) * LIGHT_SPACING;
+        const y = GANTRY_BEAM_Y - 1.3 - r * 0.75;
+        const i = c * LIGHT_ROWS + r;
+        lamps.setMatrixAt(i, matrix.makeTranslation(x, y, 0.28).premultiply(basis));
+        lamps.setColorAt(i, LAMP_OFF);
+        glows.setMatrixAt(i, matrix.makeTranslation(x, y, 0.55).premultiply(basis));
+        glows.setColorAt(i, GLOW_OFF);
+      }
+    }
+    this.scene.add(lamps, glows);
+    return [lamps, glows];
+  }
+
+  /**
+   * Grandstands behind the barrier on the right of the main straight, plus one on the outside
+   * of the heaviest braking zone. Returns their footprints for the trees to avoid.
+   */
+  private buildGrandstands(): Footprint[] {
+    const placements = this.standPlacements();
+    if (placements.length === 0) return [];
+    const structures: THREE.BufferGeometry[] = [];
+    const crowd = new MeshBuilder();
+    const unit = standGeometry(STAND_LENGTH);
+    const corner = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const tile = CROWD_SEATS * CROWD_SEAT_WIDTH;
+    for (const place of placements) {
+      const basis = groundBasis(place.x, place.z, place.ax, place.az);
+      structures.push(unit.clone().applyMatrix4(basis));
+      // The crowd: one sloping sheet just above the seat rows, facing the track.
+      normal.set(0, ROW_DEPTH, -ROW_RISE).normalize().transformDirection(basis);
+      const sheet = (x: number, front: boolean) => {
+        const z = front ? 0.3 : STAND_DEPTH;
+        const y = STAND_FRONT + ROW_RISE * (front ? 1 : STAND_ROWS + 1) + 0.3;
+        corner.set(x, y, z).applyMatrix4(basis);
+        return crowd.vertex(
+          corner.x,
+          corner.y,
+          corner.z,
+          normal.x,
+          normal.y,
+          normal.z,
+          x / tile,
+          front ? 0 : 1,
+        );
+      };
+      const half = STAND_LENGTH / 2;
+      crowd.quad(sheet(-half, true), sheet(half, true), sheet(half, false), sheet(-half, false));
+    }
+    unit.dispose();
+
+    const stands = new THREE.Mesh(
+      merge(structures),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
+    );
+    stands.castShadow = true;
+    stands.receiveShadow = true;
+    this.scene.add(stands);
+
+    const texture = crowdTexture(STAND_ROWS);
+    this.disposables.push(texture);
+    const people = new THREE.Mesh(
+      crowd.build(),
+      new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 }),
+    );
+    people.receiveShadow = true;
+    this.scene.add(people);
+
+    return placements.map((p) => ({
+      x: p.x - p.az * (STAND_DEPTH / 2),
+      z: p.z + p.ax * (STAND_DEPTH / 2),
+      r: STAND_LENGTH / 2 + 10,
+    }));
+  }
+
+  private standPlacements(): StandPlacement[] {
+    const track = this.track;
+    const samples = track.samples;
+    const n = samples.length;
+    const spacing = track.length / n;
+    const curvature = (i: number) => samples[((i % n) + n) % n]!.curvature;
+    // The main straight: as far either way from the start line as the track stays nearly straight.
+    const straight = (i: number) => Math.abs(curvature(i)) < 1 / 400;
+    let back = 0;
+    while (back < n / 3 && straight(-back - 1)) back++;
+    let ahead = 0;
+    while (ahead < n / 3 && straight(ahead + 1)) ahead++;
+    const from = -back * spacing + 10;
+    const to = ahead * spacing - 10;
+    const half = STAND_LENGTH / 2;
+    const out: StandPlacement[] = [];
+    // Up to four in a row on the right, those nearest the grid and the line first.
+    const slots: number[] = [];
+    for (let k = -8; k <= 8; k++) {
+      const centre = (k - 0.5) * STAND_SPACING;
+      if (centre - half >= from && centre + half <= to) slots.push(centre);
+    }
+    if (slots.length === 0 && to - from >= STAND_LENGTH) slots.push((from + to) / 2);
+    slots.sort((a, b) => Math.abs(a + 20) - Math.abs(b + 20));
+    for (const centre of slots) if (out.length < 4) this.tryStand(centre, 1, out);
+
+    // The heaviest braking zone: the tight corner after the longest run without one. The stand
+    // goes on the outside, just before the turn-in.
+    const tight = 1 / 120;
+    let best = 0;
+    let brake: { s: number; side: number } | null = null;
+    for (let i = 0; i < n; i++) {
+      if (Math.abs(curvature(i)) < tight || Math.abs(curvature(i - 1)) >= tight) continue;
+      let run = 0;
+      while (run < n && Math.abs(curvature(i - 1 - run)) < tight) run++;
+      if (run * spacing <= best) continue;
+      best = run * spacing;
+      let peak = 0;
+      for (let d = 0; d < 30; d++) {
+        if (Math.abs(curvature(i + d)) > Math.abs(peak)) peak = curvature(i + d);
+      }
+      // A left turn (curvature > 0) runs wide to the right.
+      brake = { s: samples[i]!.s - 15 - half, side: peak > 0 ? 1 : -1 };
+    }
+    if (brake && best >= STAND_LENGTH + 40) this.tryStand(brake.s, brake.side, out);
+    return out;
+  }
+
+  /** Adds a stand centred at distance `s` on `side` (+1 right) if it fits clear of the track. */
+  private tryStand(s: number, side: number, out: StandPlacement[]): void {
+    const track = this.track;
+    const p = track.at(s);
+    const d = track.wallOffset + BARRIER_THICKNESS + STAND_GAP;
+    const place: StandPlacement = {
+      x: p.x - p.tz * d * side,
+      z: p.z + p.tx * d * side,
+      ax: p.tx * side,
+      az: p.tz * side,
+    };
+    const half = STAND_LENGTH / 2;
+    for (const other of out) {
+      if (Math.hypot(other.x - place.x, other.z - place.z) < STAND_LENGTH + 1) return;
+    }
+    for (const u of [-half, 0, half]) {
+      for (const v of [-1.5, STAND_DEPTH / 2, STAND_DEPTH + 0.3]) {
+        // Local z (away from the track) is (-az, ax).
+        const x = place.x + place.ax * u - place.az * v;
+        const z = place.z + place.az * u + place.ax * v;
+        if (Math.abs(track.project(x, z).lateral) < track.wallOffset + BARRIER_THICKNESS + 1) {
+          return;
+        }
+      }
+    }
+    out.push(place);
+  }
+
+  /**
+   * `theme.trees` trees scattered beyond the barriers, denser near the track: conifers and
+   * broadleaves (instanced, one draw call each plus one for all the trunks).
+   */
+  private buildTrees(avoid: Footprint[]): void {
+    const track = this.track;
+    const theme = track.def.theme;
+    const wanted = Math.max(0, Math.floor(theme.trees));
+    if (wanted === 0) return;
+    const rand = mulberry32(hashString(track.def.id) ^ 0x5bd1e995);
+    const samples = track.samples;
+    const n = samples.length;
+    const clear = track.wallOffset + TREE_CLEARANCE;
+    // Every fourth sample, for a quick distance check before the exact one.
+    const step = 4;
+    const coarse = samples.filter((_, i) => i % step === 0);
+    const slack = (step * track.length) / n;
+    const pines: THREE.Matrix4[] = [];
+    const leafy: THREE.Matrix4[] = [];
+    const position = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    for (let attempt = 0; attempt < wanted * 6 && pines.length + leafy.length < wanted; attempt++) {
+      const p = samples[Math.floor(rand() * n)]!;
+      const side = rand() < 0.5 ? -1 : 1;
+      const out =
+        track.wallOffset + TREE_NEAREST + Math.pow(rand(), 1.6) * (TREE_FARTHEST - TREE_NEAREST);
+      const along = (rand() - 0.5) * 20;
+      const pine = rand() < 0.5;
+      const size = 0.75 + rand() * 0.8;
+      const stretch = 0.85 + rand() * 0.4;
+      const yaw = rand() * Math.PI * 2;
+      const x = p.x - p.tz * out * side + p.tx * along;
+      const z = p.z + p.tx * out * side + p.tz * along;
+      let nearest = Infinity;
+      for (const c of coarse) nearest = Math.min(nearest, (c.x - x) ** 2 + (c.z - z) ** 2);
+      if (Math.sqrt(nearest) - slack < clear && Math.abs(track.project(x, z).lateral) < clear) {
+        continue;
+      }
+      if (avoid.some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < f.r * f.r)) continue;
+      position.set(x, 0, z);
+      rotation.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
+      scale.set(size, size * stretch, size);
+      (pine ? pines : leafy).push(new THREE.Matrix4().compose(position, rotation, scale));
+    }
+    const all = [...pines, ...leafy];
+    if (all.length === 0) return;
+
+    const trunks = new THREE.InstancedMesh(
+      new THREE.CylinderGeometry(0.2, 0.32, 3.2, 5, 1, true).translate(0, 1.6, 0),
+      new THREE.MeshStandardMaterial({ color: 0x5a4330, roughness: 1 }),
+      all.length,
+    );
+    all.forEach((m, i) => trunks.setMatrixAt(i, m));
+    this.scene.add(trunks);
+
+    const grass = new THREE.Color(theme.grass);
+    const color = new THREE.Color();
+    const crowns = (geometry: THREE.BufferGeometry, base: number, matrices: THREE.Matrix4[]) => {
+      if (matrices.length === 0) {
+        geometry.dispose();
+        return;
+      }
+      const mesh = new THREE.InstancedMesh(
+        geometry,
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 }),
+        matrices.length,
+      );
+      // A hint of the local grass in the leaves, and every tree a slightly different shade.
+      const tint = new THREE.Color(base).lerp(grass, 0.2);
+      matrices.forEach((m, i) => {
+        mesh.setMatrixAt(i, m);
+        color
+          .copy(tint)
+          .offsetHSL((rand() - 0.5) * 0.05, (rand() - 0.5) * 0.12, (rand() - 0.5) * 0.07);
+        mesh.setColorAt(i, color);
+      });
+      this.scene.add(mesh);
+    };
+    crowns(
+      merge([
+        new THREE.ConeGeometry(2.3, 5.2, 8).translate(0, 4.6, 0),
+        new THREE.ConeGeometry(1.6, 3.8, 8).translate(0, 7.4, 0),
+      ]),
+      0x2d5a33,
+      pines,
+    );
+    crowns(
+      new THREE.IcosahedronGeometry(2.6, 1).scale(1, 0.9, 1).translate(0, 5, 0),
+      0x4b7a35,
+      leafy,
+    );
+  }
+}
+
+/** Polygon offset for flat layer `level` (higher draws over lower; the ground is level 0). */
+function layer(level: number): Partial<THREE.MeshStandardMaterialParameters> {
+  return {
+    polygonOffset: true,
+    polygonOffsetFactor: -level,
+    polygonOffsetUnits: -2 * level,
+  };
+}
+
+/** Material colour that makes the neutral turf texture average out at `grass`. */
+function turfTint(grass: number, turf: THREE.Texture): THREE.Color {
+  const mean = (turf.userData as { mean?: number }).mean ?? 1;
+  return new THREE.Color(grass).multiplyScalar(1 / mean);
+}
+
+function createSky(sunDirection: THREE.Vector3, lowSun: number): SkyMesh {
+  const sky = new SkyMesh();
+  sky.scale.setScalar(SKY_SIZE);
+  // Hazier, redder light when the sun is low.
+  sky.turbidity.value = 3.2 + lowSun * 4;
+  sky.rayleigh.value = 1.1 + lowSun * 0.9;
+  sky.mieCoefficient.value = 0.004 + lowSun * 0.004;
+  sky.mieDirectionalG.value = 0.86;
+  sky.cloudCoverage.value = 0.32;
+  sky.sunPosition.value.copy(sunDirection);
+  return sky;
+}
+
+/** Placement at (x, z) on the ground with local x along (ax, az), y up and z = x × y. */
+function groundBasis(x: number, z: number, ax: number, az: number): THREE.Matrix4 {
+  return new THREE.Matrix4()
+    .makeBasis(
+      new THREE.Vector3(ax, 0, az),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(-az, 0, ax),
+    )
+    .setPosition(x, 0, z);
+}
+
+function box(w: number, h: number, d: number, x: number, y: number, z: number) {
+  return new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+}
+
+function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const merged = mergeGeometries(parts);
+  if (!merged) throw new Error('Could not merge the track scenery geometry');
+  for (const part of parts) part.dispose();
+  return merged;
+}
+
+function painted(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const c = new THREE.Color(hex);
+  const count = geometry.getAttribute('position').count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) colors.set([c.r, c.g, c.b], i * 3);
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
+
+/**
+ * One grandstand in its own frame: x along the track, z away from it, origin at the foot of the
+ * front wall. Stepped concrete rows, a back wall and a roof on slim posts.
+ */
+function standGeometry(length: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (w: number, h: number, d: number, x: number, y: number, z: number, hex: number) =>
+    parts.push(painted(box(w, h, d, x, y, z), hex));
+  add(length, STAND_FRONT, 0.3, 0, STAND_FRONT / 2, 0.15, 0x39414d);
+  for (let r = 0; r < STAND_ROWS; r++) {
+    const h = STAND_FRONT + (r + 1) * ROW_RISE;
+    add(length, h, ROW_DEPTH, 0, h / 2, 0.3 + (r + 0.5) * ROW_DEPTH, r % 2 ? 0x96968f : 0x8a8a84);
+  }
+  add(length, ROOF_Y, 0.3, 0, ROOF_Y / 2, STAND_DEPTH + 0.15, 0x5b636f);
+  const roofDepth = STAND_DEPTH + 2.1;
+  add(length + 1.2, 0.3, roofDepth, 0, ROOF_Y + 0.15, STAND_DEPTH + 0.3 - roofDepth / 2, 0xe6e9ed);
+  const posts = Math.max(2, Math.round(length / 16) + 1);
+  for (let k = 0; k < posts; k++) {
+    const x = -length / 2 + 0.4 + (k / (posts - 1)) * (length - 0.8);
+    add(0.25, ROOF_Y - STAND_FRONT, 0.25, x, (ROOF_Y + STAND_FRONT) / 2, 0.15, 0x4a4f57);
+  }
+  return merge(parts);
+}
+
+function hashString(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** Smooth 2D value noise in [0, 1] with features about `cell` metres across. */
+function valueNoise(seed: number, cell: number): (x: number, z: number) => number {
+  const hash = (i: number, j: number): number => {
+    let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + seed) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  return (x, z) => {
+    const gx = x / cell;
+    const gz = z / cell;
+    const i = Math.floor(gx);
+    const j = Math.floor(gz);
+    const fx = gx - i;
+    const fz = gz - j;
+    const sx = fx * fx * (3 - 2 * fx);
+    const sz = fz * fz * (3 - 2 * fz);
+    const a = hash(i, j);
+    const b = hash(i + 1, j);
+    const c = hash(i, j + 1);
+    const d = hash(i + 1, j + 1);
+    return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
+  };
+}

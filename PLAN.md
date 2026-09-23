@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Round 1 (Foundations) merged. Round 2 (Handling) built and in review. See the progress log (§10).
+> **Status:** Rounds 1–2 and Push 3 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -795,3 +795,15 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - A pad's steering range should be the kinematic grip-limit angle plus about half the tyre's peak slip angle. Using the full peak slip angle put the limit at a quarter of the stick at high speed.
   - Cars must be placed flush with sloped ground on reset, or they flip; the Round 4 tracks need this anyway.
 
+### Push 3: Menus, circuits, AI racing, championships and 25 cars (v0.3.0)
+- **Built:**
+  - Menus for controller, keyboard, mouse and touch, with animated transitions: title, main menu, track and car select, race setup, pause, results, championship, standings, settings (gameplay, controls, wheel, rumble, graphics, audio, data), rebinding of buttons and keys, a controller tester, controls and about. Button prompts match the device in use.
+  - Six fictional circuits (2.5–5.5 km): Merriford Park, Port Aveline Street Circuit, Lake Vireska, Solmara International, Veltmoor Autodrome and Sunhaven Coast. Each has kerbs, gravel or grass run-off, barriers, a start gantry with working lights, grandstands, trees, and its own sun and colours. There is a minimap.
+  - AI drivers that follow a computed racing line with four difficulty levels, overtake, recover from spins and reset when stuck. Car-to-car contact.
+  - Race rules: grid, five red lights, lap and sector timing, positions, gaps, finish and results.
+  - Game modes: Quick Race, Championship (3–6 rounds, points for the top ten, grid in championship order, saved between visits), Time Trial with track records, and Free Drive.
+  - 25 cars in five classes, with computed power, weight and top speed, and 12 paint colours.
+  - Controller rumble mixer (wheelspin, lock-ups, ABS, shifts, limiter, kerbs and grass, impacts).
+  - Touch controls for iPad: drag or tilt steering, pedals and paddles.
+  - A race engineer on the radio (the browser's speech synthesis, with subtitles).
+- **AI grip calibration:** each car's racing line plans with a measured share of its estimated grip. The share is the largest with which a flat-out AI laps five circuits without leaving the road, and it is stored per car. Rerun it with `npx vitest run -c tools/vitest.config.ts` after changing a car.
