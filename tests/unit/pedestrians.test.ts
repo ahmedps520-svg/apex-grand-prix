@@ -54,7 +54,7 @@ describe('pedestrians', () => {
     expect(active.length).toBeGreaterThanOrEqual(20);
     const before = active.map((p) => ({ p, x: p.x, z: p.z }));
     for (const p of active) {
-      expect(Math.hypot(p.x - player.pos.x, p.z - player.pos.z)).toBeLessThan(340);
+      expect(Math.hypot(p.x - player.pos.x, p.z - player.pos.z)).toBeLessThan(270);
       if (p.state !== PED_WALKING) continue;
       // On a pavement: beside a downtown road, past its edge and within the pavement's width.
       const proj = map.project(p.x, p.z, { maxDist: 30, kinds: ['street', 'avenue'] })!;

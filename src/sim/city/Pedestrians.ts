@@ -23,9 +23,9 @@ import type { Traffic } from './Traffic';
  */
 
 const CONTROL_HZ = 20;
-const SPAWN_MIN = 45;
-const SPAWN_RADIUS = 230;
-const DESPAWN_RADIUS = 330;
+const SPAWN_MIN = 40;
+const SPAWN_RADIUS = 180;
+const DESPAWN_RADIUS = 260;
 /** Where on the pavement they walk: its middle, give or take. */
 const PAVEMENT_MID = SIDEWALK / 2;
 /** How far back from the crossing road's edge the kerb wait is. */

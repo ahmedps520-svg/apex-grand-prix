@@ -168,8 +168,9 @@ export interface DebugApi {
    */
   soft: { crush: number; parts: number; moved: number } | null;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
-  /** Free roam: pedestrians about (for the tests). */
+  /** Free roam: pedestrians about, and the nearest one relative to the car (for the tests). */
   pedestrians: number;
+  pedestrianSample: { dx: number; dz: number; y: number; state: number } | null;
   roamRace: {
     phase: string;
     placed: boolean;
@@ -607,6 +608,7 @@ export class Game {
       soft: null,
       roamRace: null,
       pedestrians: 0,
+      pedestrianSample: null,
       errors: [],
     };
     window.__apex = this.debug;
@@ -1185,8 +1187,21 @@ export class Game {
           const base = snapshot.carCount * CAR_STRIDE + SOFT_FLOATS;
           this.pedestrianView.update(view, base, snapshot.simTime);
           let about = 0;
+          let nearest = Infinity;
           for (let i = 0; i < this.pedestrianView.count; i++) {
-            if (view[base + i * PED_STRIDE + 4]! >= 0) about++;
+            const o = base + i * PED_STRIDE;
+            if (view[o + 4]! < 0) continue;
+            about++;
+            const d = Math.hypot(view[o]! - player.pos.x, view[o + 2]! - player.pos.z);
+            if (d < nearest) {
+              nearest = d;
+              this.debug.pedestrianSample = {
+                dx: Math.round(view[o]! - player.pos.x),
+                dz: Math.round(view[o + 2]! - player.pos.z),
+                y: Math.round(view[o + 1]! * 100) / 100,
+                state: view[o + 4]!,
+              };
+            }
           }
           this.debug.pedestrians = about;
         }
