@@ -11,7 +11,7 @@ import { InputManager } from '../input/InputManager';
 import { RumbleMixer, canRumble } from '../input/rumble';
 import { TouchControls, hasTouch } from '../input/TouchControls';
 import { CarView } from '../render/CarView';
-import { ChaseCamera } from '../render/ChaseCamera';
+import { ChaseCamera, type CameraMode } from '../render/ChaseCamera';
 import { Cones } from '../render/Cones';
 import { createCarRenderState, interpolateCar, type CarRenderState } from '../render/interpolate';
 import type { RendererHost } from '../render/RendererHost';
@@ -41,11 +41,13 @@ import {
 } from '../render/PhotoMode';
 import { TvDirector } from '../render/TvCamera';
 import {
+  CAR_STRIDE,
   FLAG_HORN,
   FLAG_LIMITER,
   FLAG_SHIFTING,
   FLAG_SIREN,
   SIM_HZ,
+  SOFT_NODES,
   neutralInput,
   type AidLevel,
   type PoliceStatus,
@@ -134,8 +136,20 @@ export interface DebugApi {
     state: string;
     units: Array<{ x: number; z: number; d: number; siren: boolean }>;
   } | null;
+  /**
+   * Free roam: the soft body's largest node displacement, m, the panels that are off, and how
+   * far the drawn body has moved with it.
+   */
+  soft: { crush: number; parts: number; moved: number } | null;
   errors: string[];
 }
+
+/** The road or ground height at a point of the open world. */
+const cityHeightAt = (x: number, z: number): number => {
+  const map = cityMap();
+  const deck = map.deckAt(x, z, 0.5);
+  return deck ? deck.height : map.groundHeight(x, z);
+};
 
 declare global {
   interface Window {
@@ -355,6 +369,8 @@ export class Game {
   private readonly photoHost: HTMLElement;
   /** `?autopilot`: the AI drives the player's car too (demos and browser tests). */
   private readonly autopilot = new URLSearchParams(window.location.search).has('autopilot');
+  /** `?cam=orbit`: circle the car while driving (a debug view; not in the camera cycle). */
+  private readonly orbitView = new URLSearchParams(window.location.search).get('cam') === 'orbit';
   private readonly debug: DebugApi;
   private readonly idleInput = neutralInput();
 
@@ -507,6 +523,7 @@ export class Game {
       cars: 0,
       race: null,
       police: null,
+      soft: null,
       errors: [],
     };
     window.__apex = this.debug;
@@ -705,6 +722,8 @@ export class Game {
     this.hud.setHeat(null);
     this.strips.clear();
     this.menuAudio.siren(0);
+    this.cars[0]?.repairView();
+    this.debug.soft = null;
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -713,7 +732,7 @@ export class Game {
     this.radio.stop();
     this.radioBox.hide();
     this.camera.reset();
-    this.camera.mode = idle ? 'orbit' : this.settings.camera;
+    this.camera.mode = idle ? 'orbit' : this.drivingCamera;
     this.driving = !idle;
     this.paused = false;
     this.menus.inSession.value = !idle;
@@ -1017,6 +1036,9 @@ export class Game {
         this.cars[i]!.update(this.states[i]!);
       }
       const player = this.states[0]!;
+      if (this.session?.mode === 'roam' && count > 0) {
+        this.updateSoftBody(view, snapshot.carCount, player, dt);
+      }
       this.cones?.update(dt, player);
       const top = this.menus.top;
       const showroom = top === 'livery' || top === 'carSelect' || top === 'title';
@@ -1024,7 +1046,7 @@ export class Game {
         this.showroom = showroom;
         this.repaint();
         this.camera.reset();
-        this.camera.mode = showroom || !this.driving ? 'orbit' : this.settings.camera;
+        this.camera.mode = showroom || !this.driving ? 'orbit' : this.drivingCamera;
         this.tv?.cut();
       }
       this.updateShowroom();
@@ -1115,11 +1137,7 @@ export class Game {
     }
     const scene = this.scenery.scene;
     if (this.strips.root.parent !== scene) scene.add(this.strips.root);
-    this.strips.update(status?.strips ?? [], (x, z) => {
-      const map = cityMap();
-      const deck = map.deckAt(x, z, 0.5);
-      return deck ? deck.height : map.groundHeight(x, z);
-    });
+    this.strips.update(status?.strips ?? [], cityHeightAt);
     // The sirens: loudest right beside a police car with its lights on, fading with distance.
     let level = 0;
     if (controls && status && status.state === 'pursuit') {
@@ -1147,6 +1165,27 @@ export class Game {
           })),
         }
       : null;
+  }
+
+  /**
+   * Free roam: bends the player's body to the soft body's lattice (after the cars in the
+   * snapshot), drops the panels the sim says have come off, and flies the debris.
+   */
+  private updateSoftBody(
+    view: Float32Array,
+    carCount: number,
+    player: CarRenderState,
+    dt: number,
+  ): void {
+    const car = this.cars[0];
+    if (!car) return;
+    const base = carCount * CAR_STRIDE;
+    const flags = car.deform(view, base);
+    car.detach(flags, this.scenery.scene, player.vel, cityHeightAt);
+    car.updateDebris(dt, cityHeightAt);
+    let crush = 0;
+    for (let i = 0; i < SOFT_NODES * 3; i++) crush = Math.max(crush, Math.abs(view[base + i]!));
+    this.debug.soft = { crush, parts: flags, moved: car.bodyMoved };
   }
 
   /** Rain around the camera and spray behind the cars (does nothing in the dry). */
@@ -1729,7 +1768,7 @@ export class Game {
     if (!this.replay) return;
     this.replay = null;
     this.menus.replay.value = null;
-    this.camera.mode = this.driving ? this.settings.camera : 'orbit';
+    this.camera.mode = this.driving ? this.drivingCamera : 'orbit';
     this.camera.reset();
     if (!this.paused) this.sim.resume();
   }
@@ -2276,7 +2315,7 @@ export class Game {
     if (Math.abs(this.host.scale - s.resolutionScale) > 1e-3) {
       this.host.setResolutionScale(s.resolutionScale);
     }
-    if (this.camera.mode !== 'orbit') this.camera.mode = s.camera;
+    if (this.camera.mode !== 'orbit') this.camera.mode = this.drivingCamera;
     this.sim.command({ kind: 'setAids', car: 0, aids: { ...s.aids } });
     this.applyHudVisibility();
   }
@@ -2478,9 +2517,20 @@ export class Game {
     }
   }
 
+  /** The camera while driving: the setting, unless the orbit debug view was asked for. */
+  private get drivingCamera(): CameraMode {
+    return this.orbitView ? 'orbit' : this.settings.camera;
+  }
+
   private resetCar(): void {
     this.rumble.stop(this.input.activePad);
     this.sim.command({ kind: 'resetCar', car: 0 });
+    // Free roam: the quick repair comes with the reset.
+    if (this.session?.mode === 'roam') {
+      this.sim.command({ kind: 'repair', car: 0 });
+      this.cars[0]?.repairView();
+      this.toasts.show('Repaired and reset.', { timeout: 2 });
+    }
     this.camera.reset();
   }
 

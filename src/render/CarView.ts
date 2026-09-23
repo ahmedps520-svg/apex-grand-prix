@@ -10,9 +10,59 @@ import {
   FLAG_INDICATOR_LEFT,
   FLAG_INDICATOR_RIGHT,
   FLAG_SIREN,
+  PART_BUMPER_FRONT,
+  PART_BUMPER_REAR,
+  PART_DOOR_LEFT,
+  PART_DOOR_RIGHT,
+  PART_HOOD,
+  PART_WING,
+  SOFT_NODES,
 } from '../shared/protocol';
+import type { Vec3 } from '../shared/math';
+import { SOFT_NZ, latticeAxes, nodeIndex } from '../sim/vehicle/softbody';
 import type { CarRenderState } from './interpolate';
 import { LiveryMaterial, type LiveryLayout } from './liveryMaterial';
+
+/** Panels that can come off in a crash (free roam), and the flag each answers to. */
+type Panel = 'hood' | 'bumperFront' | 'bumperRear' | 'doorLeft' | 'doorRight' | 'wing';
+const PANEL_FLAGS: Record<Panel, number> = {
+  hood: PART_HOOD,
+  bumperFront: PART_BUMPER_FRONT,
+  bumperRear: PART_BUMPER_REAR,
+  doorLeft: PART_DOOR_LEFT,
+  doorRight: PART_DOOR_RIGHT,
+  wing: PART_WING,
+};
+
+/** A mesh whose vertices follow the soft body's lattice (and the traffic's dents). */
+interface Deformable {
+  mesh: THREE.Mesh;
+  /** Vertex positions as built, and each vertex's eight lattice nodes with their weights. */
+  original: Float32Array;
+  corners: Uint8Array;
+  weights: Float32Array;
+  panel: Panel | null;
+}
+
+interface PanelView {
+  mesh: THREE.Mesh;
+  /** Where it sits on the car, to put it back after a repair. */
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+}
+
+/** A panel that has come off: it tumbles to the ground and lies there. */
+interface Debris {
+  mesh: THREE.Mesh;
+  vel: THREE.Vector3;
+  spin: THREE.Vector3;
+  resting: boolean;
+}
+
+/** How far a dented end is pushed in, m, and how much of the end it covers, m. */
+const DENT_DEPTH = 0.3;
+const DENT_REACH = 0.7;
+const GRAVITY = 9.81;
 
 interface WheelView {
   /** Positioned at the wheel centre; rotates for steering. */
@@ -179,6 +229,23 @@ export class CarView {
   private readonly beams: THREE.SpotLight[] = [];
   /** A police car: a light bar on the roof whose strobes run with the siren. */
   private readonly police: boolean;
+  /** Damage: the meshes that follow the lattice, the panels that can come off, and debris. */
+  private readonly deformables: Deformable[] = [];
+  private readonly panelGeometries: Array<{
+    panel: Panel;
+    part: Part;
+    geometry: THREE.BufferGeometry;
+  }> = [];
+  private readonly panels = new Map<Panel, PanelView>();
+  private readonly debris: Debris[] = [];
+  private detached = 0;
+  private readonly lastDisp = new Float32Array(SOFT_NODES * 3);
+  private readonly dents = { front: 0, rear: 0 };
+  private shaped = false;
+  /** The furthest any vertex now sits from where it was built, m (for the tests). */
+  bodyMoved = 0;
+  private readonly axes: { xs: number[]; ys: number[]; zs: number[] };
+  private readonly dims: { front: number; rear: number };
 
   /** `livery` wins over `paint`; without one the car wears the default livery in `paint`. */
   constructor(
@@ -190,6 +257,8 @@ export class CarView {
     police = false,
   ) {
     this.police = police;
+    this.axes = latticeAxes(spec);
+    this.dims = { front: spec.body.front, rear: spec.body.rear };
     const mat = {
       glass: this.material(
         new THREE.MeshPhysicalMaterial({ color: 0x0d141c, roughness: 0.08, metalness: 0.3 }),
@@ -280,6 +349,9 @@ export class CarView {
 
   update(state: CarRenderState): void {
     this.root.position.set(state.pos.x, state.pos.y, state.pos.z);
+    if (state.dentFront !== this.dents.front || state.dentRear !== this.dents.rear) {
+      this.setDents(state.dentFront, state.dentRear);
+    }
     const flags = state.flags;
     const blink = performance.now() % 800 < 400;
     const left = (flags & (FLAG_INDICATOR_LEFT | FLAG_HAZARDS)) !== 0 && blink;
@@ -310,9 +382,216 @@ export class CarView {
   }
 
   dispose(): void {
+    for (const d of this.debris) d.mesh.removeFromParent();
+    this.debris.length = 0;
     for (const g of this.geometries) g.dispose();
     for (const m of this.materials) m.dispose();
     this.paint.dispose();
+  }
+
+  // ---------------------------------------------------------------- damage
+
+  /**
+   * Free roam: bends the body to the soft body's lattice (node displacements at `base` in the
+   * snapshot). Returns the flags of the panels the sim says have come off.
+   */
+  deform(view: Float32Array, base: number): number {
+    let changed = false;
+    const last = this.lastDisp;
+    for (let i = 0; i < SOFT_NODES * 3; i++) {
+      const d = view[base + i]!;
+      if (Math.abs(d - last[i]!) > 0.002) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed) {
+      for (let i = 0; i < SOFT_NODES * 3; i++) last[i] = view[base + i]!;
+      this.reshape();
+    }
+    return view[base + SOFT_NODES * 3]! | 0;
+  }
+
+  /** Traffic's simple damage: each end pushed in by its dent. */
+  setDents(front: number, rear: number): void {
+    this.dents.front = front;
+    this.dents.rear = rear;
+    this.reshape();
+  }
+
+  /**
+   * Takes off the panels whose flags are set (once each): they leave the car with its velocity
+   * and a tumble, and fall to the road.
+   */
+  detach(
+    flags: number,
+    scene: THREE.Object3D,
+    vel: Vec3,
+    heightAt: (x: number, z: number) => number,
+  ): void {
+    const fresh = flags & ~this.detached;
+    if (!fresh) return;
+    this.detached |= fresh;
+    for (const [panel, view] of this.panels) {
+      if (!(fresh & PANEL_FLAGS[panel])) continue;
+      const mesh = view.mesh;
+      const position = new THREE.Vector3();
+      const quaternion = new THREE.Quaternion();
+      mesh.getWorldPosition(position);
+      mesh.getWorldQuaternion(quaternion);
+      mesh.removeFromParent();
+      mesh.position.copy(position);
+      mesh.quaternion.copy(quaternion);
+      scene.add(mesh);
+      const side = panel === 'doorLeft' ? -1 : panel === 'doorRight' ? 1 : 0;
+      this.debris.push({
+        mesh,
+        vel: new THREE.Vector3(
+          vel.x * 0.8 + side * 2 + (Math.random() - 0.5) * 2,
+          3 + Math.random() * 2,
+          vel.z * 0.8 + (Math.random() - 0.5) * 2,
+        ),
+        spin: new THREE.Vector3(
+          (Math.random() - 0.5) * 8,
+          (Math.random() - 0.5) * 4,
+          (Math.random() - 0.5) * 8,
+        ),
+        resting: false,
+      });
+      position.y = Math.max(position.y, heightAt(position.x, position.z) + 0.1);
+    }
+  }
+
+  /** Flies the panels that came off, until they land. */
+  updateDebris(dt: number, heightAt: (x: number, z: number) => number): void {
+    for (const d of this.debris) {
+      if (d.resting) continue;
+      d.vel.y -= GRAVITY * dt;
+      d.mesh.position.addScaledVector(d.vel, dt);
+      d.mesh.rotation.x += d.spin.x * dt;
+      d.mesh.rotation.y += d.spin.y * dt;
+      d.mesh.rotation.z += d.spin.z * dt;
+      const ground = heightAt(d.mesh.position.x, d.mesh.position.z) + 0.06;
+      if (d.mesh.position.y < ground) {
+        d.mesh.position.y = ground;
+        d.vel.y = Math.abs(d.vel.y) * 0.25;
+        d.vel.x *= 0.6;
+        d.vel.z *= 0.6;
+        d.spin.multiplyScalar(0.4);
+        if (d.vel.length() < 0.6) {
+          d.resting = true;
+          // Lies flat.
+          d.mesh.rotation.x = Math.round(d.mesh.rotation.x / Math.PI) * Math.PI;
+          d.mesh.rotation.z = Math.round(d.mesh.rotation.z / Math.PI) * Math.PI;
+        }
+      }
+    }
+  }
+
+  /** Puts every panel back and straightens the body (a repair). */
+  repairView(): void {
+    for (const d of this.debris) {
+      d.mesh.removeFromParent();
+      this.root.add(d.mesh);
+    }
+    this.debris.length = 0;
+    for (const view of this.panels.values()) {
+      view.mesh.position.copy(view.position);
+      view.mesh.quaternion.copy(view.quaternion);
+      view.mesh.rotation.setFromQuaternion(view.quaternion);
+    }
+    this.detached = 0;
+    this.lastDisp.fill(0);
+    this.dents.front = 0;
+    this.dents.rear = 0;
+    this.reshape();
+  }
+
+  /** Every vertex from its built position, plus the dents and the lattice's displacement. */
+  private reshape(): void {
+    const disp = this.lastDisp;
+    let bent = this.dents.front > 0 || this.dents.rear > 0;
+    for (let i = 0; i < disp.length && !bent; i++) if (Math.abs(disp[i]!) > 0.001) bent = true;
+    if (!bent && !this.shaped) return;
+    this.shaped = bent;
+    const { front, rear } = this.dents;
+    const zF = -this.dims.front;
+    const zR = this.dims.rear;
+    let moved = 0;
+    for (const d of this.deformables) {
+      if (d.panel && this.detached & PANEL_FLAGS[d.panel]) continue;
+      const attr = d.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const out = attr.array as Float32Array;
+      const orig = d.original;
+      const n = orig.length / 3;
+      for (let v = 0; v < n; v++) {
+        const i = v * 3;
+        let x = orig[i]!;
+        let y = orig[i + 1]!;
+        let z = orig[i + 2]!;
+        if (front > 0 && z < zF + DENT_REACH) {
+          const k = (1 - (z - zF) / DENT_REACH) * front;
+          z += DENT_DEPTH * k;
+          y += 0.05 * k * Math.sin(x * 9 + y * 5);
+        }
+        if (rear > 0 && z > zR - DENT_REACH) {
+          const k = (1 - (zR - z) / DENT_REACH) * rear;
+          z -= DENT_DEPTH * k;
+          y += 0.05 * k * Math.sin(x * 9 + y * 5);
+        }
+        if (bent) {
+          for (let c = 0; c < 8; c++) {
+            const w = d.weights[v * 8 + c]!;
+            if (w === 0) continue;
+            const node = d.corners[v * 8 + c]! * 3;
+            x += disp[node]! * w;
+            y += disp[node + 1]! * w;
+            z += disp[node + 2]! * w;
+          }
+        }
+        out[i] = x;
+        out[i + 1] = y;
+        out[i + 2] = z;
+        const m = Math.abs(x - orig[i]!) + Math.abs(y - orig[i + 1]!) + Math.abs(z - orig[i + 2]!);
+        if (m > moved) moved = m;
+      }
+      attr.needsUpdate = true;
+      d.mesh.geometry.computeVertexNormals();
+    }
+    this.bodyMoved = moved;
+  }
+
+  /** Binds a mesh's vertices to the lattice (trilinear weights of the cell each sits in). */
+  private bindToLattice(mesh: THREE.Mesh, panel: Panel | null): void {
+    const attr = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const positions = attr.array as Float32Array;
+    const n = attr.count;
+    const corners = new Uint8Array(n * 8);
+    const weights = new Float32Array(n * 8);
+    const { xs, ys, zs } = this.axes;
+    const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
+    for (let v = 0; v < n; v++) {
+      const x = positions[v * 3]!;
+      const y = positions[v * 3 + 1]!;
+      const z = positions[v * 3 + 2]!;
+      const cx = x < xs[1]! ? 0 : 1;
+      const tx = clamp01((x - xs[cx]!) / (xs[cx + 1]! - xs[cx]!));
+      const ty = clamp01((y - ys[0]!) / (ys[1]! - ys[0]!));
+      let cz = 0;
+      while (cz < SOFT_NZ - 2 && z > zs[cz + 1]!) cz++;
+      const tz = clamp01((z - zs[cz]!) / (zs[cz + 1]! - zs[cz]!));
+      let c = 0;
+      for (let dz = 0; dz <= 1; dz++) {
+        for (let dy = 0; dy <= 1; dy++) {
+          for (let dx = 0; dx <= 1; dx++) {
+            corners[v * 8 + c] = nodeIndex(cx + dx, dy, cz + dz);
+            weights[v * 8 + c] = (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz);
+            c++;
+          }
+        }
+      }
+    }
+    this.deformables.push({ mesh, original: new Float32Array(positions), corners, weights, panel });
   }
 
   /**
@@ -412,16 +691,74 @@ export class CarView {
         -body.front + 0.12,
       ]);
     }
+    // The panels that can come off in a crash: bumpers, bonnet, doors, and the wing.
+    const bumperY = yB + 0.12;
+    this.panelGeometries.push(
+      {
+        panel: 'bumperFront',
+        part: 'paint',
+        geometry: new RoundedBoxGeometry(halfWidth * 1.9, 0.14, 0.14, 3, 0.04).translate(
+          0,
+          bumperY,
+          zF - 0.02,
+        ),
+      },
+      {
+        panel: 'bumperRear',
+        part: 'paint',
+        geometry: new RoundedBoxGeometry(halfWidth * 1.9, 0.14, 0.14, 3, 0.04).translate(
+          0,
+          bumperY,
+          zR + 0.02,
+        ),
+      },
+      {
+        panel: 'hood',
+        part: 'paint',
+        geometry: this.profileGeometry(
+          [
+            [zF + 0.18, noseTop + 0.012],
+            [zF + length * 0.2, yT - look.noseDrop * 0.35 + 0.012],
+            [cabinFront - 0.22, yT + 0.012],
+            [cabinFront - 0.22, yT - 0.012],
+            [zF + length * 0.2, yT - look.noseDrop * 0.35 - 0.012],
+            [zF + 0.18, noseTop - 0.012],
+          ],
+          halfWidth * 0.72,
+          0.008,
+        ),
+      },
+    );
+    for (const side of [-1, 1]) {
+      this.panelGeometries.push({
+        panel: side < 0 ? 'doorLeft' : 'doorRight',
+        part: 'paint',
+        geometry: new THREE.BoxGeometry(0.024, yT - yB - 0.12, cabinLength * 0.95).translate(
+          side * (halfWidth + 0.006),
+          (yT + yB) / 2,
+          cabinZ + 0.05,
+        ),
+      });
+    }
     if (look.wing > 0) {
       const wingY = upperTop + look.wing;
-      this.box('carbon', body.halfWidth * 1.85, 0.05, 0.36, 0.02, [0, wingY, body.rear - 0.25]);
-      for (const side of [-1, 1]) {
-        this.block('carbon', 0.05, look.wing, 0.18, [
-          side * 0.55,
-          wingY - look.wing / 2,
+      const wing: THREE.BufferGeometry[] = [
+        new RoundedBoxGeometry(body.halfWidth * 1.85, 0.05, 0.36, 3, 0.02).translate(
+          0,
+          wingY,
           body.rear - 0.25,
-        ]);
+        ),
+      ];
+      for (const side of [-1, 1]) {
+        wing.push(
+          new THREE.BoxGeometry(0.05, look.wing, 0.18).translate(
+            side * 0.55,
+            wingY - look.wing / 2,
+            body.rear - 0.25,
+          ),
+        );
       }
+      this.panelGeometries.push({ panel: 'wing', part: 'carbon', geometry: merge(wing) });
     } else {
       // A small lip spoiler on the boot.
       this.box('paint', body.halfWidth * 1.6, 0.05, 0.14, 0.02, [
@@ -619,6 +956,16 @@ export class CarView {
     bevel: number,
     taper?: { taper: number; from: number; to: number },
   ): void {
+    this.parts[part].push(this.profileGeometry(outline, halfWidth, bevel, taper));
+  }
+
+  /** The geometry behind `profile`, for parts that stay separate meshes. */
+  private profileGeometry(
+    outline: ReadonlyArray<readonly [number, number]>,
+    halfWidth: number,
+    bevel: number,
+    taper?: { taper: number; from: number; to: number },
+  ): THREE.BufferGeometry {
     const shape = new THREE.Shape();
     outline.forEach(([z, y], i) => (i === 0 ? shape.moveTo(z, y) : shape.lineTo(z, y)));
     shape.closePath();
@@ -647,7 +994,7 @@ export class CarView {
       pos.setXYZ(i, x, sy, sx);
       nor.setXYZ(i, -nor.getZ(i), nor.getY(i), nor.getX(i));
     }
-    this.parts[part].push(geo);
+    return geo;
   }
 
   /** A plain box body part centred at `at` in the car frame. */
@@ -674,14 +1021,27 @@ export class CarView {
     }
   }
 
-  /** Turns the collected body parts into one mesh per material. */
+  /** Turns the collected body parts into one mesh per material, and the panels into theirs. */
   private mergeParts(materials: Record<Part, THREE.Material>): void {
     for (const part of Object.keys(this.parts) as Part[]) {
       const geometries = this.parts[part];
       if (geometries.length === 0) continue;
-      this.root.add(new THREE.Mesh(this.geometry(merge(geometries)), materials[part]));
+      const mesh = new THREE.Mesh(this.geometry(merge(geometries)), materials[part]);
+      this.root.add(mesh);
+      this.bindToLattice(mesh, null);
       geometries.length = 0;
     }
+    for (const { panel, part, geometry } of this.panelGeometries) {
+      const mesh = new THREE.Mesh(this.geometry(geometry), materials[part]);
+      this.root.add(mesh);
+      this.bindToLattice(mesh, panel);
+      this.panels.set(panel, {
+        mesh,
+        position: mesh.position.clone(),
+        quaternion: mesh.quaternion.clone(),
+      });
+    }
+    this.panelGeometries.length = 0;
   }
 
   private geometry<T extends THREE.BufferGeometry>(g: T): T {

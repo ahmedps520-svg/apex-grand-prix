@@ -1,3 +1,4 @@
+import { SoftBody } from './softbody';
 import {
   addScaledV,
   approach,
@@ -161,6 +162,8 @@ class Wheel {
   contact = false;
   /** Grip left in the tyre: 1 whole, 0.3 burst on a spike strip. */
   burst = 1;
+  /** This corner's suspension, 0 as new … 1 wrecked (from the soft body's crush). */
+  damage = 0;
   load = 0;
   slip = 0;
   slipRatio = 0;
@@ -274,6 +277,8 @@ export class Car {
   private boostTime = 0;
   /** How much impacts hurt: 0 = no damage, 0.5 = light, 1 = full. */
   damageScale = 0;
+  /** Free roam: the deformable shell (null elsewhere). */
+  soft: SoftBody | null = null;
   /** On the grid before the start: the handbrake is held on whatever the driver does. */
   holdForStart = false;
   private readonly wheelbase: number;
@@ -482,6 +487,10 @@ export class Car {
     this.updateControls(dt);
     this.updateHybrid(dt);
     this.updateIndicator();
+    if (this.soft) {
+      this.soft.step(dt);
+      this.applySoftDamage();
+    }
     this.absActive = false;
     this.tcActive = false;
     this.impactForce = 0;
@@ -606,7 +615,10 @@ export class Car {
     // Turning right (angle > 0): the right wheel is on the inside. Toe-in points each wheel's
     // front towards the car's centre line.
     // Bent steering: both front wheels point off to one side, so the car pulls.
-    const bent = this.damage.steering * DAMAGE_TOE;
+    // A bent chassis pulls the steering: from the lattice where there is one, else the tally.
+    const bent = this.soft
+      ? clamp(this.soft.metrics.bend * 0.6, -0.09, 0.09)
+      : this.damage.steering * DAMAGE_TOE;
     fl.steer = sign * (angle > 0 ? outer : inner) + front.toe + bent;
     fr.steer = sign * (angle > 0 ? inner : outer) - front.toe + bent;
     rl.steer = this.spec.rear.toe;
@@ -663,11 +675,17 @@ export class Car {
     }
     const axle = w.axle;
     const compressionRate = -w.lengthRate;
-    let force = Math.max(axle.springRate * (w.freeLength - w.length), 0);
+    // A crushed corner: a softer, shorter spring and a leaking damper.
+    const hurt = w.damage;
+    let force = Math.max(
+      axle.springRate * (1 - 0.5 * hurt) * (w.freeLength - 0.06 * hurt - w.length),
+      0,
+    );
     force +=
-      compressionRate > 0
+      (compressionRate > 0
         ? axle.bumpDamping * compressionRate
-        : axle.reboundDamping * compressionRate;
+        : axle.reboundDamping * compressionRate) *
+      (1 - 0.6 * hurt);
     const stopDepth = w.fullBumpLength + axle.bumpStopRange - w.length;
     if (stopDepth > 0) {
       // Progressive rubber bump stop with a little damping.
@@ -861,7 +879,7 @@ export class Car {
 
     // Camber: the wheel plane leans with static camber, camber gain and body roll.
     const bump = axle.staticLength - w.length;
-    const bodyCamber = axle.camber + axle.camberGain * bump;
+    const bodyCamber = axle.camber + axle.camberGain * bump - 0.1 * w.damage;
     const upWheel = setV(this.t3, w.side * Math.sin(bodyCamber), Math.cos(bodyCamber), 0);
     rotateV(upWheel, this.rot, upWheel);
     const lean = dotV(upWheel, right);
@@ -1071,7 +1089,14 @@ export class Car {
         normal.nz * push - tz * friction,
       );
       this.impactForce = Math.max(this.impactForce, push);
-      if (-vn > DAMAGE_MIN_SPEED) this.takeDamage(p, push * -vn * SIM_DT);
+      if (-vn > DAMAGE_MIN_SPEED) {
+        this.takeDamage(p, push * -vn * SIM_DT);
+        if (this.soft && this.damageScale > 0) {
+          // The wall pushes the shell in along its normal, at the closing speed.
+          const dir = invRotateV(vScratch2, this.rot, setV(vScratch2, normal.nx, 0, normal.nz));
+          this.soft.press(p.x, p.y, p.z, dir.x, dir.y, dir.z, -vn * this.damageScale, SIM_DT);
+        }
+      }
       crossV(vScratch, arm, f);
       addScaledV(this.torque, this.torque, vScratch, 1);
       addScaledV(this.force, this.force, f, 1);
@@ -1099,7 +1124,37 @@ export class Car {
     if (j / this.spec.mass > DAMAGE_MIN_SPEED * 0.5) {
       const at = invRotateV(vScratch3, this.rot, subV(vScratch3, point, this.pos));
       this.takeDamage(at, (j * j) / (2 * this.spec.mass));
+      if (this.soft && this.damageScale > 0) {
+        const dir = invRotateV(
+          vScratch2,
+          this.rot,
+          setV(vScratch2, impulse.x / j, impulse.y / j, impulse.z / j),
+        );
+        const speed = Math.min((j / this.spec.mass) * 2.5, 20) * this.damageScale;
+        this.soft.impact(at.x, at.y, at.z, dir.x, dir.y, dir.z, speed);
+      }
     }
+  }
+
+  /** Free roam: gives the car its deformable shell. */
+  enableSoftBody(): void {
+    this.soft ??= new SoftBody(this.spec);
+  }
+
+  /** Feeds the shell's permanent deformation back into the handling and the damage tally. */
+  private applySoftDamage(): void {
+    const soft = this.soft;
+    if (!soft || !soft.damaged) return;
+    const m = soft.metrics;
+    for (let i = 0; i < this.wheels.length; i++) {
+      const w = this.wheels[i]!;
+      w.damage = m.corner[i] ?? 0;
+      // A corner crushed onto the wheel bursts the tyre.
+      if (w.damage > 0.75) w.burst = Math.min(w.burst, 0.3);
+    }
+    const d = this.damage;
+    d.engine = Math.max(d.engine, Math.min(m.front / 0.4, 1));
+    d.aero = Math.max(d.aero, Math.min(Math.max(m.front, m.rear) / 0.3, 1));
   }
 
   /** Impact energy (J) at a point in the car's frame damages the parts near it. */
@@ -1164,6 +1219,11 @@ export class Car {
     this.damage.aero = 0;
     this.damage.engine = 0;
     this.damage.steering = 0;
+    this.soft?.reset();
+    for (const w of this.wheels) {
+      w.damage = 0;
+      w.burst = 1;
+    }
   }
 
   /** Acceleration the driver feels (everything but gravity), in the car's frame, smoothed. */

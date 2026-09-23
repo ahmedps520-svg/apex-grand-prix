@@ -45,6 +45,9 @@ export interface CarRenderState {
   damageAero: number;
   damageEngine: number;
   damageSteer: number;
+  /** Traffic's simple damage: how dented each end is, 0 … 1. */
+  dentFront: number;
+  dentRear: number;
   /** DRS: 0 = not here, 1 = allowed, 2 = open. ERS battery 0 … 1 (-1 = no hybrid). */
   drs: number;
   ers: number;
@@ -91,6 +94,8 @@ export function createCarRenderState(): CarRenderState {
     damageAero: 0,
     damageEngine: 0,
     damageSteer: 0,
+    dentFront: 0,
+    dentRear: 0,
     drs: 0,
     ers: -1,
     ersBoost: false,
@@ -143,6 +148,8 @@ export function interpolateCar(
   out.damageAero = buf[b + C.DAMAGE_AERO]!;
   out.damageEngine = buf[b + C.DAMAGE_ENGINE]!;
   out.damageSteer = buf[b + C.DAMAGE_STEER]!;
+  out.dentFront = buf[b + C.DENT_FRONT]!;
+  out.dentRear = buf[b + C.DENT_REAR]!;
   out.drs = buf[b + C.DRS]!;
   out.ers = buf[b + C.ERS]!;
   out.ersBoost = buf[b + C.ERS_BOOST]! > 0.5;
