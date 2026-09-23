@@ -18,7 +18,7 @@ import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
-import { CityMinimap } from '../ui/CityMinimap';
+import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
 import { cityMap, type CityMap } from '../content/city/map';
 import {
   POLICE_PAINT,
@@ -54,6 +54,7 @@ import {
   type AidLevel,
   type PoliceStatus,
   type SessionConfig,
+  type RoamStart,
   type SpawnPoint,
 } from '../shared/protocol';
 import { mulberry32 } from '../shared/math';
@@ -96,7 +97,19 @@ import {
   type Glyphs,
 } from './DrivingSchool';
 import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from './ghost';
-import { loadRecords, loadSeason, saveRecord, saveSeason } from './records';
+import {
+  loadFestivalRecords,
+  loadRecords,
+  loadSeason,
+  saveFestivalRecord,
+  saveRecord,
+  saveSeason,
+} from './records';
+import { Festival } from './Festival';
+import { EventHud } from '../ui/EventHud';
+import { FestivalScene } from '../render/FestivalScene';
+import { festivalEvents, type EventKind } from '../content/city/events';
+import type { FestivalInfo } from '../ui/menu/store';
 import { ReplayRecorder, type Replay } from './replay';
 import {
   DAMAGE_SCALE,
@@ -154,6 +167,24 @@ const cityHeightAt = (x: number, z: number): number => {
   const deck = map.deckAt(x, z, 0.5);
   return deck ? deck.height : map.groundHeight(x, z);
 };
+
+/** The festival's marker colours by event kind (the minimap and the map screen agree). */
+const EVENT_COLOURS: Record<EventKind, string> = {
+  race: '#ff3b2f',
+  drift: '#37d4ff',
+  camera: '#ffd166',
+  jump: '#ff8a5b',
+};
+
+/** The free-roam starts, as fast-travel destinations. */
+const SPAWN_NAMES: ReadonlyArray<[RoamStart, string]> = [
+  ['downtown', 'Downtown'],
+  ['highway', 'Orbital highway'],
+  ['suburbs', 'Suburbs'],
+  ['port', 'Port'],
+  ['mountain', 'Ridge Road'],
+  ['circuit', 'Circuit'],
+];
 
 /** Arcade: cones on the corners of the flat junctions (the cones lie on the ground plane). */
 function cityConePlacements(map: CityMap): ConePlacement[] {
@@ -450,6 +481,14 @@ export class Game {
   /** Arcade: the skill points of the session, and their HUD. */
   private skill: Skill | null = null;
   private readonly skillHud: SkillHud;
+  /** Free roam: the festival's events and rules, their HUD, their furniture and their bests. */
+  private festival: Festival | null = null;
+  private readonly eventHud: EventHud;
+  private festivalScene: FestivalScene | null = null;
+  private festivalRecords = loadFestivalRecords();
+  private festivalMarkers: MinimapMarker[] = [];
+  /** Whether the police have been told an event is on (speeding is sanctioned). */
+  private sanctioned = false;
   private lastPadName = '';
   private lastWheelId = '';
   private soundCheckAt = -1;
@@ -484,6 +523,7 @@ export class Game {
     const upshift = TEST_MULE.gearbox.upshiftRpm;
     this.hud = new Hud(ui, { upshiftRpm: upshift, shiftLightsFrom: upshift - SHIFT_LIGHT_RANGE });
     this.skillHud = new SkillHud(ui);
+    this.eventHud = new EventHud(ui);
     this.raceHud = new RaceHud(ui);
     this.radioBox = new RadioBox(ui);
     this.radio.onMessage = (text) => this.radioBox.show(text);
@@ -753,6 +793,18 @@ export class Game {
     this.skill = config.handling === 'arcade' && !idle && !attract ? new Skill() : null;
     this.skillHud.reset();
     if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
+    // Free roam: the festival's events, with the bests kept in this browser.
+    const events = roam ? festivalEvents(cityMap()) : [];
+    this.festival =
+      roam && !idle && !attract
+        ? new Festival(events, this.festivalRecords, (id, value) => {
+            this.festivalRecords = saveFestivalRecord(id, value);
+          })
+        : null;
+    this.eventHud.reset();
+    this.sanctioned = false;
+    this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
+    this.menus.festival.value = roam ? this.festivalInfo() : null;
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -859,6 +911,8 @@ export class Game {
     this.minimap?.dispose();
     this.minimap = null;
     this.cones = null;
+    this.festivalScene?.dispose();
+    this.festivalScene = null;
     const def = config.trackId ? trackById(config.trackId) : undefined;
     if (config.mode === 'roam') {
       this.track = null;
@@ -867,6 +921,8 @@ export class Game {
       const detail =
         this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
       this.scenery = new CityScene(map, config.conditions, detail);
+      this.festivalScene = new FestivalScene(festivalEvents(map));
+      this.scenery.scene.add(this.festivalScene.root);
       if (config.handling === 'arcade') {
         // Festival cones on the junction corners, to send flying for points.
         this.cones = new Cones(cityConePlacements(map), TEST_MULE.body);
@@ -971,6 +1027,7 @@ export class Game {
     this.audio.suspend();
     this.radio.stop();
     this.rumble.stop(this.input.activePad);
+    if (this.session?.mode === 'roam') this.menus.festival.value = this.festivalInfo();
     this.menus.set(['pause']);
     this.applyHudVisibility();
   }
@@ -1005,6 +1062,7 @@ export class Game {
       this.driving && !this.menus.open && !this.photo && !this.flyover && !this.podium;
     this.hud.setVisible(driving);
     this.skillHud.setVisible(driving && this.skill !== null);
+    this.eventHud.setVisible(driving && this.festival !== null);
     const mode = this.session?.mode;
     this.raceHud.setVisible(driving && mode !== 'free' && mode !== 'roam' && !this.school);
     this.minimap?.setVisible(driving);
@@ -1107,6 +1165,23 @@ export class Game {
         if (this.skill) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
+        }
+        if (this.festival) {
+          this.festival.update(dt, snapshot.simTime, player);
+          this.eventHud.update(this.festival.view);
+          for (const n of this.festival.notices.splice(0)) {
+            this.toasts.show(n.text, { timeout: 6 });
+            if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
+          }
+          this.festivalScene?.setNextCheckpoint(this.festival.nextCheckpoint(), dt);
+          // An event on, or close ahead, is sanctioned: the police let the speed go.
+          const view = this.festival.view;
+          const sanctioned =
+            view.active !== null || (view.hint !== null && view.hint.distance < 150);
+          if (sanctioned !== this.sanctioned) {
+            this.sanctioned = sanctioned;
+            this.sim.command({ kind: 'sanction', on: sanctioned });
+          }
         }
         this.telemetry.update(dt, player, {
           steer: input.raw.steer,
@@ -1910,7 +1985,7 @@ export class Game {
         dot.x = this.states[i]!.pos.x;
         dot.z = this.states[i]!.pos.z;
       }
-      this.minimap.update(this.minimapCars.slice(0, count));
+      this.minimap.update(this.minimapCars.slice(0, count), this.festivalMarkers);
     }
     if (!race || !track || !this.driving || this.menus.open) return;
     // Grid intro: the camera circles the car until the lights start coming on.
@@ -2288,6 +2363,7 @@ export class Game {
         }
       },
       resume: () => this.resume(),
+      fastTravel: (id) => this.fastTravel(id),
       resetCar: () => {
         this.resume();
         this.resetCar();
@@ -2556,6 +2632,62 @@ export class Game {
     }
   }
 
+  /** Free roam: the festival map's contents for the pause menu. */
+  private festivalInfo(): FestivalInfo {
+    const map = cityMap();
+    const player = this.states[0];
+    const destinations: FestivalInfo['destinations'] = [];
+    for (const [id, name] of SPAWN_NAMES) {
+      const s = map.spawns[id];
+      destinations.push({ id: `spawn-${id}`, kind: 'spawn', name, best: null, x: s.x, z: s.z });
+    }
+    for (const e of festivalEvents(map)) {
+      const best = this.festivalRecords[e.id];
+      destinations.push({
+        id: e.id,
+        kind: e.kind,
+        name: e.name,
+        best: best === undefined ? null : Festival.format(e.kind, best),
+        x: e.x,
+        z: e.z,
+      });
+    }
+    return {
+      destinations,
+      roads: map.roads.map((r) => ({
+        points: r.points,
+        loop: r.loop,
+        elevated: r.elevated,
+        kind: r.kind,
+      })),
+      bounds: { minX: MAP_MIN_X, maxX: MAP_MAX_X, minZ: MAP_MIN_Z, maxZ: MAP_MAX_Z },
+      player: { x: player?.pos.x ?? 0, z: player?.pos.z ?? 0 },
+    };
+  }
+
+  /** Free roam: puts the car down at a spawn, or just before an event facing it, as new. */
+  private fastTravel(id: string): void {
+    const map = cityMap();
+    let spot: { x: number; z: number; yaw: number; y?: number; name: string } | null = null;
+    const spawn = SPAWN_NAMES.find(([key]) => `spawn-${key}` === id);
+    if (spawn) {
+      const s = map.spawns[spawn[0]];
+      spot = { x: s.x, z: s.z, yaw: s.yaw, y: s.y, name: spawn[1] };
+    } else {
+      const e = festivalEvents(map).find((ev) => ev.id === id);
+      if (e)
+        spot = { x: e.x - e.tx * 45, z: e.z - e.tz * 45, yaw: e.yaw, y: e.y + 0.5, name: e.name };
+    }
+    if (!spot) return;
+    this.festival?.abandon();
+    this.sim.command({ kind: 'place', car: 0, x: spot.x, z: spot.z, yaw: spot.yaw, y: spot.y });
+    this.sim.command({ kind: 'repair', car: 0 });
+    this.cars[0]?.repairView();
+    this.camera.reset();
+    this.toasts.show(`Fast travel: ${spot.name}`, { timeout: 3 });
+    this.resume();
+  }
+
   /** The camera while driving: the setting, unless the orbit debug view was asked for. */
   private get drivingCamera(): CameraMode {
     return this.orbitView ? 'orbit' : this.settings.camera;
@@ -2564,8 +2696,9 @@ export class Game {
   private resetCar(): void {
     this.rumble.stop(this.input.activePad);
     this.sim.command({ kind: 'resetCar', car: 0 });
-    // Free roam: the quick repair comes with the reset.
+    // Free roam: the quick repair comes with the reset (and a race under way is off).
     if (this.session?.mode === 'roam') {
+      this.festival?.abandon();
       this.sim.command({ kind: 'repair', car: 0 });
       this.cars[0]?.repairView();
       this.toasts.show('Repaired and reset.', { timeout: 2 });

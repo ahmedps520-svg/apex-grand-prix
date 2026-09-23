@@ -19,6 +19,7 @@ import { RaceDirector } from './race/RaceDirector';
 import { DEFAULT_LINE_OPTIONS, computeRacingLine, type RacingLineOptions } from './race/racingLine';
 import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
+import { festivalEvents, rampOf } from '../content/city/events';
 import { cityMap } from '../content/city/map';
 import { CitySurface } from './city/CitySurface';
 import { Police } from './city/Police';
@@ -96,6 +97,11 @@ export class World {
     if (config.mode === 'roam') {
       const surface = new CitySurface(cityMap());
       surface.gripScale = config.grip ?? 1;
+      // The festival's jump ramps are part of the ground.
+      for (const event of festivalEvents(surface.map)) {
+        const ramp = rampOf(event);
+        if (ramp) surface.ramps.push(ramp);
+      }
       const world = new World(1, surface, surface.map.spawns[config.roamStart ?? 'downtown'], spec);
       world.setAids(0, config.aids);
       world.cars[0]!.damageScale = config.damage ?? 0;

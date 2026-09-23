@@ -151,6 +151,10 @@ export type SimCommand =
   | { kind: 'restart' }
   /** Mends the car's damage (free roam: the quick repair, with a reset). */
   | { kind: 'repair'; car: number }
+  /** Free roam: puts the car down somewhere else (fast travel). */
+  | { kind: 'place'; car: number; x: number; z: number; yaw: number; y?: number }
+  /** Free roam: a festival event is on (or near): the police let the speed go. */
+  | { kind: 'sanction'; on: boolean }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 

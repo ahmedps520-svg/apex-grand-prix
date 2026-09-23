@@ -21,7 +21,7 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, MenuStore, ReplayCommand } from './store';
+import type { Difficulty, FestivalDestination, MenuStore, ReplayCommand } from './store';
 import {
   Button,
   Choice,
@@ -802,6 +802,88 @@ const ROAM_STARTS: ReadonlyArray<{ value: RoamStart; text: string }> = [
   { value: 'circuit', text: 'Circuit' },
 ];
 
+const DESTINATION_COLOUR: Record<FestivalDestination['kind'], string> = {
+  spawn: '#f2f4f8',
+  race: '#ff3b2f',
+  drift: '#37d4ff',
+  camera: '#ffd166',
+  jump: '#ff8a5b',
+};
+const DESTINATION_LABEL: Record<FestivalDestination['kind'], string> = {
+  spawn: 'Start',
+  race: 'Race',
+  drift: 'Drift zone',
+  camera: 'Speed trap',
+  jump: 'Jump',
+};
+
+/** Free roam: the festival map (roads, events, the car) and the places to fast-travel to. */
+export function MapScreen({ store }: ScreenProps) {
+  const info = store.festival.value;
+  if (!info) {
+    return (
+      <div class="mn-panel">
+        <Header title="Festival map" subtitle="Only in free roam" />
+      </div>
+    );
+  }
+  const { bounds, roads, destinations, player } = info;
+  const w = bounds.maxX - bounds.minX;
+  const h = bounds.maxZ - bounds.minZ;
+  const points = (road: (typeof roads)[number]) => {
+    const pts: string[] = [];
+    for (let i = 0; i < road.points.length; i += 2)
+      pts.push(`${road.points[i]},${road.points[i + 1]}`);
+    if (road.loop && road.points.length >= 2) pts.push(`${road.points[0]},${road.points[1]}`);
+    return pts.join(' ');
+  };
+  return (
+    <div class="mn-panel mn-wide mn-map">
+      <Header title="Festival map" subtitle="Pick a place to fast-travel to" />
+      <div class="mn-map-body">
+        <svg
+          class="mn-map-svg"
+          viewBox={`${bounds.minX} ${bounds.minZ} ${w} ${h}`}
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {roads.map((road, i) => (
+            <polyline
+              key={i}
+              points={points(road)}
+              fill="none"
+              stroke={road.elevated ? '#ffd678' : road.kind === 'avenue' ? '#e6e9ef' : '#8f98a8'}
+              strokeWidth={road.elevated ? 14 : road.kind === 'avenue' ? 12 : 7}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {destinations.map((d) => (
+            <circle
+              key={d.id}
+              cx={d.x}
+              cy={d.z}
+              r={d.kind === 'spawn' ? 18 : 22}
+              fill={DESTINATION_COLOUR[d.kind]}
+              stroke="#000"
+              strokeWidth={4}
+            />
+          ))}
+          <circle cx={player.x} cy={player.z} r={26} fill="#ff3b2f" stroke="#fff" strokeWidth={6} />
+        </svg>
+        <div class="mn-list mn-map-list">
+          {destinations.map((d) => (
+            <Button
+              key={d.id}
+              label={`${DESTINATION_LABEL[d.kind]}: ${d.name}${d.best ? ` · best ${d.best}` : ''}`}
+              onPress={() => store.actions.fastTravel(d.id)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RoamSetupScreen({ store }: ScreenProps) {
   const setup = store.setup.value;
   return (
@@ -853,6 +935,7 @@ export function PauseScreen({ store }: ScreenProps) {
         )}
         <Button label="Reset car" onPress={() => store.actions.resetCar()} />
         <Button label="Photo mode" onPress={() => store.actions.photoMode()} />
+        {mode === 'roam' && <Button label="Festival map" onPress={() => store.push('map')} />}
         <Button label="Settings" onPress={() => store.push('settings')} />
         <Button label="Controls" onPress={() => store.push('controls')} />
         <Button label="Quit to main menu" onPress={() => store.actions.quitToMenu()} />

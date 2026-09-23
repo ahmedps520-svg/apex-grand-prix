@@ -50,3 +50,31 @@ export function saveSeason(season: unknown): void {
     // Storage blocked: the season lasts for this session only.
   }
 }
+
+const FESTIVAL_KEY = 'apex-gp.festival';
+
+/** Best result per festival event (a race's time in seconds, a zone's points, a trap's km/h, a jump's metres). */
+export function loadFestivalRecords(): Records {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(FESTIVAL_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object') return {};
+    const out: Records = {};
+    for (const [id, value] of Object.entries(raw)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) out[id] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveFestivalRecord(id: string, value: number): Records {
+  const records = loadFestivalRecords();
+  records[id] = value;
+  try {
+    localStorage.setItem(FESTIVAL_KEY, JSON.stringify(records));
+  } catch {
+    // Storage blocked: the record lasts for this session only.
+  }
+  return records;
+}

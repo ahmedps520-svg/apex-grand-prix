@@ -59,6 +59,8 @@ export class Police {
     strips: [],
   };
   private readonly units: Vehicle[];
+  /** A festival event is on: speeding is sanctioned (red lights and crashes still count). */
+  sanctioned = false;
   private time = 0;
   private timer = 0;
   private sinceSeen = 0;
@@ -115,7 +117,7 @@ export class Police {
     const limit = this.map.speedLimitAt(px, pz, player.pos.y);
     this.speedingFor =
       limit > 0 && speed * 3.6 > limit + SPEEDING_MARGIN ? this.speedingFor + cdt : 0;
-    if (this.speedingFor > 2 && seen) this.offence();
+    if (this.speedingFor > 2 && seen && !this.sanctioned) this.offence();
     if (this.ranRedLight(player, speed) && seen) this.offence();
     if (this.traffic.playerHits > this.hits) {
       this.hits = this.traffic.playerHits;
@@ -326,7 +328,7 @@ export class Police {
     if (!p || p.piece.road.kind === 'ramp') return;
     const road = p.piece.road;
     const forward = player.vel.x * p.piece.tx + player.vel.z * p.piece.tz >= 0 ? 1 : -1;
-    const at = this.pointAlong(road, p.s + forward * BLOCK_AHEAD);
+    const at = this.map.pointAlong(road, clampAlong(road, p.s + forward * BLOCK_AHEAD));
     if (!at) return;
     const units = this.units.slice(-2);
     const half = road.width / 2;
@@ -363,33 +365,6 @@ export class Police {
     }
     this.block = { units, x: at.x, z: at.z, since: this.time, strip };
     this.blockAt = this.time;
-  }
-
-  /** The point a distance along a road (clamped to its ends; wrapping on a loop). */
-  private pointAlong(
-    road: Road,
-    s: number,
-  ): { x: number; z: number; y: number; tx: number; tz: number } | null {
-    const u = road.loop
-      ? ((s % road.length) + road.length) % road.length
-      : Math.min(Math.max(s, 5), road.length - 5);
-    let piece = null;
-    for (const p of this.traffic.map.pieces) {
-      if (p.road !== road) continue;
-      if (u >= p.s0 && u <= p.s0 + p.len) {
-        piece = p;
-        break;
-      }
-    }
-    if (!piece) return null;
-    const t = (u - piece.s0) / piece.len;
-    return {
-      x: piece.ax + piece.tx * piece.len * t,
-      z: piece.az + piece.tz * piece.len * t,
-      y: piece.ay + (piece.by - piece.ay) * t,
-      tx: piece.tx,
-      tz: piece.tz,
-    };
   }
 
   /** A wheel crossing a strip bursts its tyre; the strip is spent. */
@@ -456,4 +431,9 @@ function segmentDistance(
   const len = dx * dx + dz * dz;
   const t = len > 0 ? Math.min(Math.max(((x - x1) * dx + (z - z1) * dz) / len, 0), 1) : 0;
   return Math.hypot(x - (x1 + dx * t), z - (z1 + dz * t));
+}
+
+/** A distance along a road kept a little inside its ends (a loop wraps instead). */
+function clampAlong(road: Road, s: number): number {
+  return road.loop ? s : Math.min(Math.max(s, 5), road.length - 5);
 }
