@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Rounds 1–2 and Push 3 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
+> **Status:** Rounds 1–2 and Pushes 3–4 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -807,3 +807,24 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - Touch controls for iPad: drag or tilt steering, pedals and paddles.
   - A race engineer on the radio (the browser's speech synthesis, with subtitles).
 - **AI grip calibration:** each car's racing line plans with a measured share of its estimated grip. The share is the largest with which a flat-out AI laps five circuits without leaving the road, and it is stored per car. Rerun it with `npx vitest run -c tools/vitest.config.ts` after changing a car.
+
+### Push 4: Replays, weather, liveries, damage, photo mode and eight circuits (v0.4.0)
+- **Built:**
+  - **Replays:** recorded at 30 Hz for every car. Watch from the results with TV cameras (trackside cameras and a helicopter, with automatic cuts), a chase camera or onboard, at 0.25× to 4×, following any car.
+  - **Menu backdrop:** an AI race on a circuit filmed by the TV cameras, in random conditions.
+  - **Time-trial ghost:** the best lap on each circuit, saved in the browser.
+  - **Circuits:** Dunmore Raceway (a roval) and Mirador Desert Circuit, for eight in total.
+  - **Liveries:** an editor with 8 patterns, 3 colours from 24, a race number, 4 finishes and 12 presets. Rivals get random, harmonious liveries that stay the same all season. Cars now take about 17 draw calls instead of 45.
+  - **Weather and time of day:**
+    - Five times of day and five weathers, per race.
+    - Rain wets and darkens the track, pulls the fog in, adds rain streaks and spray, and cuts grip for everyone. The AI's racing line uses the wet grip.
+    - Championship rounds get random conditions.
+  - **Damage:**
+    - Off, Light or Full.
+    - Impact energy from barriers and other cars costs downforce and adds drag, costs engine torque, and bends the steering so the car pulls.
+    - Bars appear on the HUD, and the race engineer calls it out.
+  - **Photo mode:** from the pause menu or a replay. Free camera, field of view, roll, depth of field, exposure, contrast, saturation, filters, vignette and grain. Saves the shot as a PNG with an optional watermark.
+- **Fixed from the v0.3.0 review:**
+  - **Controller menus:** gamepad buttons are polled, so a quick tap between two frames could be missed. Presses are now sampled between frames too and never lost. A new browser test plays from the title to a race and back with only a mocked DualSense.
+  - **HUD:** the driving HUD no longer shows faintly behind menus.
+  - **Settings screens:** they now redraw immediately after a change.

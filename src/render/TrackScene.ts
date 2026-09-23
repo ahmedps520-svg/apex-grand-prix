@@ -1,8 +1,22 @@
-import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import type { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as THREE from 'three/webgpu';
+import {
+  materialColor,
+  materialRoughness,
+  mix,
+  positionWorld,
+  smoothstep,
+  texture,
+  uniform,
+} from 'three/tsl';
+import { DEFAULT_CONDITIONS, type Conditions } from '../content/conditions';
 import { mulberry32 } from '../shared/math';
 import { KERB_WIDTH, type Track } from '../sim/track/Track';
+import { Atmosphere } from './Atmosphere';
+import { Rain } from './Rain';
+import { CLEAR_FOG_FAR, sceneLook, type SceneLook } from './sceneLook';
+import { Spray } from './Spray';
 import type { ConePlacement } from './TestGroundScene';
 import {
   CROWD_SEAT_WIDTH,
@@ -14,19 +28,18 @@ import {
   glowTexture,
   gravelTexture,
   labelTexture,
+  noiseTexture,
   turfTexture,
 } from './textures';
 import { LINE_Y, MeshBuilder, TrackMeshBuilder } from './trackMeshes';
 
 const SHADOW_EXTENT = 40;
-const FOG_NEAR = 350;
-const FOG_FAR = 2600;
-/** The sky is a box around the car; it draws at the far plane whatever its size. */
-const SKY_SIZE = 2800;
 /** Metres per texture tile (asphalt is adjusted to a whole number of tiles per lap). */
 const ASPHALT_TILE = 7;
 const TURF_TILE = 9;
 const GRAVEL_TILE = 4;
+/** Metres per tile of the noise that decides where water stands on a wet road. */
+const PUDDLE_TILE = 37;
 const BARRIER_HEIGHT = 1;
 const BARRIER_THICKNESS = 0.5;
 /** Length of each red or white block along the barrier top. */
@@ -59,10 +72,14 @@ const STAND_GAP = 3.5;
 const STAND_DEPTH = 0.3 + STAND_ROWS * ROW_DEPTH;
 const STAND_TOP = STAND_FRONT + STAND_ROWS * ROW_RISE;
 const ROOF_Y = STAND_TOP + 3.4;
+/** The roof overhangs the ends by 0.6 m and the front by 1.8 m. */
+const STAND_RADIUS = Math.hypot(STAND_LENGTH / 2 + 0.6, STAND_DEPTH / 2 + 1.8);
 /** Trees stand 25–400 m beyond the barriers and never nearer the track than this past them. */
 const TREE_NEAREST = 25;
 const TREE_FARTHEST = 400;
 const TREE_CLEARANCE = 15;
+/** Trees keep this far from a grandstand's centre. */
+const TREE_STAND_CLEARANCE = STAND_LENGTH / 2 + 10;
 
 interface StandPlacement {
   /** Front centre of the stand, on the ground. */
@@ -73,57 +90,79 @@ interface StandPlacement {
   az: number;
 }
 
-/** Circle that trees keep out of. */
-interface Footprint {
+/** A circle on the ground: a grandstand's footprint. */
+export interface Footprint {
   x: number;
   z: number;
   r: number;
 }
 
+/** A material that rain darkens (colour × `darken`) and makes glossier. */
+interface WetSurface {
+  material: THREE.MeshStandardMaterial;
+  color: THREE.Color;
+  roughness: number;
+  /** Colour factor and roughness when soaked. */
+  darken: number;
+  wetRoughness: number;
+}
+
 /**
  * Scenery for a circuit, built from its Track: road, kerbs, run-off, barriers, a start gantry
- * with working start lights, grandstands, trees, and sun, sky and fog from the track's theme.
- * Static geometry is merged per material and repeated props are instanced: 18 draw calls at
- * most, plus 3 in the shadow pass.
+ * with working start lights, grandstands, trees, and sun, sky and fog from the track's theme,
+ * shaped by the time of day and the weather (`Conditions`). Static geometry is merged per
+ * material and repeated props are instanced: 18 draw calls at most, plus 3 in the shadow pass,
+ * and 2 more in the rain (the streaks, and spray behind the cars).
  */
 export class TrackScene {
   readonly scene = new THREE.Scene();
   /** Circuits have no cones. */
   readonly conePlacements: ConePlacement[] = [];
+  /** Grandstand footprints: circles on the ground that cameras keep out of and can't see through. */
+  readonly obstacles: ReadonlyArray<Footprint>;
   private readonly sun: THREE.DirectionalLight;
+  private readonly hemi: THREE.HemisphereLight;
+  private readonly atmosphere = new Atmosphere();
   private readonly sky: SkyMesh;
+  /** Towards the sun in the sky, and towards the shadow-casting light. */
   private readonly sunDirection = new THREE.Vector3();
-  /** 0 for a high sun, up to 1 for a low golden-hour one. */
-  private readonly lowSun: number;
+  private readonly lightDirection = new THREE.Vector3();
+  private readonly followed = new THREE.Vector3();
   private readonly disposables: Array<{ dispose(): void }> = [];
   private readonly lamps: THREE.InstancedMesh;
   private readonly glows: THREE.InstancedMesh;
   /** What the start lights show now: lit columns, or -1 for green. */
   private lightsShown = -2;
+  private current: Conditions;
+  private look: SceneLook;
+  /** Road wetness for the road shader: 0 dry … 1 standing water. */
+  private readonly wet = uniform(0);
+  private readonly wetSurfaces: WetSurface[] = [];
+  private readonly rain = new Rain();
+  private readonly spraying = new Spray();
+  // Reflections (see buildEnvironment).
+  private renderer: THREE.WebGPURenderer | null = null;
+  private pmrem: THREE.PMREMGenerator | null = null;
+  private envTarget: THREE.RenderTarget | null = null;
+  private envSky: SkyMesh | null = null;
 
-  constructor(private readonly track: Track) {
+  constructor(
+    private readonly track: Track,
+    conditions: Conditions = DEFAULT_CONDITIONS,
+  ) {
     const theme = track.def.theme;
-    const elevation = THREE.MathUtils.degToRad(theme.sunElevation);
-    const azimuth = THREE.MathUtils.degToRad(theme.sunAzimuth);
-    this.sunDirection.set(
-      Math.cos(elevation) * Math.sin(azimuth),
-      Math.sin(elevation),
-      Math.cos(elevation) * Math.cos(azimuth),
-    );
-    this.lowSun = 1 - THREE.MathUtils.smoothstep(theme.sunElevation, 5, 40);
+    this.current = { ...conditions };
+    this.look = sceneLook(theme, this.current);
 
-    this.sky = createSky(this.sunDirection, this.lowSun);
-    // Last of all: the sky shader then only runs where nothing else was drawn.
-    this.sky.renderOrder = 2;
+    this.sky = this.atmosphere.createSky();
     this.scene.add(this.sky);
-    this.scene.fog = new THREE.Fog(theme.fog, FOG_NEAR, FOG_FAR);
+    // Range fog like THREE.Fog, but its colour glows towards the sun (see Atmosphere).
+    (this.scene as { fogNode?: THREE.Node }).fogNode = this.atmosphere.createFog();
 
-    const skyFill = new THREE.Color(0xc3d8ff).lerp(new THREE.Color(0xf2cfae), this.lowSun * 0.6);
-    const groundBounce = new THREE.Color(theme.grass).multiplyScalar(0.6);
-    this.scene.add(new THREE.HemisphereLight(skyFill, groundBounce, 0.35 + this.lowSun * 0.15));
+    this.hemi = new THREE.HemisphereLight();
+    this.scene.add(this.hemi);
 
-    const sunColor = new THREE.Color(0xfff1dd).lerp(new THREE.Color(0xffb46e), this.lowSun);
-    this.sun = new THREE.DirectionalLight(sunColor, 3.2 - this.lowSun * 0.7);
+    this.sun = new THREE.DirectionalLight();
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const cam = this.sun.shadow.camera;
@@ -136,7 +175,6 @@ export class TrackScene {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.sun, this.sun.target);
-    this.follow(new THREE.Vector3(track.samples[0]!.x, 0, track.samples[0]!.z));
 
     const meshes = new TrackMeshBuilder(track);
     const turf = turfTexture();
@@ -145,39 +183,70 @@ export class TrackScene {
     this.buildSurfaces(meshes, turf);
     this.buildBarriers(meshes);
     [this.lamps, this.glows] = this.buildGantry();
-    const stands = this.buildGrandstands();
-    this.buildTrees(stands);
+    this.obstacles = this.buildGrandstands();
+    this.buildTrees(this.obstacles);
     this.setStartLights(0, false);
+    this.scene.add(this.rain.mesh, this.spraying.mesh);
+    this.disposables.push(this.atmosphere, this.rain, this.spraying);
+
+    this.applyLook();
+    this.follow(new THREE.Vector3(track.samples[0]!.x, 0, track.samples[0]!.z));
+  }
+
+  /** The time of day and weather shown. */
+  get conditions(): Readonly<Conditions> {
+    return this.current;
+  }
+
+  /**
+   * Changes the time of day and weather in place: lights, sky, fog, wet surfaces and rain are
+   * all uniforms, so nothing is rebuilt. The reflections are re-rendered if `buildEnvironment`
+   * has run (a few milliseconds); rain appearing for the first time compiles its shader.
+   */
+  setConditions(conditions: Conditions): void {
+    if (conditions.time === this.current.time && conditions.weather === this.current.weather) {
+      return;
+    }
+    this.current = { ...conditions };
+    this.look = sceneLook(this.track.def.theme, this.current);
+    this.applyLook();
+    this.follow(this.followed);
+    if (this.look.wetness <= 0) this.spraying.clear();
+    this.renderEnvironment();
   }
 
   /** Reflections for shiny surfaces: a pre-filtered copy of the sky. */
   buildEnvironment(renderer: THREE.WebGPURenderer): void {
-    try {
-      const pmrem = new THREE.PMREMGenerator(renderer);
-      const envScene = new THREE.Scene();
-      const sky = createSky(this.sunDirection, this.lowSun);
-      // Without the sun disc and with a softer glow round it: blurred into the map, they make
-      // anything facing a low sun (the start lights' panel, a car's paint) glare pale.
-      sky.showSunDisc.value = 0;
-      sky.mieCoefficient.value *= 0.3;
-      sky.mieDirectionalG.value = 0.7;
-      envScene.add(sky);
-      const target = pmrem.fromScene(envScene, 0.02);
-      this.scene.environment = target.texture;
-      this.scene.environmentIntensity = 0.55;
-      this.disposables.push(target, pmrem);
-    } catch (error) {
-      console.warn('Environment map unavailable; continuing without reflections.', error);
-    }
+    this.renderer = renderer;
+    this.renderEnvironment();
   }
 
   /** Keeps the shadow-casting light (and the sky box) centred on the car. */
   follow(target: THREE.Vector3): void {
+    if (target !== this.followed) this.followed.copy(target);
     this.sun.target.position.copy(target);
-    this.sun.position.copy(target).addScaledVector(this.sunDirection, 150);
+    this.sun.position.copy(target).addScaledVector(this.lightDirection, 150);
     this.sun.target.updateMatrixWorld();
     // A circuit can be bigger than the sky box: keep the viewer inside it.
     this.sky.position.set(target.x, 0, target.z);
+  }
+
+  /**
+   * Per frame, before rendering: moves the rain with `camera` and ages the spray. Cheap when
+   * dry (it returns straight away).
+   */
+  update(dt: number, camera: THREE.Camera): void {
+    this.rain.update(dt, camera);
+    this.spraying.update(dt);
+  }
+
+  /**
+   * Water thrown up behind a car on a wet track: (x, y, z) is the car's centre and (vx, vz) its
+   * velocity, m/s. Call once per car per frame (with `update` once per frame); it does nothing
+   * when the track is dry or the car is slow.
+   */
+  spray(x: number, y: number, z: number, vx: number, vz: number): void {
+    this.spraying.emit(x, y, z, vx, vz);
   }
 
   /**
@@ -214,7 +283,84 @@ export class TrackScene {
       else material?.dispose();
       if (object instanceof THREE.InstancedMesh) object.dispose();
     });
+    if (this.envSky) this.atmosphere.disposeSky(this.envSky);
+    this.envTarget?.dispose();
+    this.pmrem?.dispose();
     for (const d of this.disposables) d.dispose();
+  }
+
+  // ------------------------------------------------------------ conditions
+
+  /** Sets the lights, sky, fog, wet surfaces and rain from `this.look`. */
+  private applyLook(): void {
+    const look = this.look;
+    const toward = (out: THREE.Vector3, elevationDeg: number) => {
+      const elevation = THREE.MathUtils.degToRad(elevationDeg);
+      const azimuth = THREE.MathUtils.degToRad(look.sunAzimuth);
+      return out.set(
+        Math.cos(elevation) * Math.sin(azimuth),
+        Math.sin(elevation),
+        Math.cos(elevation) * Math.cos(azimuth),
+      );
+    };
+    toward(this.sunDirection, look.sunElevation);
+    toward(this.lightDirection, look.lightElevation);
+    this.atmosphere.set(look, this.sunDirection);
+    this.hemi.color.copy(look.hemiSky);
+    this.hemi.groundColor.copy(look.hemiGround);
+    this.hemi.intensity = look.hemiIntensity;
+    this.sun.color.copy(look.sunColor);
+    this.sun.intensity = look.sunIntensity;
+    this.sun.shadow.radius = look.shadowRadius;
+    this.sun.shadow.intensity = look.shadowIntensity;
+    this.scene.environmentIntensity = look.environmentIntensity;
+
+    const wet = look.wetness;
+    this.wet.value = wet;
+    for (const s of this.wetSurfaces) {
+      s.material.color.copy(s.color).multiplyScalar(THREE.MathUtils.lerp(1, s.darken, wet));
+      s.material.roughness = THREE.MathUtils.lerp(s.roughness, s.wetRoughness, wet);
+    }
+    this.rain.set(look.rain, look.waterColor, 1.4, 0.6);
+    this.spraying.wetness = wet;
+    this.spraying.setLook(look.waterColor, 0.09 + 0.08 * wet);
+  }
+
+  /** (Re)renders the reflections from the sky as it looks now, into the same target. */
+  private renderEnvironment(): void {
+    const renderer = this.renderer;
+    if (!renderer) return;
+    try {
+      this.pmrem ??= new THREE.PMREMGenerator(renderer);
+      if (this.envSky) this.atmosphere.disposeSky(this.envSky);
+      const envScene = new THREE.Scene();
+      this.envSky = this.atmosphere.createSky(true);
+      envScene.add(this.envSky);
+      const target = this.pmrem.fromScene(envScene, 0.02, 0.1, 100, {
+        renderTarget: this.envTarget,
+      });
+      this.envTarget = target;
+      this.scene.environment = target.texture;
+      this.scene.environmentIntensity = this.look.environmentIntensity;
+    } catch (error) {
+      console.warn('Environment map unavailable; continuing without reflections.', error);
+    }
+  }
+
+  /** Registers a material that rain darkens (colour × `darken`) and makes glossier. */
+  private wettable<M extends THREE.MeshStandardMaterial>(
+    material: M,
+    darken: number,
+    wetRoughness: number,
+  ): M {
+    this.wetSurfaces.push({
+      material,
+      color: material.color.clone(),
+      roughness: material.roughness,
+      darken,
+      wetRoughness,
+    });
+    return material;
   }
 
   // ------------------------------------------------------------------ build
@@ -234,7 +380,7 @@ export class TrackScene {
       minZ = Math.min(minZ, p.z);
       maxZ = Math.max(maxZ, p.z);
     }
-    const margin = Math.max(600, FOG_FAR) + this.track.wallOffset;
+    const margin = Math.max(600, CLEAR_FOG_FAR) + this.track.wallOffset;
     const x0 = minX - margin;
     const z0 = minZ - margin;
     const width = maxX - minX + 2 * margin;
@@ -263,13 +409,17 @@ export class TrackScene {
     }
     const ground = new THREE.Mesh(
       mb.build(),
-      new THREE.MeshStandardMaterial({
-        map: turf,
-        color: turfTint(this.track.def.theme.grass, turf),
-        vertexColors: true,
-        roughness: 1,
-        metalness: 0,
-      }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({
+          map: turf,
+          color: turfTint(this.track.def.theme.grass, turf),
+          vertexColors: true,
+          roughness: 1,
+          metalness: 0,
+        }),
+        0.82,
+        0.85,
+      ),
     );
     ground.receiveShadow = true;
     // After the track surfaces lying on it, so the depth test skips shading what they cover.
@@ -284,11 +434,22 @@ export class TrackScene {
 
     const tile = track.length / Math.max(1, Math.round(track.length / ASPHALT_TILE));
     const asphalt = asphaltTexture(1, 1);
-    this.disposables.push(asphalt);
-    this.addFlat(
-      meshes.road(tile),
-      new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.93, metalness: 0, ...layer(1) }),
-    );
+    const puddles = noiseTexture(53, 256, 4, 4);
+    this.disposables.push(asphalt, puddles);
+    const road = new THREE.MeshStandardNodeMaterial({
+      map: asphalt,
+      roughness: 0.93,
+      metalness: 0,
+      ...layer(1),
+    });
+    // Wet asphalt: darker and glossy, so it mirrors the sky; standing water in the dips (where
+    // the noise peaks) once the road is soaked. Dry, the nodes reduce to the plain material.
+    const wet = this.wet;
+    const water = texture(puddles, positionWorld.xz.div(PUDDLE_TILE)).r;
+    const puddle = smoothstep(0.64, 0.8, water).mul(smoothstep(0.5, 1, wet));
+    road.colorNode = materialColor.mul(mix(1, 0.5, wet)).mul(mix(1, 0.72, puddle));
+    road.roughnessNode = mix(materialRoughness, mix(0.2, 0.04, puddle), wet);
+    this.addFlat(meshes.road(tile), road);
 
     // Gravel where the physics has it: in the corners, when the track uses gravel traps.
     const gravelTraps = theme.runoffSurface === 'gravel';
@@ -297,30 +458,46 @@ export class TrackScene {
     const runoffGrass = new THREE.Color(theme.grass).offsetHSL(0.01, -0.08, 0.03);
     this.addFlat(
       meshes.runoff(isGravel, false, TURF_TILE),
-      new THREE.MeshStandardMaterial({
-        map: turf,
-        color: turfTint(runoffGrass.getHex(), turf),
-        roughness: 1,
-        metalness: 0,
-        ...layer(1),
-      }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({
+          map: turf,
+          color: turfTint(runoffGrass.getHex(), turf),
+          roughness: 1,
+          metalness: 0,
+          ...layer(1),
+        }),
+        0.82,
+        0.8,
+      ),
     );
     if (gravelTraps) {
       const gravel = gravelTexture();
       this.disposables.push(gravel);
       this.addFlat(
         meshes.runoff(isGravel, true, GRAVEL_TILE),
-        new THREE.MeshStandardMaterial({ map: gravel, roughness: 1, metalness: 0, ...layer(1) }),
+        this.wettable(
+          new THREE.MeshStandardMaterial({ map: gravel, roughness: 1, metalness: 0, ...layer(1) }),
+          0.7,
+          0.6,
+        ),
       );
     }
 
     this.addFlat(
       meshes.kerbs(),
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, ...layer(2) }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, ...layer(2) }),
+        0.8,
+        0.25,
+      ),
     );
     this.addFlat(
       meshes.lines(),
-      new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.7, ...layer(2) }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.7, ...layer(2) }),
+        0.88,
+        0.25,
+      ),
     );
 
     // Two rows of 0.8 m squares.
@@ -328,7 +505,11 @@ export class TrackScene {
     this.disposables.push(checker);
     this.addFlat(
       meshes.startLine(1.6, LINE_Y + 0.002),
-      new THREE.MeshStandardMaterial({ map: checker, roughness: 0.7, ...layer(3) }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({ map: checker, roughness: 0.7, ...layer(3) }),
+        0.85,
+        0.25,
+      ),
     );
   }
 
@@ -348,7 +529,11 @@ export class TrackScene {
     this.disposables.push(texture);
     const walls = new THREE.Mesh(
       meshes.barriers(BARRIER_HEIGHT, BARRIER_THICKNESS, BARRIER_BLOCK),
-      new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0 }),
+      this.wettable(
+        new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8, metalness: 0 }),
+        0.85,
+        0.45,
+      ),
     );
     // One draw call more in the shadow pass; the walls' shadows ground the track nicely.
     walls.castShadow = true;
@@ -450,7 +635,7 @@ export class TrackScene {
 
   /**
    * Grandstands behind the barrier on the right of the main straight, plus one on the outside
-   * of the heaviest braking zone. Returns their footprints for the trees to avoid.
+   * of the heaviest braking zone. Returns their footprints (roof included).
    */
   private buildGrandstands(): Footprint[] {
     const placements = this.standPlacements();
@@ -506,7 +691,7 @@ export class TrackScene {
     return placements.map((p) => ({
       x: p.x - p.az * (STAND_DEPTH / 2),
       z: p.z + p.ax * (STAND_DEPTH / 2),
-      r: STAND_LENGTH / 2 + 10,
+      r: STAND_RADIUS,
     }));
   }
 
@@ -590,7 +775,7 @@ export class TrackScene {
    * `theme.trees` trees scattered beyond the barriers, denser near the track: conifers and
    * broadleaves (instanced, one draw call each plus one for all the trunks).
    */
-  private buildTrees(avoid: Footprint[]): void {
+  private buildTrees(stands: ReadonlyArray<Footprint>): void {
     const track = this.track;
     const theme = track.def.theme;
     const wanted = Math.max(0, Math.floor(theme.trees));
@@ -625,7 +810,8 @@ export class TrackScene {
       if (Math.sqrt(nearest) - slack < clear && Math.abs(track.project(x, z).lateral) < clear) {
         continue;
       }
-      if (avoid.some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < f.r * f.r)) continue;
+      const near = TREE_STAND_CLEARANCE ** 2;
+      if (stands.some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < near)) continue;
       position.set(x, 0, z);
       rotation.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw);
       scale.set(size, size * stretch, size);
@@ -694,19 +880,6 @@ function layer(level: number): Partial<THREE.MeshStandardMaterialParameters> {
 function turfTint(grass: number, turf: THREE.Texture): THREE.Color {
   const mean = (turf.userData as { mean?: number }).mean ?? 1;
   return new THREE.Color(grass).multiplyScalar(1 / mean);
-}
-
-function createSky(sunDirection: THREE.Vector3, lowSun: number): SkyMesh {
-  const sky = new SkyMesh();
-  sky.scale.setScalar(SKY_SIZE);
-  // Hazier, redder light when the sun is low.
-  sky.turbidity.value = 3.2 + lowSun * 4;
-  sky.rayleigh.value = 1.1 + lowSun * 0.9;
-  sky.mieCoefficient.value = 0.004 + lowSun * 0.004;
-  sky.mieDirectionalG.value = 0.86;
-  sky.cloudCoverage.value = 0.32;
-  sky.sunPosition.value.copy(sunDirection);
-  return sky;
 }
 
 /** Placement at (x, z) on the ground with local x along (ax, az), y up and z = x × y. */

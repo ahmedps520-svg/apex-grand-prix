@@ -355,6 +355,37 @@ export function crowdTexture(rows: number): THREE.CanvasTexture {
   return toTexture(canvas, 1, 1, true);
 }
 
+/**
+ * Tileable grey noise stretched to the full 0–1 range (in red, green and blue): cloud decks and
+ * puddles. Linear data, not a colour.
+ */
+export function noiseTexture(
+  seed: number,
+  size = 256,
+  octaves = 5,
+  baseCells = 4,
+): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(size);
+  const noise = tileableNoise(size, seed, octaves, baseCells);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const v of noise) {
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
+  }
+  const scale = 255 / Math.max(hi - lo, 1e-6);
+  const image = ctx.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    const v = (noise[i]! - lo) * scale;
+    image.data[i * 4] = v;
+    image.data[i * 4 + 1] = v;
+    image.data[i * 4 + 2] = v;
+    image.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+  return toTexture(canvas, 1, 1, false);
+}
+
 /** Soft round glow for lamps: white, fading out from the centre (in alpha, for additive use). */
 export function glowTexture(): THREE.CanvasTexture {
   const size = 128;

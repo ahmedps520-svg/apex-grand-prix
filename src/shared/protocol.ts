@@ -1,3 +1,4 @@
+import type { Conditions } from '../content/conditions';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 
 /**
@@ -95,6 +96,14 @@ export interface SessionConfig {
   gridSlot: number;
   aids: DriverAids;
   seed: number;
+  /** Menu background: the AI drives every car, including car 0. */
+  attract?: boolean;
+  /** Track grip for the weather: 1 dry, lower when wet. */
+  grip?: number;
+  /** How much impacts damage the cars: 0 = off, 0.5 = light, 1 = full. */
+  damage?: number;
+  /** Time of day and weather, for the scenery (the simulation only uses `grip`). */
+  conditions?: Conditions;
 }
 
 export type SimCommand =
@@ -198,7 +207,11 @@ export const C = {
   /** Aid levels: 0 = off, 1 = low, 2 = high. */
   TC_LEVEL: 31,
   ABS_LEVEL: 32,
-  WHEELS: 33,
+  /** Damage, 0 … 1 (steering signed: + = pulls right). */
+  DAMAGE_AERO: 33,
+  DAMAGE_ENGINE: 34,
+  DAMAGE_STEER: 35,
+  WHEELS: 36,
 } as const;
 export const CAR_STRIDE = C.WHEELS + WHEEL_COUNT * WHEEL_STRIDE;
 

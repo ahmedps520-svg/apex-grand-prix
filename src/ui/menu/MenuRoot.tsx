@@ -1,5 +1,6 @@
 import type { FunctionComponent } from 'preact';
 import './menu.css';
+import { LiveryScreen } from './LiveryScreen';
 import { PROMPT_SETS, type PromptAction } from './prompts';
 import {
   AboutScreen,
@@ -12,6 +13,7 @@ import {
   MainScreen,
   PauseScreen,
   RaceSetupScreen,
+  ReplayScreen,
   ResultsScreen,
   SettingsScreen,
   StandingsScreen,
@@ -23,6 +25,8 @@ import type { MenuStore, ScreenId } from './store';
 
 interface Props {
   store: MenuStore;
+  /** Settings revision: a new value re-renders the screen after a setting changed. */
+  revision?: number;
 }
 
 const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
@@ -30,12 +34,14 @@ const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
   main: MainScreen,
   trackSelect: TrackSelectScreen,
   carSelect: CarSelectScreen,
+  livery: LiveryScreen,
   championship: ChampionshipScreen,
   standings: StandingsScreen,
   raceSetup: RaceSetupScreen,
   freeSetup: FreeSetupScreen,
   pause: PauseScreen,
   results: ResultsScreen,
+  replay: ReplayScreen,
   settings: SettingsScreen,
   bindPad: BindPadScreen,
   bindKeys: BindKeysScreen,
@@ -44,18 +50,26 @@ const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
   about: AboutScreen,
 };
 
-/** Which prompts each screen shows in its footer. */
-const FOOTER: Record<ScreenId, PromptAction[]> = {
+/** Which prompts each screen shows in its footer, with the text when it isn't the usual one. */
+const FOOTER: Record<ScreenId, Array<PromptAction | [PromptAction, string]>> = {
   title: ['confirm'],
   main: ['confirm'],
   trackSelect: ['confirm', 'back'],
-  carSelect: ['confirm', 'adjust', 'tabs', 'back'],
+  carSelect: ['confirm', 'tabs', 'back'],
+  livery: ['confirm', 'adjust', 'back'],
   championship: ['confirm', 'adjust', 'back'],
   standings: ['confirm'],
   raceSetup: ['confirm', 'adjust', 'back'],
   freeSetup: ['confirm', 'adjust', 'back'],
   pause: ['confirm', 'back'],
   results: ['confirm'],
+  replay: [
+    ['confirm', 'Play / pause'],
+    ['adjust', 'Rewind / forward'],
+    ['tabs', 'Car'],
+    ['fast', 'Camera'],
+    ['back', 'Exit'],
+  ],
   settings: ['confirm', 'adjust', 'fast', 'tabs', 'back'],
   bindPad: ['confirm', 'back'],
   bindKeys: ['confirm', 'back'],
@@ -77,8 +91,9 @@ const PROMPT_TEXT: Record<PromptAction, string> = {
 export function MenuRoot({ store }: Props) {
   const stack = store.stack.value;
   const top = stack[stack.length - 1];
-  // Reading the revision re-renders the menus when a setting changes.
-  void store.revision.value;
+  // Reading the revision re-renders the menus when a setting changes; passing it on makes the
+  // screen re-render too (signals skip components whose props didn't change).
+  const revision = store.revision.value;
   if (!top) return null;
   const Screen = SCREENS[top];
   const glyphs = PROMPT_SETS[store.prompts.value];
@@ -93,10 +108,11 @@ export function MenuRoot({ store }: Props) {
           top === 'settings' || top === 'trackSelect' || top === 'carSelect' ? undefined : 'true'
         }
       >
-        <Screen store={store} />
+        <Screen store={store} revision={revision} />
       </div>
       <div class="menu-prompts">
-        {FOOTER[top].map((action) => {
+        {FOOTER[top].map((entry) => {
+          const [action, text] = typeof entry === 'string' ? [entry, PROMPT_TEXT[entry]] : entry;
           const set = glyphs[action];
           if (set.length === 0) return null;
           return (
@@ -104,7 +120,7 @@ export function MenuRoot({ store }: Props) {
               {set.map((g) => (
                 <kbd class={g.className ? `glyph ${g.className}` : 'glyph'}>{g.text}</kbd>
               ))}
-              <span>{PROMPT_TEXT[action]}</span>
+              <span>{text}</span>
             </span>
           );
         })}

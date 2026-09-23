@@ -68,6 +68,8 @@ export interface Surface {
    * direction that pushes it back out.
    */
   wallContact?(x: number, z: number, out: { nx: number; nz: number }): number;
+  /** Multiplier on every surface's grip (a wet track is below 1). */
+  gripScale?: number;
 }
 
 /** Flat test ground: a rectangular asphalt pad surrounded by grass, all at height 0. */

@@ -41,6 +41,10 @@ export interface CarRenderState {
   manualGearbox: boolean;
   tcLevel: number;
   absLevel: number;
+  /** Damage, 0 … 1 (steering signed: + = pulls right). */
+  damageAero: number;
+  damageEngine: number;
+  damageSteer: number;
   wheels: WheelRenderState[];
 }
 
@@ -80,6 +84,9 @@ export function createCarRenderState(): CarRenderState {
     manualGearbox: false,
     tcLevel: 0,
     absLevel: 0,
+    damageAero: 0,
+    damageEngine: 0,
+    damageSteer: 0,
     wheels,
   };
 }
@@ -126,6 +133,9 @@ export function interpolateCar(
   out.manualGearbox = buf[b + C.GEARBOX_MANUAL]! > 0.5;
   out.tcLevel = buf[b + C.TC_LEVEL]!;
   out.absLevel = buf[b + C.ABS_LEVEL]!;
+  out.damageAero = buf[b + C.DAMAGE_AERO]!;
+  out.damageEngine = buf[b + C.DAMAGE_ENGINE]!;
+  out.damageSteer = buf[b + C.DAMAGE_STEER]!;
   for (let i = 0; i < WHEEL_COUNT; i++) {
     const o = b + C.WHEELS + i * WHEEL_STRIDE;
     const w = out.wheels[i]!;
