@@ -127,6 +127,8 @@ export interface SessionConfig {
   police?: number;
   /** Free roam: street racers for the festival's races (slots after the police). */
   racers?: number;
+  /** Free roam: pedestrians on the pavements (after the cars and the soft body in the snapshot). */
+  pedestrians?: number;
   opponents: number;
   laps: number;
   difficulty: Difficulty;
@@ -353,9 +355,17 @@ export const PART_DOOR_LEFT = 8;
 export const PART_DOOR_RIGHT = 16;
 export const PART_WING = 32;
 
-export const snapshotFloats = (carCount: number): number => carCount * CAR_STRIDE + SOFT_FLOATS;
-export const snapshotBytes = (carCount: number): number =>
-  snapshotFloats(carCount) * Float32Array.BYTES_PER_ELEMENT;
+/** Pedestrians after the soft body: x, y, z, yaw and a state each (-1 = not there). */
+export const PED_STRIDE = 5;
+export const PED_WALKING = 0;
+export const PED_WAITING = 1;
+export const PED_CROSSING = 2;
+export const PED_LEAPING = 3;
+
+export const snapshotFloats = (carCount: number, pedestrians = 0): number =>
+  carCount * CAR_STRIDE + SOFT_FLOATS + pedestrians * PED_STRIDE;
+export const snapshotBytes = (carCount: number, pedestrians = 0): number =>
+  snapshotFloats(carCount, pedestrians) * Float32Array.BYTES_PER_ELEMENT;
 
 /** Wheel order used everywhere: front-left, front-right, rear-left, rear-right. */
 export const WHEEL_NAMES = ['FL', 'FR', 'RL', 'RR'] as const;

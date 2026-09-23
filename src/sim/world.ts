@@ -22,6 +22,7 @@ import { Track } from './track/Track';
 import { festivalEvents, rampOf } from '../content/city/events';
 import { cityMap } from '../content/city/map';
 import { CitySurface } from './city/CitySurface';
+import { Pedestrians } from './city/Pedestrians';
 import { Police } from './city/Police';
 import { Racers } from './city/Racers';
 import { Traffic } from './city/Traffic';
@@ -73,6 +74,8 @@ export class World {
   police: Police | null = null;
   /** Free roam: the street racers for the festival's races (slots after the police). */
   racers: Racers | null = null;
+  /** Free roam: the pedestrians on the pavements (after the cars in the snapshot). */
+  pedestrians: Pedestrians | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
   private readonly hints: number[] = [];
@@ -123,6 +126,10 @@ export class World {
         );
         if (police > 0) world.police = new Police(world.traffic, surface.map);
         if (racers > 0) world.racers = new Racers(world.traffic, surface.map);
+      }
+      if ((config.pedestrians ?? 0) > 0) {
+        world.pedestrians = new Pedestrians(surface.map, config.pedestrians!, config.seed);
+        if (world.traffic) world.traffic.pedestrians = world.pedestrians;
       }
       return world;
     }
@@ -242,6 +249,7 @@ export class World {
     this.traffic?.step(dt, cars[0]!);
     this.police?.step(dt, cars[0]!);
     this.racers?.step(dt, cars[0]!);
+    this.pedestrians?.step(dt, cars[0]!, this.traffic);
     director?.update(dt, cars);
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {
@@ -291,5 +299,12 @@ export class World {
     const soft = this.cars[0]?.soft;
     if (soft) soft.writeSnapshot(out, base);
     else out.fill(0, base, base + SOFT_FLOATS);
+    // The pedestrians, after that.
+    this.pedestrians?.writeSnapshot(out, base + SOFT_FLOATS);
+  }
+
+  /** Pedestrian slots in the snapshot. */
+  get pedestrianCount(): number {
+    return this.pedestrians?.count ?? 0;
   }
 }

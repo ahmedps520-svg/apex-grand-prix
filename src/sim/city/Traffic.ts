@@ -16,12 +16,14 @@ import {
   FLAG_INDICATOR_LEFT,
   FLAG_INDICATOR_RIGHT,
   FLAG_SIREN,
+  PED_CROSSING,
   W,
   WHEEL_COUNT,
   WHEEL_STRIDE,
 } from '../../shared/protocol';
 import type { Car } from '../vehicle/car';
 import type { CarSpec } from '../vehicle/spec';
+import type { Pedestrians } from './Pedestrians';
 
 /**
  * Traffic: everyday cars driving the lane graph around the player. They are kinematic (a
@@ -112,6 +114,8 @@ const kmh = (v: number): number => v / 3.6;
 export class Traffic {
   readonly vehicles: Vehicle[] = [];
   readonly graph: LaneGraph;
+  /** The pedestrians, when there are any: anyone in the road ahead stops the traffic. */
+  pedestrians: Pedestrians | null = null;
   private readonly rand: () => number;
   private controlTimer = 0;
   private time = 0;
@@ -369,6 +373,7 @@ export class Traffic {
       }
     }
     if (!chasing) this.playerAhead(car, player, remaining, consider);
+    if (!chasing && this.pedestrians) this.pedestriansAhead(car, remaining, consider);
 
     // The line at the end of the link: signals, stop signs, giving way, left turns.
     const stopLine = remaining - 1.5;
@@ -417,6 +422,25 @@ export class Traffic {
           ? car.next.turn
           : 0;
     car.indicator = turning;
+  }
+
+  /** Anyone crossing (or leaping about) in this car's lane ahead: a stopped leader. */
+  private pedestriansAhead(
+    car: Vehicle,
+    remaining: number,
+    consider: (distance: number, speed: number) => void,
+  ): void {
+    for (const ped of this.pedestrians!.list) {
+      if (!ped.active || ped.state < PED_CROSSING) continue;
+      if (Math.abs(ped.x - car.x) > 45 || Math.abs(ped.z - car.z) > 45) continue;
+      const p = this.projectOnLink(car.link, ped.x, ped.z);
+      if (p && Math.abs(p.lateral) < 2.6 && p.s > car.s) {
+        consider(p.s - car.s - car.front - 1.5, 0);
+      } else if (car.next) {
+        const q = this.projectOnLink(car.next, ped.x, ped.z);
+        if (q && Math.abs(q.lateral) < 2.6) consider(remaining + q.s - car.front - 1.5, 0);
+      }
+    }
   }
 
   /** A police car with its siren on within reach (ahead or behind). */

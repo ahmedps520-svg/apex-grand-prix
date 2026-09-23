@@ -24,6 +24,7 @@ import { cityMap, type CityMap } from '../content/city/map';
 import {
   POLICE_PAINT,
   policeModel,
+  pedestrianSlotsFor,
   policeSlotsFor,
   racerModel,
   racerSlotsFor,
@@ -52,6 +53,8 @@ import {
   FLAG_SHIFTING,
   FLAG_SIREN,
   SIM_HZ,
+  PED_STRIDE,
+  SOFT_FLOATS,
   SOFT_NODES,
   neutralInput,
   type AidLevel,
@@ -113,6 +116,7 @@ import { Festival } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
+import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
 import type { FestivalInfo } from '../ui/menu/store';
 import { ReplayRecorder, type Replay } from './replay';
@@ -164,6 +168,8 @@ export interface DebugApi {
    */
   soft: { crush: number; parts: number; moved: number } | null;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
+  /** Free roam: pedestrians about (for the tests). */
+  pedestrians: number;
   roamRace: {
     phase: string;
     placed: boolean;
@@ -491,6 +497,8 @@ export class Game {
   /** Black over the screen for a moment (the car being put on a race's grid). */
   private readonly fade: HTMLElement;
   private festivalScene: FestivalScene | null = null;
+  /** Free roam: the pedestrians' figures, placed from the snapshot. */
+  private pedestrianView: PedestrianView | null = null;
   private festivalRecords = loadFestivalRecords();
   private festivalMarkers: MinimapMarker[] = [];
   /** Whether the police have been told an event is on (speeding is sanctioned). */
@@ -598,6 +606,7 @@ export class Game {
       police: null,
       soft: null,
       roamRace: null,
+      pedestrians: 0,
       errors: [],
     };
     window.__apex = this.debug;
@@ -713,6 +722,7 @@ export class Game {
     // the festival's street racers the slots after them.
     const police = traffic > 0 ? policeSlotsFor(detail.chunks) : 0;
     const racers = traffic > 0 ? racerSlotsFor(detail.chunks) : 0;
+    const pedestrians = traffic > 0 ? pedestrianSlotsFor(detail.chunks) : 0;
     return {
       fieldCars:
         setup.mode === 'race'
@@ -728,6 +738,7 @@ export class Game {
       traffic: traffic || undefined,
       police: police || undefined,
       racers: racers || undefined,
+      pedestrians: pedestrians || undefined,
       mode: setup.mode,
       trackId:
         setup.mode === 'free' || setup.mode === 'roam' ? '' : setup.trackId || TRACKS[0]?.id || '',
@@ -938,6 +949,8 @@ export class Game {
     this.cones = null;
     this.festivalScene?.dispose();
     this.festivalScene = null;
+    this.pedestrianView?.dispose();
+    this.pedestrianView = null;
     const def = config.trackId ? trackById(config.trackId) : undefined;
     if (config.mode === 'roam') {
       this.track = null;
@@ -948,6 +961,8 @@ export class Game {
       this.scenery = new CityScene(map, config.conditions, detail);
       this.festivalScene = new FestivalScene(festivalEvents(map));
       this.scenery.scene.add(this.festivalScene.root);
+      this.pedestrianView = new PedestrianView(config.pedestrians ?? 0);
+      this.scenery.scene.add(this.pedestrianView.root);
       if (config.handling === 'arcade') {
         // Festival cones on the junction corners, to send flying for points.
         this.cones = new Cones(cityConePlacements(map), TEST_MULE.body);
@@ -1166,6 +1181,15 @@ export class Game {
       const player = this.states[0]!;
       if (this.session?.mode === 'roam' && count > 0) {
         this.updateSoftBody(view, snapshot.carCount, player, dt);
+        if (this.pedestrianView) {
+          const base = snapshot.carCount * CAR_STRIDE + SOFT_FLOATS;
+          this.pedestrianView.update(view, base, snapshot.simTime);
+          let about = 0;
+          for (let i = 0; i < this.pedestrianView.count; i++) {
+            if (view[base + i * PED_STRIDE + 4]! >= 0) about++;
+          }
+          this.debug.pedestrians = about;
+        }
       }
       this.cones?.update(dt, player);
       const top = this.menus.top;
