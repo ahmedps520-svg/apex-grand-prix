@@ -186,6 +186,8 @@ export class InputManager {
   private readonly pendingKeyActions: Action[] = [];
   private readonly pendingUi: UiInput[] = [];
   private pendingShiftUp = 0;
+  private pendingDrs = 0;
+  private pendingBoost = 0;
   private pendingShiftDown = 0;
   private readonly prevButtons = new Map<number, boolean[]>();
   private readonly prevWheel = new Map<WheelAction, boolean>();
@@ -193,7 +195,7 @@ export class InputManager {
   private readonly wheelOut = wheelReading();
   private readonly listeners: Array<[EventTarget, string, EventListener]> = [];
   /** Menu direction repeat state: when each held direction started and last fired. */
-  private readonly held = new Map<UiEvent, { since: number; last: number }>();
+  private readonly held = new Map<UiEvent, { since: number; last: number; polls: number }>();
   private stickX = 0;
   private stickY = 0;
   private capture: Capture | null = null;
@@ -251,8 +253,12 @@ export class InputManager {
     const d = this.driver;
     d.shiftUp = this.pendingShiftUp;
     d.shiftDown = this.pendingShiftDown;
+    d.drs = this.pendingDrs;
+    d.boost = this.pendingBoost;
     this.pendingShiftUp = 0;
     this.pendingShiftDown = 0;
+    this.pendingDrs = 0;
+    this.pendingBoost = 0;
 
     const k = this.keys;
     const keysDown = (codes: readonly string[]) => codes.some((c) => k.has(c));
@@ -308,6 +314,8 @@ export class InputManager {
         if (pressed(PAD.DPAD_LEFT)) this.actions.push('menuPrev');
         if (pressed(PAD.DPAD_RIGHT)) this.actions.push('menuNext');
         if (pressed(b.shiftUp)) d.shiftUp++;
+        if (pressed(b.drs)) d.drs++;
+        if (pressed(b.boost)) d.boost++;
         if (pressed(b.shiftDown)) d.shiftDown++;
         // L3 + R3 together also toggle the telemetry (for pads without a touchpad).
         if ((pressed(PAD.L3) && now2[PAD.R3]) || (pressed(PAD.R3) && now2[PAD.L3])) {
@@ -459,9 +467,15 @@ export class InputManager {
       if (!isDown) {
         this.held.delete(event);
       } else if (!state) {
-        this.held.set(event, { since: now, last: now });
+        this.held.set(event, { since: now, last: now, polls: 1 });
         push(event);
-      } else if (now - state.since > REPEAT_DELAY && now - state.last > REPEAT_INTERVAL) {
+      } else if (
+        // Seen held on a few polls as well as for the delay: one long frame (a hitch while a
+        // menu opens) must not turn a tap into a repeat.
+        ++state.polls > 2 &&
+        now - state.since > REPEAT_DELAY &&
+        now - state.last > REPEAT_INTERVAL
+      ) {
         state.last = now;
         push(event);
       }
@@ -536,6 +550,8 @@ export class InputManager {
           this.pendingKeyActions.push(event.shiftKey ? 'menuPrev' : 'menuNext');
         }
         if (this.bindings.keys.shiftUp.includes(event.code)) this.pendingShiftUp++;
+        if (this.bindings.keys.drs.includes(event.code)) this.pendingDrs++;
+        if (this.bindings.keys.boost.includes(event.code)) this.pendingBoost++;
         if (this.bindings.keys.shiftDown.includes(event.code)) this.pendingShiftDown++;
       }
       this.keys.add(event.code);

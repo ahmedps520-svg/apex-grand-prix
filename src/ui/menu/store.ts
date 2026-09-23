@@ -16,6 +16,7 @@ export type ScreenId =
   | 'trackSelect'
   | 'carSelect'
   | 'livery'
+  | 'schoolOffer'
   | 'championship'
   | 'standings'
   | 'raceSetup'
@@ -171,6 +172,8 @@ export interface MenuActions {
   watchReplay(): void;
   /** Opens photo mode (from the pause menu or a replay). */
   photoMode(): void;
+  /** Starts the driving school. */
+  startSchool(): void;
   replay(command: ReplayCommand): void;
 }
 

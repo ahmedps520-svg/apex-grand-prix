@@ -77,6 +77,9 @@ export class SimClient {
         this.readyResolve = null;
         break;
       case 'snapshot':
+        // A last snapshot of the previous session can arrive before the new one is ready: drop
+        // it, or the race radio and HUD would read the old session for a frame.
+        if (this.readyResolve) break;
         // The previous snapshot has been used for rendering by now: give its buffer back.
         if (this.latest) this.returned.push(this.latest.buffer);
         this.latest = message;

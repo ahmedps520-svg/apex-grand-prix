@@ -45,6 +45,10 @@ export interface CarRenderState {
   damageAero: number;
   damageEngine: number;
   damageSteer: number;
+  /** DRS: 0 = not here, 1 = allowed, 2 = open. ERS battery 0 … 1 (-1 = no hybrid). */
+  drs: number;
+  ers: number;
+  ersBoost: boolean;
   wheels: WheelRenderState[];
 }
 
@@ -87,6 +91,9 @@ export function createCarRenderState(): CarRenderState {
     damageAero: 0,
     damageEngine: 0,
     damageSteer: 0,
+    drs: 0,
+    ers: -1,
+    ersBoost: false,
     wheels,
   };
 }
@@ -136,6 +143,9 @@ export function interpolateCar(
   out.damageAero = buf[b + C.DAMAGE_AERO]!;
   out.damageEngine = buf[b + C.DAMAGE_ENGINE]!;
   out.damageSteer = buf[b + C.DAMAGE_STEER]!;
+  out.drs = buf[b + C.DRS]!;
+  out.ers = buf[b + C.ERS]!;
+  out.ersBoost = buf[b + C.ERS_BOOST]! > 0.5;
   for (let i = 0; i < WHEEL_COUNT; i++) {
     const o = b + C.WHEELS + i * WHEEL_STRIDE;
     const w = out.wheels[i]!;

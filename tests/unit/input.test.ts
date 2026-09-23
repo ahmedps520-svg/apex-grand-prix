@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultPadSettings } from '../../src/app/settings';
 import { InputManager, cleanPadName, padFamily } from '../../src/input/InputManager';
 import type { WheelProfile } from '../../src/input/wheel';
@@ -85,6 +85,34 @@ describe('input manager', () => {
     pad.press(4);
     input.update();
     expect(input.driver.shiftDown).toBe(1);
+    input.dispose();
+  });
+
+  it('repeats a held menu direction, but not after one long frame', () => {
+    const pad = fakePad('DualSense Wireless Controller (STANDARD GAMEPAD)', 'standard');
+    pads.push(pad);
+    const input = new InputManager();
+    let t = 100;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => t * 1000);
+    const ups = () => input.ui.filter((u) => u.event === 'up').length;
+    pad.press(12); // D-pad up
+    input.update();
+    expect(ups()).toBe(1);
+    // A hitch: the next poll comes half a second later. Still one press, no repeat.
+    t += 0.5;
+    input.update();
+    expect(ups()).toBe(0);
+    // Held for real: it repeats.
+    t += 0.1;
+    input.update();
+    expect(ups()).toBe(1);
+    t += 0.1;
+    input.update();
+    expect(ups()).toBe(1);
+    pad.press(12, false);
+    input.update();
+    expect(ups()).toBe(0);
+    clock.mockRestore();
     input.dispose();
   });
 

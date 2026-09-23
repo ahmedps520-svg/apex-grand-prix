@@ -37,6 +37,9 @@ export interface DriverInput {
   /** Gear-change presses since the previous frame (manual gearbox). */
   shiftUp: number;
   shiftDown: number;
+  /** DRS and ERS boost presses since the previous frame (cars that have them). */
+  drs: number;
+  boost: number;
 }
 
 export const neutralInput = (): DriverInput => ({
@@ -49,6 +52,8 @@ export const neutralInput = (): DriverInput => ({
   clutch: 0,
   shiftUp: 0,
   shiftDown: 0,
+  drs: 0,
+  boost: 0,
 });
 
 export type AidLevel = 'off' | 'low' | 'high';
@@ -215,7 +220,12 @@ export const C = {
   DAMAGE_AERO: 33,
   DAMAGE_ENGINE: 34,
   DAMAGE_STEER: 35,
-  WHEELS: 36,
+  /** DRS: 0 = none here, 1 = allowed, 2 = open. */
+  DRS: 36,
+  /** ERS battery (0 … 1, or -1 for cars without one) and 1 while boosting. */
+  ERS: 37,
+  ERS_BOOST: 38,
+  WHEELS: 39,
 } as const;
 export const CAR_STRIDE = C.WHEELS + WHEEL_COUNT * WHEEL_STRIDE;
 

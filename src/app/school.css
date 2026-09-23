@@ -1,0 +1,94 @@
+/* Driving school prompt: one control, a short instruction, progress and the lesson dots. */
+.school {
+  position: absolute;
+  top: calc(96px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.school-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-width: 260px;
+  padding: 14px 22px 12px;
+  border-radius: 16px;
+  background: rgba(10, 13, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.school-card.pass {
+  animation: school-pass 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+
+.school-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.school-glyph {
+  display: grid;
+  place-items: center;
+  min-width: 48px;
+  height: 48px;
+  padding: 0 10px;
+  border-radius: 12px;
+  font: 900 18px var(--font);
+  color: #fff;
+  background: linear-gradient(160deg, #ff3b2f, #b3170f);
+  box-shadow: 0 6px 20px rgba(255, 59, 47, 0.45);
+}
+
+.school-text {
+  font: italic 900 26px var(--font);
+  letter-spacing: 0.02em;
+}
+
+.school-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.school-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #39d98a, #b6f36a);
+  transition: width 0.15s linear;
+}
+
+.school-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.school-dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.school-dots span.now {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+}
+
+.school-dots span.done {
+  background: #39d98a;
+}
+
+@keyframes school-pass {
+  40% {
+    transform: scale(1.12);
+    border-color: #39d98a;
+  }
+}

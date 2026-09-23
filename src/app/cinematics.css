@@ -1,0 +1,156 @@
+/* Race cinematics: the circuit flyover's title card, and the podium's confetti and banner. */
+/* A lower third, so the circuit stays in view. */
+.flyover-card {
+  position: absolute;
+  left: calc(5% + var(--safe-left));
+  bottom: calc(12% + var(--safe-bottom));
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  width: max-content;
+  max-width: min(70vw, 720px);
+  padding: 14px 30px 12px 22px;
+  border-radius: 0 16px 16px 0;
+  border-left: 5px solid var(--accent);
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  z-index: 3;
+  animation: flyover-in 0.8s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.flyover-card.leaving {
+  animation: flyover-out 0.6s ease-in both;
+}
+
+.flyover-name {
+  font: italic 900 clamp(24px, 4.5vw, 48px) var(--font);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.flyover-sub {
+  font: 600 13px var(--font);
+  color: var(--muted);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.flyover-skip {
+  margin-top: 6px;
+  font: 700 10px var(--font);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+@keyframes flyover-in {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+}
+
+@keyframes flyover-out {
+  to {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+}
+
+.podium-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.podium-confetti {
+  position: absolute;
+  inset: 0;
+  transition: opacity 1s;
+}
+
+.podium-confetti span {
+  position: absolute;
+  top: -4vh;
+  left: var(--x);
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--c);
+  opacity: 0;
+  animation: podium-fall var(--t) linear var(--d) infinite;
+}
+
+@keyframes podium-fall {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 0;
+  }
+
+  8% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(40px, 110vh) rotate(720deg);
+    opacity: 0.8;
+  }
+}
+
+.podium-banner {
+  position: absolute;
+  left: 50%;
+  top: calc(12% + var(--safe-top));
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+  pointer-events: auto;
+  cursor: pointer;
+  animation: podium-in 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.2) 0.4s both;
+}
+
+.podium-label {
+  font: 800 14px var(--font);
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: #ffd166;
+}
+
+.podium-name {
+  font: italic 900 clamp(30px, 7vw, 64px) var(--font);
+  text-transform: uppercase;
+  line-height: 1;
+  text-shadow: 0 6px 30px rgba(0, 0, 0, 0.6);
+}
+
+.podium-done .podium-banner {
+  animation: podium-out 0.5s ease-in both;
+}
+
+.podium-done .podium-confetti {
+  opacity: 0;
+}
+
+@keyframes podium-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+}
+
+@keyframes podium-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -30px);
+  }
+}

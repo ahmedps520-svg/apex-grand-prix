@@ -106,7 +106,7 @@ export class RaceEngineer {
     if (first) {
       if (race && r.phase !== 'racing') {
         out.push({
-          text: `Radio check. You start ${ordinal(r.position)} of ${r.cars}. ${r.laps} laps today.`,
+          text: `Radio check. You start ${ordinal(r.position)} of ${r.cars}. ${r.laps} ${r.laps === 1 ? 'lap' : 'laps'} today.`,
           priority: 1,
         });
       } else if (r.mode === 'timeTrial') {

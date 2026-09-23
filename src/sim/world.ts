@@ -60,6 +60,9 @@ export class World {
   /** AI driver per car (null for the player). */
   drivers: Array<AiDriver | null> = [];
   private readonly neutral = neutralInput();
+  /** Nearest track sample per car (a hint for projecting onto the track). */
+  private readonly hints: number[] = [];
+  private drsTimer = 0;
 
   constructor(
     playerCount = 1,
@@ -115,6 +118,7 @@ export class World {
         seed: config.seed + i * 7919,
       });
       world.cars[i]!.setAids({ ...defaultAids(), gearbox: 'auto', tc: 'high', abs: 'high' });
+      world.cars[i]!.autoHybrid = true;
     }
     for (const car of world.cars) car.damageScale = config.damage ?? 0;
     const laps = config.mode === 'race' ? config.laps : 0;
@@ -186,6 +190,39 @@ export class World {
     }
     if (cars.length > 1) resolveCarContacts(cars);
     director?.update(dt, cars);
+    this.drsTimer -= dt;
+    if (this.drsTimer <= 0) {
+      this.drsTimer = 0.02;
+      this.updateDrs();
+    }
+  }
+
+  /**
+   * DRS is allowed in a zone; in a race only from the second lap and within a second of the car
+   * ahead (measured at the timing points).
+   */
+  private updateDrs(): void {
+    const track = this.track;
+    if (!track) return;
+    const status = this.director?.status;
+    for (let i = 0; i < this.cars.length; i++) {
+      const car = this.cars[i]!;
+      if (!car.spec.hybrid) continue;
+      const pr = track.project(car.pos.x, car.pos.z, this.hints[i] ?? -1);
+      this.hints[i] = pr.index;
+      let allowed = track.inDrsZone(pr.s);
+      if (allowed && status?.mode === 'race') {
+        const me = status.cars[i];
+        const ahead = me ? status.cars[status.order[me.position - 2] ?? -1] : undefined;
+        allowed =
+          status.phase === 'racing' &&
+          me !== undefined &&
+          me.lap >= 1 &&
+          ahead !== undefined &&
+          me.gapToLeader - ahead.gapToLeader < 1;
+      }
+      car.drsAllowed = allowed;
+    }
   }
 
   writeSnapshot(out: Float32Array): void {

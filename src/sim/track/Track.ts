@@ -80,6 +80,8 @@ export class Track implements Surface {
   readonly kerbs: Array<{ left: boolean; right: boolean }> = [];
   /** Wet weather: multiplier on every surface's grip. */
   gripScale = 1;
+  /** DRS zones along the long straights: [start, end] distances along the lap. */
+  readonly drsZones: Array<[number, number]> = [];
   private readonly grid = new Map<number, number[]>();
 
   constructor(readonly def: TrackDef) {
@@ -146,6 +148,40 @@ export class Track implements Surface {
       this.kerbs.push({ left: corner, right: corner });
     }
     this.buildGrid();
+    this.findDrsZones();
+  }
+  /**
+   * DRS zones: every straight (curvature under 1/600 per metre) at least 400 m long, from 60 m
+   * after it starts to 120 m before the braking zone at its end.
+   */
+  private findDrsZones(): void {
+    const n = this.samples.length;
+    const straight = this.samples.map((p) => Math.abs(p.curvature) < 1 / 600);
+    // Start scanning at a bend, so a straight across the start line isn't split in two.
+    const first = straight.indexOf(false);
+    if (first < 0) return;
+    let runStart = -1;
+    for (let k = 1; k <= n; k++) {
+      const i = (first + k) % n;
+      if (straight[i] && runStart < 0) runStart = k;
+      if ((!straight[i] || k === n) && runStart >= 0) {
+        const from = this.samples[(first + runStart) % n]!.s;
+        const length = (k - runStart) * SAMPLE_SPACING;
+        if (length >= 400) {
+          const start = (from + 60) % this.length;
+          this.drsZones.push([start, (start + length - 180) % this.length]);
+        }
+        runStart = -1;
+      }
+    }
+  }
+
+  /** True when `s` (distance along the lap) is inside a DRS zone. */
+  inDrsZone(s: number): boolean {
+    for (const [a, b] of this.drsZones) {
+      if (a <= b ? s >= a && s <= b : s >= a || s <= b) return true;
+    }
+    return false;
   }
 
   /** Point on the centre line at distance `s` (wraps around the lap). */

@@ -31,6 +31,12 @@ export class Hud {
   private readonly segments: HTMLElement[] = [];
   private readonly abs = el('span', 'hud-lamp', 'ABS');
   private readonly tc = el('span', 'hud-lamp', 'TC');
+  /** Hybrid cars: the DRS lamp and the ERS battery. */
+  private readonly hybrid = el('div', 'hud-hybrid');
+  private readonly drs = el('span', 'hud-drs', 'DRS');
+  private readonly ers = el('span', 'hud-ers');
+  private readonly ersFill = el('span');
+  private hybridShown = '';
   /** Damage: wing, engine and alignment bars, shown once something is damaged. */
   private readonly damage = el('div', 'hud-damage');
   private readonly damageBars: HTMLElement[] = [];
@@ -68,13 +74,16 @@ export class Hud {
       this.damageBars.push(fill);
     }
     this.damage.hidden = true;
+    this.ers.appendChild(this.ersFill);
+    this.hybrid.append(this.drs, this.ers);
+    this.hybrid.hidden = true;
     const readout = el('div', 'hud-readout');
     const gearBlock = el('div', 'hud-gear-block');
     gearBlock.append(this.gear, this.mode);
     const speedBlock = el('div', 'hud-speed-block');
     speedBlock.append(this.speed, this.unit);
     readout.append(gearBlock, speedBlock);
-    this.root.append(this.damage, this.lights, bar, readout, lamps);
+    this.root.append(this.damage, this.hybrid, this.lights, bar, readout, lamps);
     parent.appendChild(this.root);
   }
 
@@ -126,6 +135,19 @@ export class Hud {
     this.abs.classList.toggle('active', (car.flags & FLAG_ABS) !== 0);
     this.tc.classList.toggle('active', (car.flags & FLAG_TC) !== 0);
     this.updateDamage(car);
+    this.updateHybrid(car);
+  }
+
+  private updateHybrid(car: CarRenderState): void {
+    const key = `${car.ers < 0 ? -1 : Math.round(car.ers * 40)},${car.drs},${car.ersBoost}`;
+    if (key === this.hybridShown) return;
+    this.hybridShown = key;
+    this.hybrid.hidden = car.ers < 0;
+    if (car.ers < 0) return;
+    this.drs.classList.toggle('allowed', car.drs === 1);
+    this.drs.classList.toggle('open', car.drs === 2);
+    this.ersFill.style.width = `${Math.round(car.ers * 100)}%`;
+    this.ers.classList.toggle('boost', car.ersBoost);
   }
 
   private updateDamage(car: CarRenderState): void {

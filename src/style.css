@@ -950,3 +950,63 @@ body.fatal #loading-text {
 .hud-damage-bar span.bad {
   background: #ff3b2f;
 }
+
+/* Hybrid cars: DRS lamp and ERS battery above the speedo. */
+.hud-hybrid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.hud-hybrid[hidden] {
+  display: none;
+}
+
+.hud-drs {
+  padding: 2px 8px;
+  border-radius: 5px;
+  font: 800 11px var(--font);
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.hud-drs.allowed {
+  color: #39d98a;
+  border-color: #39d98a;
+}
+
+.hud-drs.open {
+  color: #051a10;
+  background: #39d98a;
+  border-color: #39d98a;
+  box-shadow: 0 0 12px rgba(57, 217, 138, 0.8);
+}
+
+.hud-ers {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-ers span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #1f8fff, #37d4ff);
+  transition: width 0.2s linear;
+}
+
+.hud-ers.boost span {
+  background: linear-gradient(90deg, #ffb000, #fff176);
+  animation: hud-boost 0.4s ease-in-out infinite alternate;
+}
+
+@keyframes hud-boost {
+  to {
+    opacity: 0.6;
+  }
+}
