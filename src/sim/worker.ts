@@ -100,9 +100,14 @@ scope.onmessage = (event) => {
         paused = false;
         clock.resetBaseline();
         break;
-      case 'command':
-        if (msg.command.kind === 'resetCar') world?.cars[msg.command.car]?.reset();
+      case 'command': {
+        const command = msg.command;
+        if (!world) break;
+        if (command.kind === 'resetCar') world.cars[command.car]?.reset();
+        else if (command.kind === 'teleport') world.teleport(command.car, command.to);
+        else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
         break;
+      }
     }
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));

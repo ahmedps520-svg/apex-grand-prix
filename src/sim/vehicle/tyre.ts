@@ -1,10 +1,10 @@
 import type { TyreSpec } from './spec';
 
 /**
- * Round 1 tyre: Pacejka "Magic Formula" curves for pure slip, combined with normalised slip
- * (the resultant slip is scaled by each direction's peak slip, which gives an elliptical grip
- * envelope), plus simple load sensitivity. Round 2 replaces this with the fuller model
- * (relaxation length, camber, combined-slip weighting, temperature).
+ * Tyre forces: Pacejka "Magic Formula" curves for pure slip, combined with normalised slip (the
+ * resultant slip is scaled by each direction's peak slip, which gives an elliptical grip
+ * envelope), load sensitivity and camber. The slip angle passed in already includes the
+ * carcass relaxation (see Car), so forces build up over a short rolling distance.
  */
 
 /** Magic Formula shape: sin(C·atan(Bx − E(Bx − atan Bx))), normalised to a peak of 1. */
@@ -42,6 +42,8 @@ export interface TyreOutput {
 
 export const tyreOutput = (): TyreOutput => ({ fx: 0, fy: 0, dfxdk: 0, fxMax: 0, slip: 0 });
 
+const MAX_CAMBER_LOSS = 0.3;
+
 export class TyreModel {
   readonly kappaPeak: number;
   readonly alphaPeak: number;
@@ -58,10 +60,18 @@ export class TyreModel {
   /**
    * @param kappa slip ratio (+ = wheel spinning faster than the road)
    * @param alpha slip angle in radians (+ = contact patch sliding to the right)
+   * @param lean camber relative to the road in radians (+ = top of the wheel leaning right)
    * @param load normal load in newtons
    * @param grip surface grip multiplier
    */
-  compute(kappa: number, alpha: number, load: number, grip: number, out: TyreOutput): TyreOutput {
+  compute(
+    kappa: number,
+    alpha: number,
+    lean: number,
+    load: number,
+    grip: number,
+    out: TyreOutput,
+  ): TyreOutput {
     if (load <= 0) {
       out.fx = 0;
       out.fy = 0;
@@ -71,17 +81,20 @@ export class TyreModel {
       return out;
     }
     const s = this.spec;
-    const loadFactor = this.loadFactor(load);
-    const dx = s.muX * grip * loadFactor * load;
-    const dy = s.muY * grip * loadFactor * load;
+    const factor = grip * this.loadFactor(load) * this.camberFactor(alpha, lean);
+    const dx = s.muX * factor * load;
+    const dy = s.muY * factor * load;
+    // Camber thrust: a leaning tyre pushes towards the side it leans to, like a small slip
+    // angle the other way.
+    const alphaEff = alpha - s.camberThrust * lean;
 
-    out.fx = this.fx(kappa, alpha, dx);
-    out.fy = this.fy(kappa, alpha, dy);
+    out.fx = this.fx(kappa, alphaEff, dx);
+    out.fy = this.fy(kappa, alphaEff, dy);
     const h = 1e-3;
-    out.dfxdk = (this.fx(kappa + h, alpha, dx) - this.fx(kappa - h, alpha, dx)) / (2 * h);
+    out.dfxdk = (this.fx(kappa + h, alphaEff, dx) - this.fx(kappa - h, alphaEff, dx)) / (2 * h);
     out.fxMax = dx;
     const kn = kappa / this.kappaPeak;
-    const an = alpha / this.alphaPeak;
+    const an = alphaEff / this.alphaPeak;
     out.slip = Math.sqrt(kn * kn + an * an);
     return out;
   }
@@ -90,6 +103,21 @@ export class TyreModel {
   private loadFactor(load: number): number {
     const f = 1 - this.spec.loadSensitivity * (load / this.referenceLoad - 1);
     return f < 0.6 ? 0.6 : f > 1.15 ? 1.15 : f;
+  }
+
+  /**
+   * Cornering grip is best when the tyre leans slightly into the corner; in a straight line any
+   * lean shrinks the contact patch a little.
+   */
+  private camberFactor(alpha: number, lean: number): number {
+    const s = this.spec;
+    const cornering = Math.min(Math.abs(alpha) / this.alphaPeak, 1);
+    // The lateral force opposes the slip angle; leaning towards the force is leaning "in".
+    const intoCorner = -lean * Math.sign(alpha);
+    const offIdeal = intoCorner - s.idealCamber;
+    const loss =
+      s.camberGripLoss * (cornering * offIdeal * offIdeal + (1 - cornering) * 0.5 * lean * lean);
+    return 1 - Math.min(loss, MAX_CAMBER_LOSS);
   }
 
   private fx(kappa: number, alpha: number, peak: number): number {

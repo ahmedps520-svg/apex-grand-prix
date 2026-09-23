@@ -14,6 +14,10 @@ export interface WheelRenderState {
   slip: number;
   load: number;
   contact: boolean;
+  slipRatio: number;
+  slipAngle: number;
+  surface: number;
+  camber: number;
 }
 
 export interface CarRenderState {
@@ -28,13 +32,33 @@ export interface CarRenderState {
   steer: number;
   handbrake: number;
   flags: number;
+  accelLong: number;
+  accelLat: number;
+  /** Average front road-wheel angle and the current steering range, radians. */
+  steerAngle: number;
+  steerAuthority: number;
+  clutch: number;
+  manualGearbox: boolean;
+  tcLevel: number;
+  absLevel: number;
   wheels: WheelRenderState[];
 }
 
 export function createCarRenderState(): CarRenderState {
   const wheels: WheelRenderState[] = [];
   for (let i = 0; i < WHEEL_COUNT; i++) {
-    wheels.push({ length: 0, steer: 0, spin: 0, slip: 0, load: 0, contact: false });
+    wheels.push({
+      length: 0,
+      steer: 0,
+      spin: 0,
+      slip: 0,
+      load: 0,
+      contact: false,
+      slipRatio: 0,
+      slipAngle: 0,
+      surface: 0,
+      camber: 0,
+    });
   }
   return {
     pos: vec3(),
@@ -48,6 +72,14 @@ export function createCarRenderState(): CarRenderState {
     steer: 0,
     handbrake: 0,
     flags: 0,
+    accelLong: 0,
+    accelLat: 0,
+    steerAngle: 0,
+    steerAuthority: 0,
+    clutch: 1,
+    manualGearbox: false,
+    tcLevel: 0,
+    absLevel: 0,
     wheels,
   };
 }
@@ -86,6 +118,14 @@ export function interpolateCar(
   out.steer = buf[b + C.STEER]!;
   out.handbrake = buf[b + C.HANDBRAKE]!;
   out.flags = buf[b + C.FLAGS]!;
+  out.accelLong = buf[b + C.ACCEL_LONG]!;
+  out.accelLat = buf[b + C.ACCEL_LAT]!;
+  out.steerAngle = buf[b + C.STEER_ANGLE]!;
+  out.steerAuthority = buf[b + C.STEER_AUTHORITY]!;
+  out.clutch = buf[b + C.CLUTCH]!;
+  out.manualGearbox = buf[b + C.GEARBOX_MANUAL]! > 0.5;
+  out.tcLevel = buf[b + C.TC_LEVEL]!;
+  out.absLevel = buf[b + C.ABS_LEVEL]!;
   for (let i = 0; i < WHEEL_COUNT; i++) {
     const o = b + C.WHEELS + i * WHEEL_STRIDE;
     const w = out.wheels[i]!;
@@ -95,6 +135,10 @@ export function interpolateCar(
     w.slip = buf[o + W.SLIP]!;
     w.load = buf[o + W.LOAD]!;
     w.contact = buf[o + W.CONTACT]! > 0.5;
+    w.slipRatio = buf[o + W.SLIP_RATIO]!;
+    w.slipAngle = buf[o + W.SLIP_ANGLE]!;
+    w.surface = buf[o + W.SURFACE]!;
+    w.camber = buf[o + W.CAMBER]!;
   }
   return out;
 }

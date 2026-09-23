@@ -3,10 +3,14 @@ import { mulberry32 } from '../shared/math';
 
 /** Procedural textures drawn once at startup, so the build ships no image files. */
 
-function makeCanvas(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+/** The UI's font stack: system fonts are always loaded, so text can be drawn right away. */
+const LABEL_FONT =
+  "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
+function makeCanvas(width: number, height = width): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('2D canvas is not available');
   return [canvas, ctx];
@@ -55,18 +59,24 @@ function tileableNoise(
   return out;
 }
 
-function toTexture(canvas: HTMLCanvasElement, repeat: number, srgb: boolean): THREE.CanvasTexture {
+function toTexture(
+  canvas: HTMLCanvasElement,
+  repeatX: number,
+  repeatY: number,
+  srgb: boolean,
+): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(repeat, repeat);
+  texture.repeat.set(repeatX, repeatY);
   texture.anisotropy = 8;
   texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   texture.needsUpdate = true;
   return texture;
 }
 
-export function asphaltTexture(repeat: number): THREE.CanvasTexture {
+/** Tileable asphalt; repeats are tiles across the surface's u (x) and v (y) directions. */
+export function asphaltTexture(repeatX: number, repeatY = repeatX): THREE.CanvasTexture {
   const size = 512;
   const [canvas, ctx] = makeCanvas(size);
   const noise = tileableNoise(size, 7, 5, 8);
@@ -84,7 +94,7 @@ export function asphaltTexture(repeat: number): THREE.CanvasTexture {
     image.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
-  return toTexture(canvas, repeat, true);
+  return toTexture(canvas, repeatX, repeatY, true);
 }
 
 export function grassTexture(repeat: number): THREE.CanvasTexture {
@@ -102,7 +112,7 @@ export function grassTexture(repeat: number): THREE.CanvasTexture {
     image.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
-  return toTexture(canvas, repeat, true);
+  return toTexture(canvas, repeat, repeat, true);
 }
 
 export function checkerTexture(columns: number, rows: number): THREE.CanvasTexture {
@@ -118,6 +128,44 @@ export function checkerTexture(columns: number, rows: number): THREE.CanvasTextu
       ctx.fillRect(x * cell, y * cell, cell, cell);
     }
   }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+export interface LabelOptions {
+  /** Canvas size in pixels; match the aspect ratio of the surface it goes on. Default 512×256. */
+  width?: number;
+  height?: number;
+  /** CSS colours of the panel and the text. Default: near-black on off-white. */
+  background?: string;
+  color?: string;
+}
+
+/** A sign face: bold text, as large as fits, centred on a plain panel. */
+export function labelTexture(text: string, options: LabelOptions = {}): THREE.CanvasTexture {
+  const { width = 512, height = 256, background = '#f4f4f0', color = '#141414' } = options;
+  const [canvas, ctx] = makeCanvas(width, height);
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, width, height);
+  // Most of the panel's height, narrowed if the text would run into the sides.
+  let size = height * 0.72;
+  ctx.font = `800 ${size}px ${LABEL_FONT}`;
+  const fit = (width * 0.86) / ctx.measureText(text).width;
+  if (fit < 1) {
+    size *= fit;
+    ctx.font = `800 ${size}px ${LABEL_FONT}`;
+  }
+  // Centre the ink rather than the em box, so digits sit in the middle of the panel.
+  const metrics = ctx.measureText(text);
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    text,
+    width / 2,
+    (height + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2,
+  );
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;

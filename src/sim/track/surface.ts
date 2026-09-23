@@ -1,3 +1,5 @@
+import { PAD_HALF_X, PAD_HALF_Z } from '../../content/testGround';
+
 /**
  * Ground surfaces the physics can query. Round 1 only has the flat test ground; Round 4 adds the
  * spline-based track surface behind the same interface.
@@ -59,18 +61,19 @@ export interface Surface {
   surfaceAt(x: number, z: number): SurfaceId;
 }
 
-/** Flat test ground: a square asphalt pad surrounded by grass, all at height 0. */
+/** Flat test ground: a rectangular asphalt pad surrounded by grass, all at height 0. */
 export class TestGround implements Surface {
-  constructor(readonly padHalfSize = 350) {}
+  constructor(
+    readonly halfX = PAD_HALF_X,
+    readonly halfZ = PAD_HALF_Z,
+  ) {}
 
   heightAt(): number {
     return 0;
   }
 
   surfaceAt(x: number, z: number): SurfaceId {
-    return Math.abs(x) <= this.padHalfSize && Math.abs(z) <= this.padHalfSize
-      ? SURFACE.ASPHALT
-      : SURFACE.GRASS;
+    return Math.abs(x) <= this.halfX && Math.abs(z) <= this.halfZ ? SURFACE.ASPHALT : SURFACE.GRASS;
   }
 
   raycast(
@@ -96,6 +99,59 @@ export class TestGround implements Surface {
     hit.ny = 1;
     hit.nz = 0;
     hit.surface = this.surfaceAt(ox + dx * t, oz + dz * t);
+    return true;
+  }
+}
+
+/**
+ * An endless asphalt slope for tests: the ground rises towards -z (a car with yaw 0 faces
+ * uphill) by `grade` metres per metre.
+ */
+export class SlopeGround implements Surface {
+  private readonly nx = 0;
+  private readonly ny: number;
+  private readonly nz: number;
+
+  constructor(readonly grade: number) {
+    const len = Math.sqrt(1 + grade * grade);
+    this.ny = 1 / len;
+    this.nz = grade / len;
+  }
+
+  heightAt(_x: number, z: number): number {
+    return -this.grade * z;
+  }
+
+  surfaceAt(): SurfaceId {
+    return SURFACE.ASPHALT;
+  }
+
+  raycast(
+    _ox: number,
+    oy: number,
+    oz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    maxDist: number,
+    hit: RayHit,
+  ): boolean {
+    // Plane through the origin with normal n: n·p = 0.
+    const above = this.ny * oy + this.nz * oz;
+    let t: number;
+    if (above <= 0) {
+      t = 0;
+    } else {
+      const along = this.ny * dy + this.nz * dz + this.nx * dx;
+      if (along >= -1e-6) return false;
+      t = above / -along;
+      if (t > maxDist) return false;
+    }
+    hit.distance = t;
+    hit.nx = this.nx;
+    hit.ny = this.ny;
+    hit.nz = this.nz;
+    hit.surface = SURFACE.ASPHALT;
     return true;
   }
 }

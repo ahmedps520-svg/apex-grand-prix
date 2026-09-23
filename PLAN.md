@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Round 1 (Foundations) built and in review. See the progress log (§10).
+> **Status:** Round 1 (Foundations) merged. Round 2 (Handling) built and in review. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -768,3 +768,30 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - Headless Chromium's software WebGPU loses its device right after start-up, even on a bare three.js page. That's a quirk of the test environment, but it showed the game needs to handle device loss. It now falls back to WebGL2 automatically if WebGPU dies in the first 15 s, and otherwise shows a Reload button.
   - ABS and traction control must be slip *controllers* that model the wheel's effective inertia. Simple torque limits either lock the wheels or strangle launches.
   - The service worker must ignore `Vary` headers when matching cached files, otherwise offline play fails.
+
+### Round 2: Handling (F1 25 style) and steering wheels
+- **Fixed from the Round 1 review:**
+  - The physics fell behind real time below 10 fps (a 100 ms catch-up cap), and the fps readout was capped the same way. The cap is now 250 ms and fps is measured from real time. Tests prove real time within 1 % at 5–20 fps.
+  - Traction control cut power at every launch, even with no wheelspin: its target wheel speed didn't account for the car accelerating. ABS had the mirror-image flaw. Both now follow the car's acceleration; TC stays off on a clean dry launch.
+- **Built:**
+  - Tyres: carcass relaxation (grip builds over ~0.3 m of rolling), camber and camber gain, a low-speed model, and a brake hold that parks the car on a 15 % slope.
+  - Driveline: clutch-pack limited-slip differential (preload plus power/coast locking), clutch pedal, manual gearbox with paddles, rev-matched downshifts and over-rev protection, and early automatic downshifts under braking.
+  - Assists: ABS and TC at Off / Low / High, gearbox Auto / Manual.
+  - Pad steering: stick dead zone and centre precision, smoothing and rate limits, and a speed-sensitive range that always reaches the grip limit at full stick.
+  - Steering wheels: detection, a calibration wizard (steering, pedals incl. combined pedals and pedals that read 0 until moved, buttons incl. hat switches), and per-wheel settings for rotation, dead zone, linearity, pedal curves, dead zone, saturation and invert. Wheels steer 1:1.
+  - Trigger curves (Linear / Progressive / Aggressive) and dead zones; an in-race quick menu (D-pad or Tab); versioned settings with migration from Round 1.
+  - Telemetry panel (F3 / touchpad / L3+R3): inputs vs applied, per-wheel load, slip ratio, slip angle, grip use, camber and surface, and a g-g plot.
+  - HUD: shift lights, auto/manual indicator, TC/ABS levels, refused-downshift flash.
+  - Code-generated engine sound and tyre squeal.
+  - Proving ground: a 1 km drag strip with boards and automatic timing (0–100, 0–200, 400 m, 1 km), a 60 m skidpad, and teleports.
+- **Measured (Node physics bench, GT test car, TC/ABS High):**
+  - 0–100 km/h 3.21 s, 0–200 km/h 9.41 s, top speed 291 km/h.
+  - 200→0 km/h in 86 m with ABS (96 m with locked wheels).
+  - 60 m skidpad: 1.46 g, understeering gently at the limit.
+  - Parked on a 15 % slope with the handbrake: under 0.1 mm of creep in 10 s.
+  - About 8 µs per physics step.
+- **Learned:**
+  - A slip controller has to follow a moving target: the right wheel speed changes as the car accelerates, so ABS and TC need the car's acceleration as a feed-forward term.
+  - A pad's steering range should be the kinematic grip-limit angle plus about half the tyre's peak slip angle. Using the full peak slip angle put the limit at a quarter of the stick at high speed.
+  - Cars must be placed flush with sloped ground on reset, or they flip; the Round 4 tracks need this anyway.
+

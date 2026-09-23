@@ -10,8 +10,11 @@ import {
   invRotateV,
   isFiniteQuat,
   isFiniteVec,
+  lerp,
+  mulQ,
   normalizeV,
   quat,
+  quatFromUnitVectors,
   quatFromYaw,
   rotateV,
   setV,
@@ -23,15 +26,21 @@ import {
   C,
   FLAG_ABS,
   FLAG_LIMITER,
+  FLAG_SHIFT_DENIED,
   FLAG_SHIFTING,
   FLAG_TC,
   FLAG_UPSIDE_DOWN,
   W,
   WHEEL_STRIDE,
+  aidLevelNumber,
+  defaultAids,
   neutralInput,
+  type AidLevel,
+  type DriverAids,
   type DriverInput,
+  type SteerSmoothing,
 } from '../../shared/protocol';
-import { SURFACE_PROPS, rayHit, type Surface } from '../track/surface';
+import { SURFACE, SURFACE_PROPS, rayHit, type Surface, type SurfaceId } from '../track/surface';
 import type { AxleSpec, CarSpec } from './spec';
 import { TyreModel, tyreOutput } from './tyre';
 
@@ -39,20 +48,63 @@ const GRAVITY = 9.81;
 const AIR_DENSITY = 1.225;
 const TWO_PI = Math.PI * 2;
 const RPM_PER_RAD_S = 60 / TWO_PI;
-/** Speed floors for the slip formulas; they keep the tyre model stable near standstill. */
+/** Speed floor for the slip-ratio formula; keeps the longitudinal tyre model stable at rest. */
 const V_LONG_MIN = 2;
-const V_LAT_MIN = 2;
+/** Largest slip angle the tyre carcass can wind up to (radians). */
+const MAX_SLIP_ANGLE = 1.35;
+/** Extra sideways damping for slow tyres so a parked or crawling car doesn't rock. */
+const LOW_SPEED_DAMPING = 6_000;
+const LOW_SPEED_DAMPING_BELOW = 3;
+/** Brake hold: a braked wheel at a standstill grips the ground like static friction. */
+const HOLD_ENGAGE_SPEED = 0.08;
+const HOLD_RELEASE_SPEED = 0.35;
+const HOLD_STIFFNESS = 200_000;
+const HOLD_DAMPING = 12_000;
+const HOLD_MIN_TORQUE = 150;
 /** Body-to-ground contact (bottoming out, rollovers). */
 const BODY_STIFFNESS = 250_000;
 const BODY_DAMPING = 12_000;
 const BODY_FRICTION = 0.55;
-/** ABS / traction control aim for this fraction of the tyre's peak slip ratio… */
-const ASSIST_SLIP_FRACTION = 0.9;
-/** …and correct wheel speed over roughly this many seconds. */
-const ASSIST_RESPONSE = 0.02;
+/** Wheel steering is smoothed only enough to hide the display-rate input steps. */
+const WHEEL_INPUT_SMOOTHING = 0.008;
+/** Manual gearbox: a downshift is refused if it would put the engine this far past the limiter. */
+const OVER_REV_MARGIN = 300;
+/** Gear changes into or out of reverse only below this speed, m/s. */
+const REVERSE_SELECT_SPEED = 1.5;
+
+interface AssistTuning {
+  /** Target slip as a fraction of the tyre's peak slip ratio. */
+  fraction: number;
+  /** Seconds over which the wheel speed is corrected. */
+  response: number;
+}
+
+/** "Low" lets the tyre slip well past its peak before stepping in; "High" holds it just below. */
+const ASSISTS: Record<'abs' | 'tc', Record<AidLevel, AssistTuning | null>> = {
+  abs: {
+    off: null,
+    low: { fraction: 1.4, response: 0.03 },
+    high: { fraction: 0.9, response: 0.02 },
+  },
+  tc: {
+    off: null,
+    low: { fraction: 1.45, response: 0.035 },
+    high: { fraction: 0.9, response: 0.02 },
+  },
+};
+
+/**
+ * Pad steering range above the kinematic grip limit, as a fraction of the front tyre's peak
+ * slip angle: full stick reaches the grip limit at any speed without going far past it.
+ */
+const PAD_SLIP_MARGIN = 0.5;
+
+/** Pad steering smoothing time constants, seconds. */
+const STEER_SMOOTHING: Record<SteerSmoothing, number> = { low: 0.02, medium: 0.04, high: 0.07 };
 
 const UP: Vec3 = { x: 0, y: 1, z: 0 };
 const FORWARD: Vec3 = { x: 0, y: 0, z: -1 };
+const RIGHT: Vec3 = { x: 1, y: 0, z: 0 };
 
 export interface Spawn {
   x: number;
@@ -67,6 +119,7 @@ class Wheel {
   /** Spring length at zero force. */
   readonly freeLength: number;
   readonly fullBumpLength: number;
+  readonly staticLoad: number;
 
   length: number;
   prevLength: number;
@@ -81,8 +134,15 @@ class Wheel {
   slip = 0;
   slipRatio = 0;
   slipAngle = 0;
+  /** Sideways deflection of the tyre carcass (relaxation state), metres. */
+  deflection = 0;
+  /** Camber relative to the road, radians (- = top leaning inwards). */
+  camber = 0;
   driveTorque = 0;
   extraInertia = 0;
+  /** Brake hold (static friction at a standstill) and where it is anchored. */
+  hold = false;
+  readonly holdPoint = vec3();
 
   // Per-step scratch values.
   readonly hardpointWorld = vec3();
@@ -91,12 +151,12 @@ class Wheel {
   cosAngle = 1;
   grip = 1;
   rollingResistance = 0;
+  surface: SurfaceId = SURFACE.ASPHALT;
 
   constructor(
     readonly axle: AxleSpec,
     /** -1 = left, +1 = right. */
     readonly side: number,
-    readonly isFront: boolean,
     cogHeight: number,
     staticLoad: number,
   ) {
@@ -105,6 +165,7 @@ class Wheel {
     this.hardpoint = vec3(side * axle.halfTrack, hardpointY, -axle.offset);
     this.freeLength = axle.staticLength + staticLoad / axle.springRate;
     this.fullBumpLength = axle.maxLength - axle.travel;
+    this.staticLoad = staticLoad;
     this.length = axle.staticLength;
     this.prevLength = this.length;
   }
@@ -124,55 +185,75 @@ export class Car {
   readonly prevRot = quat();
 
   input: DriverInput = neutralInput();
+  aids: DriverAids = defaultAids();
 
-  /** Filtered controls. */
+  /** Steering as a fraction of the current steering range (pads) or of full lock (wheels). */
   steer = 0;
+  /** Road-wheel angle the steering currently asks for, radians. */
+  roadAngle = 0;
+  /** Largest road-wheel angle available right now. */
+  steerAuthority: number;
   throttle = 0;
   brake = 0;
   handbrake = 0;
+  clutchEngagement = 1;
 
   gear = 1;
   engineRpm: number;
   shiftTimer = 0;
   shiftCooldown = 0;
+  shiftDeniedTimer = 0;
   reverseMode = false;
   limiterActive = false;
-  /** Driver aids (Round 3 exposes them as settings). */
-  readonly assists = { abs: true, tc: true };
   /** True if ABS / traction control limited a wheel during the last step. */
   absActive = false;
   tcActive = false;
+  /** Felt acceleration in the car's frame (smoothed), m/s². */
+  accelLong = 0;
+  accelLat = 0;
+  /** Actual acceleration along the car's nose during the last step, m/s² (unsmoothed). */
+  private forwardAccel = 0;
 
+  private pendingUp = 0;
+  private pendingDown = 0;
   private reverseHold = 0;
   private forwardHold = 0;
-  private readonly spawn: Spawn;
+  private spawn: Spawn;
   private readonly bodyPoints: Vec3[];
+  private readonly wheelbase: number;
+  private readonly frontAlphaPeak: number;
 
   // World-space scratch.
   private readonly up = vec3();
   private readonly fwd = vec3();
+  private readonly right = vec3();
   private readonly force = vec3();
   private readonly torque = vec3();
   private readonly t0 = vec3();
   private readonly t1 = vec3();
   private readonly t2 = vec3();
+  private readonly t3 = vec3();
   private readonly hit = rayHit();
   private readonly tyreOut = tyreOutput();
 
   constructor(
     readonly spec: CarSpec,
     spawn: Spawn,
+    /** Ground used to place the car on reset (flat ground at height 0 if omitted). */
+    private readonly ground: Surface | null = null,
   ) {
-    const wheelbase = spec.front.offset - spec.rear.offset;
-    const frontShare = -spec.rear.offset / wheelbase;
+    this.wheelbase = spec.front.offset - spec.rear.offset;
+    const frontShare = -spec.rear.offset / this.wheelbase;
     const frontLoad = (spec.mass * GRAVITY * frontShare) / 2;
     const rearLoad = (spec.mass * GRAVITY * (1 - frontShare)) / 2;
     this.wheels = [
-      new Wheel(spec.front, -1, true, spec.cogHeight, frontLoad),
-      new Wheel(spec.front, 1, true, spec.cogHeight, frontLoad),
-      new Wheel(spec.rear, -1, false, spec.cogHeight, rearLoad),
-      new Wheel(spec.rear, 1, false, spec.cogHeight, rearLoad),
+      new Wheel(spec.front, -1, spec.cogHeight, frontLoad),
+      new Wheel(spec.front, 1, spec.cogHeight, frontLoad),
+      new Wheel(spec.rear, -1, spec.cogHeight, rearLoad),
+      new Wheel(spec.rear, 1, spec.cogHeight, rearLoad),
     ];
+    this.frontAlphaPeak = this.wheels[0]!.tyre.alphaPeak;
+    this.steerAuthority = spec.front.maxSteer;
     const b = spec.body;
     this.bodyPoints = [];
     for (const x of [-b.halfWidth, b.halfWidth]) {
@@ -185,10 +266,30 @@ export class Car {
     this.reset(spawn);
   }
 
-  /** Places the car at rest on the ground at `spawn`. */
+  /** Takes this frame's controls. Gear-change presses are queued so none are lost. */
+  setInput(input: DriverInput): void {
+    this.input = input;
+    this.pendingUp = Math.min(this.pendingUp + input.shiftUp, 3);
+    this.pendingDown = Math.min(this.pendingDown + input.shiftDown, 3);
+  }
+
+  setAids(aids: DriverAids): void {
+    const wasManual = this.aids.gearbox === 'manual';
+    this.aids = { ...aids };
+    // Reverse is a gear in manual mode but a brake-pedal mode in auto; carry it across.
+    if (aids.gearbox === 'manual') this.reverseMode = false;
+    else if (wasManual && this.gear < 0) this.reverseMode = true;
+  }
+
+  /** Moves the car to a new place; later resets return there. */
+  teleport(spawn: Spawn): void {
+    this.spawn = spawn;
+    this.reset(spawn);
+  }
+
+  /** Places the car at rest on the ground at `spawn`, sitting flush with its slope. */
   reset(spawn: Spawn = this.spawn): void {
-    setV(this.pos, spawn.x, this.spec.cogHeight, spawn.z);
-    quatFromYaw(this.rot, spawn.yaw);
+    this.place(spawn);
     setV(this.vel, 0, 0, 0);
     setV(this.angVel, 0, 0, 0);
     for (const w of this.wheels) {
@@ -198,17 +299,51 @@ export class Car {
       w.steer = 0;
       w.load = 0;
       w.slip = 0;
+      w.slipRatio = 0;
+      w.slipAngle = 0;
+      w.deflection = 0;
+      w.hold = false;
     }
     this.steer = 0;
+    this.roadAngle = 0;
     this.throttle = 0;
     this.brake = 0;
     this.handbrake = 0;
     this.gear = 1;
     this.reverseMode = false;
+    this.reverseHold = 0;
+    this.forwardHold = 0;
     this.shiftTimer = 0;
     this.shiftCooldown = 0;
+    this.shiftDeniedTimer = 0;
+    this.pendingUp = 0;
+    this.pendingDown = 0;
+    this.limiterActive = false;
+    this.accelLong = 0;
+    this.accelLat = 0;
+    this.forwardAccel = 0;
     this.engineRpm = this.spec.engine.idleRpm;
     this.storePrevious();
+  }
+
+  private place(spawn: Spawn): void {
+    const normal = setV(this.t0, 0, 1, 0);
+    let groundY = 0;
+    const ground = this.ground;
+    if (ground) {
+      groundY = ground.heightAt(spawn.x, spawn.z);
+      const hit = this.hit;
+      if (ground.raycast(spawn.x, groundY + 2, spawn.z, 0, -1, 0, 4, hit)) {
+        groundY += 2 - hit.distance;
+        setV(normal, hit.nx, hit.ny, hit.nz);
+      }
+    }
+    // Turn to the spawn heading, then tilt the car's up axis onto the ground normal.
+    const yaw = quatFromYaw(quat(), spawn.yaw);
+    const tilt = quatFromUnitVectors(quat(), UP, normal);
+    mulQ(this.rot, tilt, yaw);
+    setV(this.pos, spawn.x, groundY, spawn.z);
+    addScaledV(this.pos, this.pos, normal, this.spec.cogHeight);
   }
 
   storePrevious(): void {
@@ -227,7 +362,11 @@ export class Car {
       isFiniteQuat(this.rot) &&
       isFiniteVec(this.vel) &&
       isFiniteVec(this.angVel) &&
-      this.wheels.every((w) => Number.isFinite(w.omega) && Number.isFinite(w.length))
+      Number.isFinite(this.engineRpm) &&
+      this.wheels.every(
+        (w) =>
+          Number.isFinite(w.omega) && Number.isFinite(w.length) && Number.isFinite(w.deflection),
+      )
     );
   }
 
@@ -240,6 +379,7 @@ export class Car {
   step(dt: number, surface: Surface): void {
     rotateV(this.up, this.rot, UP);
     rotateV(this.fwd, this.rot, FORWARD);
+    rotateV(this.right, this.rot, RIGHT);
     this.updateControls(dt);
     this.absActive = false;
     this.tcActive = false;
@@ -253,6 +393,7 @@ export class Car {
     for (const w of this.wheels) this.tyreForces(w, dt);
     this.aero();
     this.bodyContacts(surface);
+    this.measureAcceleration(dt);
     this.integrate(dt);
     this.afterStep(dt);
   }
@@ -262,9 +403,10 @@ export class Car {
   private updateControls(dt: number): void {
     const input = this.input;
     const speed = dotV(this.vel, this.fwd);
+    const auto = this.aids.gearbox === 'auto';
 
-    // Automatic reverse: hold the brake at a standstill to select reverse, throttle to go back.
-    if (!this.reverseMode) {
+    // Automatic gearbox only: hold the brake at a standstill to select reverse.
+    if (auto && !this.reverseMode) {
       this.reverseHold =
         speed < 0.8 && input.brake > 0.6 && input.throttle < 0.1 ? this.reverseHold + dt : 0;
       if (this.reverseHold > 0.35) {
@@ -272,7 +414,7 @@ export class Car {
         this.gear = -1;
         this.reverseHold = 0;
       }
-    } else {
+    } else if (auto) {
       this.forwardHold =
         speed > -0.8 && input.throttle > 0.6 && input.brake < 0.1 ? this.forwardHold + dt : 0;
       if (this.forwardHold > 0.1) {
@@ -281,47 +423,89 @@ export class Car {
         this.forwardHold = 0;
       }
     }
-    const throttleCmd = this.reverseMode ? input.brake : input.throttle;
-    const brakeCmd = this.reverseMode ? input.throttle : input.brake;
-    this.throttle = approach(this.throttle, clamp(throttleCmd, 0, 1), 8 * dt);
-    this.brake = approach(this.brake, clamp(brakeCmd, 0, 1), 10 * dt);
+    const swap = auto && this.reverseMode;
+    const throttleCmd = swap ? input.brake : input.throttle;
+    const brakeCmd = swap ? input.throttle : input.brake;
+    this.throttle = approach(this.throttle, clamp(throttleCmd, 0, 1), 10 * dt);
+    this.brake = approach(this.brake, clamp(brakeCmd, 0, 1), 12 * dt);
     this.handbrake = approach(this.handbrake, clamp(input.handbrake, 0, 1), 12 * dt);
+    this.clutchEngagement = 1 - clamp(input.clutch, 0, 1);
 
-    // Steering: digital input ramps, analog input gets a light filter.
+    this.roadAngle = input.steerMode === 'wheel' ? this.steerWheel(dt) : this.steerPad(dt, speed);
+    this.applySteer(this.roadAngle);
+  }
+
+  /** Steering wheels map 1:1 through the steering rack, up to the car's steering lock. */
+  private steerWheel(dt: number): number {
+    const lock = this.spec.front.maxSteer;
+    const target = clamp(this.input.wheelAngle / this.spec.steeringRatio, -lock, lock);
+    const current = this.steer * lock;
+    const angle = current + (target - current) * (1 - Math.exp(-dt / WHEEL_INPUT_SMOOTHING));
+    this.steerAuthority = lock;
+    this.steer = angle / lock;
+    return angle;
+  }
+
+  /**
+   * Pads and keys: the steering range shrinks with speed, but full stick always reaches just
+   * past the grip limit (the angle for the tightest corner possible at this speed plus the
+   * tyre's peak slip angle), so it is never numb. Input is smoothed and rate-limited, faster
+   * when returning to centre.
+   */
+  private steerPad(dt: number, speed: number): number {
+    const input = this.input;
+    const authority = this.padAuthority(Math.abs(speed));
     const target = clamp(input.steer, -1, 1);
-    if (input.steerIsDigital) {
-      const releasing = Math.abs(target) < Math.abs(this.steer) || target * this.steer < 0;
-      this.steer = approach(this.steer, target, (releasing ? 4.5 : 2.2) * dt);
+    let s = this.steer;
+    if (input.steerMode === 'keyboard') {
+      const releasing = Math.abs(target) < Math.abs(s) || target * s < 0;
+      s = approach(s, target, (releasing ? 4.5 : 2.2) * dt);
     } else {
-      this.steer += (target - this.steer) * (1 - Math.exp(-dt / 0.035));
+      const tau = STEER_SMOOTHING[this.aids.steerSmoothing];
+      const next = s + (target - s) * (1 - Math.exp(-dt / tau));
+      const returning = Math.abs(next) < Math.abs(s);
+      const fast = Math.min(Math.abs(speed) / 60, 1);
+      const maxDelta = (returning ? 9 : lerp(7, 3.5, fast)) * dt;
+      s = clamp(next, s - maxDelta, s + maxDelta);
     }
+    this.steer = s;
+    this.steerAuthority = authority;
+    return s * authority;
+  }
 
-    // Less steering lock at speed so pads and keys stay controllable (Round 2 makes it a setting).
-    const v = Math.abs(speed) / 28;
-    const speedFactor = Math.max(1 / (1 + v * v * 1.2), 0.12);
-    const angle = this.steer * this.spec.front.maxSteer * speedFactor;
-    this.applySteer(angle);
+  /** Road-wheel angle that full stick gives at `speed` (m/s). */
+  padAuthority(speed: number): number {
+    const spec = this.spec;
+    const lock = spec.front.maxSteer;
+    if (speed < 1) return lock;
+    const downforce = 0.5 * AIR_DENSITY * spec.aero.downforceArea * speed * speed;
+    const grip = spec.front.tyre.muY * 0.92;
+    const lateral = grip * GRAVITY * (1 + downforce / (spec.mass * GRAVITY));
+    const kinematic = Math.atan((this.wheelbase * lateral) / (speed * speed));
+    const range = (kinematic + this.frontAlphaPeak * PAD_SLIP_MARGIN) * this.aids.steerSensitivity;
+    return clamp(range, 0.03, lock);
   }
 
   private applySteer(angle: number): void {
     const front = this.spec.front;
-    const wheelbase = front.offset - this.spec.rear.offset;
     const abs = Math.abs(angle);
     let inner = abs;
     let outer = abs;
     if (abs > 1e-4 && front.ackermann > 0) {
-      const radius = wheelbase / Math.tan(abs);
-      const innerIdeal = Math.atan(wheelbase / Math.max(radius - front.halfTrack, 0.1));
-      const outerIdeal = Math.atan(wheelbase / (radius + front.halfTrack));
+      const radius = this.wheelbase / Math.tan(abs);
+      const innerIdeal = Math.atan(this.wheelbase / Math.max(radius - front.halfTrack, 0.1));
+      const outerIdeal = Math.atan(this.wheelbase / (radius + front.halfTrack));
       inner = abs + (innerIdeal - abs) * front.ackermann;
       outer = abs + (outerIdeal - abs) * front.ackermann;
     }
     const sign = Math.sign(angle);
-    // Turning right (angle > 0): the right wheel is on the inside.
-    const left = this.wheels[0]!;
-    const right = this.wheels[1]!;
-    left.steer = sign * (angle > 0 ? outer : inner);
-    right.steer = sign * (angle > 0 ? inner : outer);
+    const [fl, fr, rl, rr] = this.wheels as [Wheel, Wheel, Wheel, Wheel];
+    // Turning right (angle > 0): the right wheel is on the inside. Toe-in points each wheel's
+    // front towards the car's centre line.
+    fl.steer = sign * (angle > 0 ? outer : inner) + front.toe;
+    fr.steer = sign * (angle > 0 ? inner : outer) - front.toe;
+    rl.steer = this.spec.rear.toe;
+    rr.steer = -this.spec.rear.toe;
   }
 
   // ---------------------------------------------------------------- suspension
@@ -347,12 +531,14 @@ export class Car {
       const props = SURFACE_PROPS[hit.surface];
       w.grip = props.grip;
       w.rollingResistance = props.rollingResistance;
+      w.surface = hit.surface;
     } else {
       w.contact = false;
       // The wheel drops towards full droop (visual only; there is no unsprung mass yet).
       w.length = approach(w.length, axle.maxLength, 1.5 * dt);
       w.lengthRate = 0;
       w.load = 0;
+      w.hold = false;
     }
   }
 
@@ -392,10 +578,10 @@ export class Car {
 
   // ---------------------------------------------------------------- drivetrain
 
-  private totalRatio(): number {
+  private ratioFor(gear: number): number {
     const gb = this.spec.gearbox;
-    if (this.gear > 0) return gb.ratios[this.gear - 1]! * gb.finalDrive;
-    if (this.gear < 0) return -gb.reverseRatio * gb.finalDrive;
+    if (gear > 0) return gb.ratios[gear - 1]! * gb.finalDrive;
+    if (gear < 0) return -gb.reverseRatio * gb.finalDrive;
     return 0;
   }
 
@@ -419,6 +605,13 @@ export class Car {
     return throttle * full - (1 - throttle) * friction;
   }
 
+  /** Engine speed the driven wheels would give in `gear`. */
+  drivenRpm(gear: number): number {
+    const left = this.wheels[2]!;
+    const right = this.wheels[3]!;
+    return ((left.omega + right.omega) / 2) * this.ratioFor(gear) * RPM_PER_RAD_S;
+  }
+
   private drivetrain(dt: number): void {
     const spec = this.spec;
     const e = spec.engine;
@@ -430,36 +623,53 @@ export class Car {
       w.extraInertia = 0;
     }
 
-    const ratio = this.totalRatio();
-    const wheelOmega = (left.omega + right.omega) / 2;
-    const rpmAtWheels = wheelOmega * ratio * RPM_PER_RAD_S;
+    const ratio = this.ratioFor(this.gear);
+    const rpmAtWheels = this.drivenRpm(this.gear);
     const throttle = this.throttle;
+    const engagement = this.clutchEngagement;
 
     let clutchTorque = 0;
     if (ratio === 0 || this.shiftTimer > 0) {
-      // Neutral or mid-shift: no drive, engine speed follows the wheels (or idles).
+      // Neutral or mid-shift: no drive; the engine matches the new gear's speed (a blip on
+      // downshifts) or idles.
       this.engineRpm = approach(this.engineRpm, Math.max(rpmAtWheels, e.idleRpm), 20_000 * dt);
+    } else if (engagement < 0.3) {
+      // Clutch pedal down: the engine revs freely with the throttle.
+      const free = e.idleRpm + throttle * (e.limiterRpm - e.idleRpm);
+      this.engineRpm = approach(this.engineRpm, free, 15_000 * dt);
+      clutchTorque = Math.max(this.engineTorque(this.engineRpm, throttle), 0) * engagement;
     } else {
       const launchRpm = e.idleRpm + throttle * (4_200 - e.idleRpm);
       if (throttle > 0.01 && rpmAtWheels < launchRpm) {
         // Clutch slipping (pulling away): the engine holds its launch rpm and the clutch passes
         // on its torque.
         this.engineRpm = approach(this.engineRpm, launchRpm, 12_000 * dt);
-        clutchTorque = Math.max(this.engineTorque(this.engineRpm, throttle), 0);
+        clutchTorque = Math.max(this.engineTorque(this.engineRpm, throttle), 0) * engagement;
       } else if (rpmAtWheels < e.idleRpm) {
         // Coasting below idle: clutch open.
         this.engineRpm = approach(this.engineRpm, e.idleRpm, 8_000 * dt);
       } else {
         this.engineRpm = rpmAtWheels;
-        clutchTorque = this.engineTorque(this.engineRpm, throttle);
+        clutchTorque = this.engineTorque(this.engineRpm, throttle) * engagement;
         // With the clutch closed, the engine's inertia is felt at the driven wheels.
-        const reflected = (e.inertia * ratio * ratio) / 2;
+        const reflected = (e.inertia * ratio * ratio * engagement) / 2;
         left.extraInertia = reflected;
         right.extraInertia = reflected;
       }
     }
     const axleTorque = clutchTorque * ratio * gb.efficiency;
-    const coupling = spec.diffViscous * (right.omega - left.omega);
+
+    // Clutch-pack limited-slip differential: resists a speed difference between the driven
+    // wheels, up to a locking torque that grows with the torque going through it.
+    const diff = spec.diff;
+    const lockTorque =
+      diff.preload + (axleTorque >= 0 ? diff.powerLock : diff.coastLock) * Math.abs(axleTorque);
+    const inertia = spec.rear.wheelInertia + left.extraInertia;
+    const coupling = clamp(
+      ((right.omega - left.omega) * inertia) / (4 * dt),
+      -lockTorque,
+      lockTorque,
+    );
     left.driveTorque = axleTorque / 2 + coupling;
     right.driveTorque = axleTorque / 2 - coupling;
   }
@@ -474,11 +684,12 @@ export class Car {
     const handbrakeTorque = axle.handbrakeTorque * this.handbrake;
 
     if (!w.contact) {
-      // Free wheel in the air: drive and brakes only.
+      // Free wheel in the air: drive and brakes only; the carcass relaxes.
       let omega = w.omega + (dt * w.driveTorque) / inertia;
       const stop = (dt * (brakeTorque + handbrakeTorque + 5)) / inertia;
       omega = Math.abs(omega) <= stop ? 0 : omega - Math.sign(omega) * stop;
       w.omega = omega;
+      w.deflection *= Math.exp(-dt / 0.05);
       w.slip = 0;
       w.slipRatio = 0;
       w.slipAngle = 0;
@@ -486,7 +697,7 @@ export class Car {
       return;
     }
 
-    // Wheel heading projected onto the ground plane.
+    // Wheel heading and right axis on the ground plane.
     const n = w.normal;
     const heading = this.t0;
     setV(heading, Math.sin(w.steer), 0, -Math.cos(w.steer));
@@ -503,12 +714,28 @@ export class Car {
     const vLat = dotV(vp, right);
     const longRef = Math.max(Math.abs(vLong), V_LONG_MIN);
 
-    const alpha = Math.atan2(vLat, Math.max(Math.abs(vLong), V_LAT_MIN));
-    const kappa = (w.omega * radius - vLong) / longRef;
-    const out = w.tyre.compute(kappa, alpha, w.load, w.grip, this.tyreOut);
+    // Camber: the wheel plane leans with static camber, camber gain and body roll.
+    const bump = axle.staticLength - w.length;
+    const bodyCamber = axle.camber + axle.camberGain * bump;
+    const upWheel = setV(this.t3, w.side * Math.sin(bodyCamber), Math.cos(bodyCamber), 0);
+    rotateV(upWheel, this.rot, upWheel);
+    const lean = dotV(upWheel, right);
+    w.camber = w.side * lean;
 
-    // ABS and traction control as slip controllers: allow only as much brake or drive torque as
-    // steers the wheel towards a target slip just below the tyre's peak (over ~20 ms).
+    // Sideways: the carcass deflects with lateral sliding and relaxes as the tyre rolls, so the
+    // slip angle (and force) build up over about one relaxation length. At a standstill the
+    // deflection acts like a spring, which holds the car still.
+    const sigma = axle.tyre.relaxationLength;
+    const maxDeflection = sigma * Math.tan(MAX_SLIP_ANGLE);
+    w.deflection = clamp(
+      (w.deflection + dt * vLat) / (1 + (dt * Math.abs(vLong)) / sigma),
+      -maxDeflection,
+      maxDeflection,
+    );
+    const alpha = Math.atan(w.deflection / sigma);
+    const kappa = (w.omega * radius - vLong) / longRef;
+    const out = w.tyre.compute(kappa, alpha, lean, w.load, w.grip, this.tyreOut);
+
     // Implicit wheel spin: when the wheel speeds up, the tyre force grows and pushes back, so
     // the wheel behaves as if it had a larger inertia (inertia × denom). Integrating against
     // that keeps it stable however stiff the tyre is.
@@ -518,53 +745,99 @@ export class Car {
     const rolling = w.rollingResistance * w.load * radius;
 
     // ABS and traction control as slip controllers: allow only as much brake or drive torque as
-    // steers the wheel towards a target slip just below the tyre's peak (over ~20 ms). While
-    // cornering, part of the tyre's grip is used sideways, so the target shrinks.
+    // steers the wheel towards a target slip (a fraction of the tyre's peak slip) over a short
+    // response time. The target moves as the car speeds up or slows down, so the wheel must
+    // follow that too. While cornering, part of the grip is used sideways, so the target shrinks.
     let driveTorque = w.driveTorque;
     const lateralUse = Math.min(Math.abs(alpha) / w.tyre.alphaPeak, 1);
-    const room = Math.sqrt(Math.max(ASSIST_SLIP_FRACTION ** 2 - lateralUse ** 2, 0.2 ** 2));
-    const targetSlip = w.tyre.kappaPeak * room;
-    if (this.assists.abs && brakeTorque > 0 && vLong > 2.5) {
-      const omegaTarget = (vLong - targetSlip * longRef) / radius;
-      const allowed =
-        driveTorque -
-        out.fx * radius -
-        rolling +
-        (effectiveInertia * (w.omega - omegaTarget)) / ASSIST_RESPONSE;
+    const targetRate = this.forwardAccel / radius;
+    const abs = ASSISTS.abs[this.aids.abs];
+    if (abs && brakeTorque > 0 && vLong > 2.5) {
+      const room = Math.sqrt(Math.max(abs.fraction ** 2 - lateralUse ** 2, 0.2 ** 2));
+      const omegaTarget = (vLong - w.tyre.kappaPeak * room * longRef) / radius;
+      const wanted = (omegaTarget - w.omega) / abs.response + targetRate;
+      const allowed = driveTorque - out.fx * radius - rolling - effectiveInertia * wanted;
       if (brakeTorque > allowed) {
         brakeTorque = Math.max(allowed, 0);
         this.absActive = true;
       }
     }
-    if (this.assists.tc && driveTorque > 0 && vLong > -1) {
-      const omegaTarget = (vLong + targetSlip * longRef) / radius;
-      const allowed =
-        out.fx * radius + rolling + (effectiveInertia * (omegaTarget - w.omega)) / ASSIST_RESPONSE;
+    const tc = ASSISTS.tc[this.aids.tc];
+    if (tc && driveTorque > 0 && vLong > -1) {
+      const room = Math.sqrt(Math.max(tc.fraction ** 2 - lateralUse ** 2, 0.2 ** 2));
+      const omegaTarget = (vLong + w.tyre.kappaPeak * room * longRef) / radius;
+      const wanted = (omegaTarget - w.omega) / tc.response + targetRate;
+      const allowed = out.fx * radius + rolling + effectiveInertia * wanted;
       if (driveTorque > allowed) {
         driveTorque = Math.max(allowed, 0);
         this.tcActive = true;
       }
     }
 
-    const free = w.omega + (dt * (driveTorque - out.fx * radius)) / effectiveInertia;
-    const resist = brakeTorque + handbrakeTorque + rolling;
-    const stop = (dt * resist) / effectiveInertia;
-    const omega = Math.abs(free) <= stop ? 0 : free - Math.sign(free) * stop;
-    let fx = out.fx + dfxdOmega * (omega - w.omega);
-    fx = clamp(fx, -out.fxMax, out.fxMax);
-    w.omega = omega;
-    w.spin = wrapAngle(w.spin + omega * dt);
+    // Brake hold: a braked wheel at a standstill sticks to the ground (static friction), so a
+    // parked car doesn't creep down a slope. More drive torque than brake torque breaks it free.
+    const holdTorque = axle.brakeTorque * this.brake + handbrakeTorque;
+    const overpowered = Math.abs(w.driveTorque) > holdTorque;
+    const cp = w.contactPoint;
+    if (!w.hold) {
+      if (
+        Math.abs(vLong) < HOLD_ENGAGE_SPEED &&
+        Math.abs(w.omega) < 0.5 &&
+        holdTorque > HOLD_MIN_TORQUE &&
+        !overpowered
+      ) {
+        w.hold = true;
+        copyV(w.holdPoint, cp);
+      }
+    } else if (
+      holdTorque < HOLD_MIN_TORQUE * 0.5 ||
+      overpowered ||
+      Math.abs(vLong) > HOLD_RELEASE_SPEED
+    ) {
+      w.hold = false;
+    }
+
+    let fx: number;
+    if (w.hold) {
+      const displacement = dotV(subV(this.t3, cp, w.holdPoint), heading);
+      fx = -HOLD_STIFFNESS * displacement - HOLD_DAMPING * vLong;
+      const cap = Math.min(holdTorque / radius, out.fxMax);
+      if (Math.abs(fx) > cap) {
+        // Pushed harder than the brake can hold: slide, and re-anchor where the tyre is now.
+        fx = Math.sign(fx) * cap;
+        copyV(w.holdPoint, cp);
+      }
+      w.omega = 0;
+    } else {
+      const free = w.omega + (dt * (driveTorque - out.fx * radius)) / effectiveInertia;
+      const resist = brakeTorque + handbrakeTorque + rolling;
+      const stop = (dt * resist) / effectiveInertia;
+      const omega = Math.abs(free) <= stop ? 0 : free - Math.sign(free) * stop;
+      fx = clamp(out.fx + dfxdOmega * (omega - w.omega), -out.fxMax, out.fxMax);
+      w.omega = omega;
+    }
+    w.spin = wrapAngle(w.spin + w.omega * dt);
     w.slip = out.slip;
     w.slipRatio = kappa;
     w.slipAngle = alpha;
+
+    // Slow tyres get extra sideways damping so a parked car settles instead of rocking.
+    let fy = out.fy;
+    const slowBlend = 1 - Math.min(Math.abs(vLong) / LOW_SPEED_DAMPING_BELOW, 1);
+    if (slowBlend > 0) {
+      const loadShare = Math.min(w.load / w.staticLoad, 2);
+      fy -= LOW_SPEED_DAMPING * vLat * slowBlend * loadShare;
+      const limit = out.fxMax * 1.05;
+      fy = clamp(fy, -limit, limit);
+    }
 
     // Tyre force on the body, acting at roll-centre height above the contact patch.
     const f = this.t2;
     setV(
       f,
-      heading.x * fx + right.x * out.fy,
-      heading.y * fx + right.y * out.fy,
-      heading.z * fx + right.z * out.fy,
+      heading.x * fx + right.x * fy,
+      heading.y * fx + right.y * fy,
+      heading.z * fx + right.z * fy,
     );
     const at = addScaledV(this.t0, w.contactPoint, n, axle.rollCentreHeight);
     this.applyForceVec(f, at);
@@ -611,6 +884,20 @@ export class Car {
     }
   }
 
+  /** Acceleration the driver feels (everything but gravity), in the car's frame, smoothed. */
+  private measureAcceleration(dt: number): void {
+    const m = this.spec.mass;
+    const ax = this.force.x / m;
+    const ay = this.force.y / m + GRAVITY;
+    const az = this.force.z / m;
+    const long = ax * this.fwd.x + ay * this.fwd.y + az * this.fwd.z;
+    const lat = ax * this.right.x + ay * this.right.y + az * this.right.z;
+    this.forwardAccel = long - GRAVITY * this.fwd.y;
+    const k = 1 - Math.exp(-dt / 0.05);
+    this.accelLong += (long - this.accelLong) * k;
+    this.accelLat += (lat - this.accelLat) * k;
+  }
+
   // ---------------------------------------------------------------- integration
 
   private applyForce(dir: Vec3, magnitude: number, at: Vec3): void {
@@ -650,27 +937,64 @@ export class Car {
 
   private afterStep(dt: number): void {
     const e = this.spec.engine;
-    const gb = this.spec.gearbox;
 
     // Rev limiter with a little hysteresis.
     if (this.engineRpm > e.limiterRpm) this.limiterActive = true;
     else if (this.engineRpm < e.limiterRpm - 250) this.limiterActive = false;
 
-    // Automatic gearbox.
     if (this.shiftTimer > 0) this.shiftTimer = Math.max(this.shiftTimer - dt, 0);
     if (this.shiftCooldown > 0) this.shiftCooldown = Math.max(this.shiftCooldown - dt, 0);
-    if (this.gear > 0 && this.shiftTimer === 0 && this.shiftCooldown === 0) {
-      const rear = (this.wheels[2]!.omega + this.wheels[3]!.omega) / 2;
-      const rpmIn = (gear: number) => rear * gb.ratios[gear - 1]! * gb.finalDrive * RPM_PER_RAD_S;
-      if (this.gear < gb.ratios.length && rpmIn(this.gear) > gb.upshiftRpm) {
+    if (this.shiftDeniedTimer > 0) this.shiftDeniedTimer = Math.max(this.shiftDeniedTimer - dt, 0);
+    if (this.aids.gearbox === 'manual') this.manualGearbox();
+    else this.autoGearbox();
+  }
+
+  /** Paddle shifts, one at a time, with over-rev protection on downshifts. */
+  private manualGearbox(): void {
+    if (this.shiftTimer > 0) return;
+    const gb = this.spec.gearbox;
+    const speed = Math.abs(this.forwardSpeed());
+    if (this.pendingUp > 0) {
+      this.pendingUp--;
+      if (this.gear < 0) {
+        if (speed < REVERSE_SELECT_SPEED) this.gear = 1;
+        else this.shiftDeniedTimer = 0.4;
+      } else if (this.gear < gb.ratios.length) {
         this.shift(this.gear + 1);
-      } else if (
-        this.gear > 1 &&
-        rpmIn(this.gear) < gb.downshiftRpm &&
-        rpmIn(this.gear - 1) < gb.upshiftRpm - 400
-      ) {
-        this.shift(this.gear - 1);
       }
+      return;
+    }
+    if (this.pendingDown > 0) {
+      this.pendingDown--;
+      if (this.gear === 1) {
+        if (speed < REVERSE_SELECT_SPEED) this.gear = -1;
+        else this.shiftDeniedTimer = 0.4;
+      } else if (this.gear > 1) {
+        if (this.drivenRpm(this.gear - 1) < this.spec.engine.limiterRpm + OVER_REV_MARGIN) {
+          this.shift(this.gear - 1);
+        } else {
+          this.shiftDeniedTimer = 0.4;
+        }
+      }
+    }
+  }
+
+  private autoGearbox(): void {
+    this.pendingUp = 0;
+    this.pendingDown = 0;
+    if (this.gear <= 0 || this.shiftTimer > 0 || this.shiftCooldown > 0) return;
+    const gb = this.spec.gearbox;
+    const rpm = this.drivenRpm(this.gear);
+    // While braking, change down earlier so the right gear is ready for the corner exit.
+    const downAt = this.brake > 0.3 ? gb.brakingDownshiftRpm : gb.downshiftRpm;
+    if (this.gear < gb.ratios.length && rpm > gb.upshiftRpm) {
+      this.shift(this.gear + 1);
+    } else if (
+      this.gear > 1 &&
+      rpm < downAt &&
+      this.drivenRpm(this.gear - 1) < gb.upshiftRpm - 400
+    ) {
+      this.shift(this.gear - 1);
     }
   }
 
@@ -705,7 +1029,7 @@ export class Car {
     out[base + C.GEAR] = this.gear;
     out[base + C.THROTTLE] = this.throttle;
     out[base + C.BRAKE] = this.brake;
-    out[base + C.STEER] = this.steer;
+    out[base + C.STEER] = this.roadAngle / this.spec.front.maxSteer;
     out[base + C.HANDBRAKE] = this.handbrake;
     rotateV(this.up, this.rot, UP);
     out[base + C.FLAGS] =
@@ -713,7 +1037,16 @@ export class Car {
       (this.tcActive ? FLAG_TC : 0) |
       (this.shiftTimer > 0 ? FLAG_SHIFTING : 0) |
       (this.up.y < 0.3 ? FLAG_UPSIDE_DOWN : 0) |
-      (this.limiterActive ? FLAG_LIMITER : 0);
+      (this.limiterActive ? FLAG_LIMITER : 0) |
+      (this.shiftDeniedTimer > 0 ? FLAG_SHIFT_DENIED : 0);
+    out[base + C.ACCEL_LONG] = this.accelLong;
+    out[base + C.ACCEL_LAT] = this.accelLat;
+    out[base + C.STEER_ANGLE] = (this.wheels[0]!.steer + this.wheels[1]!.steer) / 2;
+    out[base + C.STEER_AUTHORITY] = this.steerAuthority;
+    out[base + C.CLUTCH] = this.clutchEngagement;
+    out[base + C.GEARBOX_MANUAL] = this.aids.gearbox === 'manual' ? 1 : 0;
+    out[base + C.TC_LEVEL] = aidLevelNumber(this.aids.tc);
+    out[base + C.ABS_LEVEL] = aidLevelNumber(this.aids.abs);
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i]!;
       const o = base + C.WHEELS + i * WHEEL_STRIDE;
@@ -726,6 +1059,10 @@ export class Car {
       out[o + W.SLIP] = w.slip;
       out[o + W.LOAD] = w.load;
       out[o + W.CONTACT] = w.contact ? 1 : 0;
+      out[o + W.SLIP_RATIO] = w.slipRatio;
+      out[o + W.SLIP_ANGLE] = w.slipAngle;
+      out[o + W.SURFACE] = w.surface;
+      out[o + W.CAMBER] = w.camber;
     }
   }
 }

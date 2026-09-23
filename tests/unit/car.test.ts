@@ -1,184 +1,168 @@
 import { describe, expect, it } from 'vitest';
-import { mulberry32 } from '../../src/shared/math';
-import { CAR_STRIDE, SIM_DT, neutralInput, type DriverInput } from '../../src/shared/protocol';
-import { TestGround } from '../../src/sim/track/surface';
-import type { Car } from '../../src/sim/vehicle/car';
+import { C, CAR_STRIDE, SIM_DT, W, WHEEL_STRIDE } from '../../src/shared/protocol';
+import { SlopeGround, TestGround } from '../../src/sim/track/surface';
 import { World } from '../../src/sim/world';
+import { fuzz, heading, kmh, openWorld, run } from './harness';
 
-/** A world with asphalt everywhere, so long runs never leave the pad. */
-const openWorld = () => new World(1, new TestGround(1e7));
+const speedOf = (v: { x: number; y: number; z: number }) => Math.hypot(v.x, v.y, v.z);
 
-function drive(world: World, seconds: number, input: Partial<DriverInput>): void {
-  const frame = { ...neutralInput(), ...input };
-  const steps = Math.round(seconds / SIM_DT);
-  for (let i = 0; i < steps; i++) {
-    world.setInputs([frame]);
-    world.step(SIM_DT);
-  }
-}
-
-const speedKmh = (car: Car) => car.forwardSpeed() * 3.6;
-const heading = (car: Car) => {
-  // Yaw of the car's nose (0 = facing -z, positive = turned left).
-  const q = car.rot;
-  const fx = -2 * (q.x * q.z + q.w * q.y);
-  const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
-  return Math.atan2(-fx, -fz);
-};
-
-describe('test car at rest', () => {
+describe('car at rest', () => {
   it('settles exactly at its design ride height and does not creep', () => {
     const world = openWorld();
     const car = world.cars[0]!;
-    const start = { x: car.pos.x, z: car.pos.z };
-    drive(world, 10, {});
+    run(world, 10, () => ({}));
     expect(car.pos.y).toBeCloseTo(car.spec.cogHeight, 3);
-    expect(Math.hypot(car.pos.x - start.x, car.pos.z - start.z)).toBeLessThan(0.01);
-    expect(Math.hypot(car.vel.x, car.vel.y, car.vel.z)).toBeLessThan(0.01);
+    expect(Math.hypot(car.pos.x, car.pos.z)).toBeLessThan(0.01);
+    expect(speedOf(car.vel)).toBeLessThan(0.001);
+  });
+
+  it.each([
+    ['uphill', 0],
+    ['downhill', Math.PI],
+    ['across the slope', Math.PI / 2],
+  ])('holds on a 15 %% slope with the handbrake, facing %s (< 1 cm in 10 s)', (_name, yaw) => {
+    const world = openWorld({ gearbox: 'manual' }, new SlopeGround(0.15), { x: 0, z: 0, yaw });
+    const car = world.cars[0]!;
+    run(world, 3, () => ({ handbrake: 1 }));
+    const start = { ...car.pos };
+    run(world, 10, () => ({ handbrake: 1 }));
+    const creep = Math.hypot(car.pos.x - start.x, car.pos.y - start.y, car.pos.z - start.z);
+    expect(creep).toBeLessThan(0.01);
+    // Sanity: the car sits on its wheels, upright on the slope.
+    expect(car.wheels.every((w) => w.contact)).toBe(true);
+  });
+
+  it('rolls away down a 15 % slope when nothing holds it', () => {
+    const world = openWorld({ gearbox: 'manual' }, new SlopeGround(0.15), { x: 0, z: 0, yaw: 0 });
+    const car = world.cars[0]!;
+    run(world, 5, () => ({}));
+    expect(car.forwardSpeed()).toBeLessThan(-2); // rolling backwards, downhill
+  });
+
+  it('rolls to a stop from 30 km/h and then stays still, without jitter', () => {
+    const world = openWorld();
+    const car = world.cars[0]!;
+    run(
+      world,
+      20,
+      () => ({ throttle: 0.4 }),
+      (_t, c) => kmh(c) >= 30,
+    );
+    const stopped = run(
+      world,
+      90,
+      () => ({}),
+      (_t, c) => speedOf(c.vel) < 0.005,
+    );
+    expect(stopped).toBeLessThan(90);
+    run(world, 1, () => ({}));
+    const at = { ...car.pos };
+    let worst = 0;
+    let reversals = 0;
+    let last = 0;
+    run(world, 5, (_t, c) => {
+      worst = Math.max(worst, speedOf(c.vel));
+      const v = c.forwardSpeed();
+      if (Math.abs(v) > 1e-4 && Math.sign(v) !== Math.sign(last)) reversals++;
+      last = v;
+      return {};
+    });
+    expect(worst).toBeLessThan(0.002);
+    expect(reversals).toBeLessThanOrEqual(1);
+    expect(Math.hypot(car.pos.x - at.x, car.pos.z - at.z)).toBeLessThan(0.002);
   });
 });
 
-describe('test car driving', () => {
-  it('accelerates straight: 0–100 km/h in 2.8–3.8 s', () => {
-    const world = openWorld();
-    const car = world.cars[0]!;
-    let t = 0;
-    let t100 = -1;
-    const frame = { ...neutralInput(), throttle: 1 };
-    while (t < 10) {
-      world.setInputs([frame]);
-      world.step(SIM_DT);
-      t += SIM_DT;
-      if (t100 < 0 && speedKmh(car) >= 100) t100 = t;
+describe('car driving', () => {
+  it('turns right when steering right and left when steering left', () => {
+    for (const steer of [0.5, -0.5]) {
+      const world = openWorld();
+      const car = world.cars[0]!;
+      run(world, 4, () => ({ throttle: 0.5 }));
+      const h0 = heading(car);
+      run(world, 1.5, () => ({ throttle: 0.3, steer }));
+      // Heading increases when turning left.
+      expect(Math.sign(heading(car) - h0)).toBe(-Math.sign(steer));
     }
-    expect(t100).toBeGreaterThan(2.8);
-    expect(t100).toBeLessThan(3.8);
-    expect(Math.abs(car.pos.x)).toBeLessThan(0.05);
   });
 
-  it('reaches a plausible top speed (260–310 km/h)', () => {
-    const world = openWorld();
-    drive(world, 45, { throttle: 1 });
-    const v = speedKmh(world.cars[0]!);
-    expect(v).toBeGreaterThan(260);
-    expect(v).toBeLessThan(310);
-  });
-
-  it('stops from 200 km/h in 80–100 m with ABS, without veering', () => {
+  it('stays stable with full steering at 100 km/h', () => {
     const world = openWorld();
     const car = world.cars[0]!;
-    while (speedKmh(car) < 200) drive(world, SIM_DT, { throttle: 1 });
-    const z0 = car.pos.z;
-    let t = 0;
-    while (car.forwardSpeed() > 0.05 && t < 10) {
-      drive(world, SIM_DT, { brake: 1 });
-      t += SIM_DT;
-    }
-    const distance = z0 - car.pos.z;
-    expect(distance).toBeGreaterThan(80);
-    expect(distance).toBeLessThan(100);
-    expect(Math.abs(car.pos.x)).toBeLessThan(0.3);
-  });
-
-  it('turns right when steering right, and stays stable at the limit', () => {
-    const world = openWorld();
-    const car = world.cars[0]!;
-    // Hold ~100 km/h, then steer right at a moderate and a large input.
-    for (const steer of [0.3, 1]) {
-      const w = openWorld();
-      const c = w.cars[0]!;
-      for (let i = 0; i < 16 / SIM_DT; i++) {
-        const t = i * SIM_DT;
-        const throttle = Math.max(0, Math.min(1, (100 - speedKmh(c)) * 0.3));
-        w.setInputs([{ ...neutralInput(), throttle, steer: t > 8 ? steer : 0 }]);
-        w.step(SIM_DT);
-      }
-      expect(c.angVel.y).toBeLessThan(-0.2); // negative yaw rate = turning right
-      // Not spinning: the car still points roughly where it is going.
-      const v = Math.hypot(c.vel.x, c.vel.z);
-      const q = c.rot;
-      const fx = -2 * (q.x * q.z + q.w * q.y);
-      const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
-      expect((c.vel.x * fx + c.vel.z * fz) / v).toBeGreaterThan(Math.cos(0.35));
-    }
-    expect(car.isFinite()).toBe(true);
-  });
-
-  it('holds a steady turn within the grip envelope (1.2–1.8 g)', () => {
-    const world = openWorld();
-    const car = world.cars[0]!;
-    for (let i = 0; i < 16 / SIM_DT; i++) {
-      const t = i * SIM_DT;
-      const throttle = Math.max(0, Math.min(1, (120 - speedKmh(car)) * 0.3));
-      world.setInputs([{ ...neutralInput(), throttle, steer: t > 8 ? 0.6 : 0 }]);
-      world.step(SIM_DT);
-    }
+    run(world, 16, (t, c) => ({
+      throttle: Math.max(0, Math.min(1, (100 - kmh(c)) * 0.3)),
+      steer: t > 8 ? 1 : 0,
+    }));
+    expect(car.angVel.y).toBeLessThan(-0.2); // negative yaw rate = turning right
     const v = Math.hypot(car.vel.x, car.vel.z);
-    const lateralG = (v * Math.abs(car.angVel.y)) / 9.81;
-    expect(lateralG).toBeGreaterThan(1.2);
-    expect(lateralG).toBeLessThan(1.8);
+    const q = car.rot;
+    const fx = -2 * (q.x * q.z + q.w * q.y);
+    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    // Not spinning: the car still points roughly where it is going.
+    expect((car.vel.x * fx + car.vel.z * fz) / v).toBeGreaterThan(Math.cos(0.35));
   });
 
-  it('reverses when the brake is held at a standstill', () => {
+  it('selects reverse by holding the brake at a standstill (automatic gearbox)', () => {
     const world = openWorld();
     const car = world.cars[0]!;
-    drive(world, 3, { brake: 1 });
+    run(world, 3, () => ({ brake: 1 }));
     expect(car.gear).toBe(-1);
     expect(car.forwardSpeed()).toBeLessThan(-1);
-    drive(world, 2, { throttle: 1 });
-    drive(world, 2, { throttle: 1 });
+    run(world, 4, () => ({ throttle: 1 }));
     expect(car.gear).toBeGreaterThan(0);
+    expect(car.forwardSpeed()).toBeGreaterThan(1);
   });
 
-  it('heading follows steering in both directions', () => {
-    const world = openWorld();
-    const car = world.cars[0]!;
-    drive(world, 4, { throttle: 0.5 });
-    const h0 = heading(car);
-    drive(world, 1.5, { throttle: 0.3, steer: -0.5 });
-    expect(heading(car)).toBeGreaterThan(h0); // left turn = heading increases
+  it('loses grip on grass', () => {
+    const grip = (surface: TestGround) => {
+      const world = openWorld({}, surface);
+      return run(
+        world,
+        20,
+        () => ({ throttle: 1 }),
+        (_t, c) => kmh(c) >= 100,
+      );
+    };
+    expect(grip(new TestGround(-1, -1))).toBeGreaterThan(grip(new TestGround(1e7, 1e7)) + 0.5);
   });
 });
 
-describe('physics robustness', () => {
-  it('survives 10 minutes of random inputs without invalid numbers or runaway speed', () => {
-    const world = new World(1); // the real test ground, pad and grass
-    const car = world.cars[0]!;
-    const rand = mulberry32(2024);
-    const input = neutralInput();
-    let nextChange = 0;
-    let maxSpeed = 0;
-    const steps = Math.round(600 / SIM_DT);
-    for (let i = 0; i < steps; i++) {
-      const t = i * SIM_DT;
-      if (t >= nextChange) {
-        input.throttle = rand() < 0.6 ? rand() : 0;
-        input.brake = rand() < 0.25 ? rand() : 0;
-        input.steer = rand() * 2 - 1;
-        input.handbrake = rand() < 0.08 ? 1 : 0;
-        input.steerIsDigital = rand() < 0.5;
-        nextChange = t + 0.2 + rand() * 1.8;
-      }
-      world.setInputs([input]);
-      world.step(SIM_DT);
-      if (i % 4000 === 0 && Math.hypot(car.pos.x, car.pos.z) > 3000) car.reset();
-      maxSpeed = Math.max(maxSpeed, Math.hypot(car.vel.x, car.vel.y, car.vel.z));
-    }
-    expect(world.warnings).toEqual([]);
-    expect(car.isFinite()).toBe(true);
-    expect(maxSpeed).toBeLessThan(150);
-  });
-
-  it('writes a snapshot with the previous and current pose', () => {
-    const world = openWorld();
-    drive(world, 1, { throttle: 1 });
+describe('snapshot', () => {
+  it('writes the previous and current pose plus telemetry', () => {
+    const world = openWorld({ tc: 'low', abs: 'off', gearbox: 'manual' });
+    run(world, 1, () => ({ throttle: 1, steer: 0.3 }));
     world.storePrevious();
     world.step(SIM_DT);
     const buf = new Float32Array(CAR_STRIDE);
     world.writeSnapshot(buf);
     const car = world.cars[0]!;
-    expect(buf[7]).toBeCloseTo(car.pos.x, 4);
-    expect(buf[9]).toBeCloseTo(car.pos.z, 3);
-    expect(buf[2]).not.toBe(buf[9]); // previous z differs from current z while moving
+    expect(buf[C.POS]).toBeCloseTo(car.pos.x, 4);
+    expect(buf[C.POS + 2]).toBeCloseTo(car.pos.z, 3);
+    expect(buf[C.PREV_POS + 2]).not.toBe(buf[C.POS + 2]);
+    expect(buf[C.TC_LEVEL]).toBe(1);
+    expect(buf[C.ABS_LEVEL]).toBe(0);
+    expect(buf[C.GEARBOX_MANUAL]).toBe(1);
+    expect(buf[C.ACCEL_LONG]).toBeGreaterThan(3); // still pulling hard after 1 s
+    expect(buf[C.STEER_AUTHORITY]).toBeGreaterThan(0);
+    const rearLeft = C.WHEELS + 2 * WHEEL_STRIDE;
+    expect(buf[rearLeft + W.LOAD]).toBeGreaterThan(2000);
+    expect(buf[rearLeft + W.SLIP_RATIO]).toBeGreaterThan(0);
+  });
+});
+
+describe('robustness', () => {
+  it('survives an hour of random inputs on the proving ground without invalid numbers', () => {
+    const world = new World(1); // the real proving ground: pad and grass
+    const { maxSpeed } = fuzz(world, 3600, 2024);
+    expect(world.warnings).toEqual([]);
+    expect(world.cars[0]!.isFinite()).toBe(true);
+    expect(maxSpeed).toBeLessThan(150);
+  });
+
+  it('survives random inputs on a slope', () => {
+    const world = new World(1, new SlopeGround(0.2), { x: 0, z: 0, yaw: 0.3 });
+    fuzz(world, 300, 7);
+    expect(world.warnings).toEqual([]);
+    expect(world.cars[0]!.isFinite()).toBe(true);
   });
 });
