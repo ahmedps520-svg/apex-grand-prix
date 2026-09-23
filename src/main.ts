@@ -4,6 +4,7 @@ import { VERSION, VERSION_TEXT, takeVersionChange } from './app/version';
 import { chooseRenderer, rememberFallback } from './app/rendererChoice';
 import { registerServiceWorker } from './pwa/register';
 import { RendererHost } from './render/RendererHost';
+import { playIntro } from './ui/Intro';
 import { Toasts } from './ui/Toasts';
 
 /** Brings the loading screen back with an error message and a reload button. */
@@ -23,6 +24,13 @@ function showFatal(title: string, detail: string): void {
   }
 }
 
+const nextFrames = (count: number): Promise<void> =>
+  new Promise((resolve) => {
+    const step = (left: number) =>
+      left <= 0 ? resolve() : requestAnimationFrame(() => step(left - 1));
+    step(count);
+  });
+
 /** Seconds after start-up during which a lost WebGPU device means "use WebGL2 next time". */
 const EARLY_LOSS_WINDOW = 15;
 
@@ -31,6 +39,12 @@ async function boot(): Promise<void> {
   const ui = document.getElementById('ui');
   if (!container || !ui) throw new Error('Page markup is missing #app or #ui');
 
+  // The studio and logo intro plays while everything loads (not for tests or `?drive`).
+  const params = new URLSearchParams(window.location.search);
+  const intro = navigator.webdriver || params.has('drive') ? null : playIntro(document.body);
+  // Let the intro paint before the heavy start-up work: from then on its animations run on the
+  // compositor, smooth even while the main thread is busy.
+  if (intro) await nextFrames(2);
   const version = document.getElementById('loading-version');
   if (version) version.textContent = VERSION_TEXT;
   const toasts = new Toasts(ui);
@@ -81,6 +95,11 @@ async function boot(): Promise<void> {
   }
 
   const game = new Game(host, ui, toasts);
+  if (intro) {
+    game.introActive = true;
+    // A short grace period, so the press that skipped the intro doesn't also leave the title.
+    void intro.then(() => window.setTimeout(() => (game.introActive = false), 250));
+  }
   await game.start();
 }
 

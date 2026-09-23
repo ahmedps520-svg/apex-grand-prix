@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Rounds 1–2 and Pushes 3–5 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
+> **Status:** Rounds 1–2 and Pushes 3–6 merged. **Change of approach (your call after Round 2):** no more small rounds with a checklist each; the game is now built toward a complete, publishable release in large pushes, following the vision in order of impact: menus, circuits, game modes and AI first, then more cars and circuits, liveries, weather, touch controls and the rest. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -837,4 +837,15 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - **Touring = sedans:** three-box saloon bodies and descriptions.
   - **Mixed-class grids:** race setup and championships offer Same car, Mixed cars from one class, or Two classes. Each car gets its own model and AI racing line, the faster class lines up in front, and rivals keep their cars all season. Results show each driver's car.
   - **Car bodies:** closed cars are no longer boxes. The shell is a side profile (nose, bonnet, deck and tail) extruded with rounded edges, and the glasshouse has a raked windscreen and rear window, a narrower top and a painted roof. Each style has its own proportions: fastback GT, low prototype, three-box sedan, coupé and upright SUV. The player's car and the AI cars use the same bodies.
+
+### Push 6: Premium start and graphical menus (v0.6.0)
+- **Intro:** a studio mark (the fictional Kestrelight Games), then the game logo with a light sweep. Any key, click, tap or controller button skips it. Only transform and opacity animate, so it stays smooth while the game loads underneath. Automated browsers and `?drive` skip it.
+- **Title:** the menus' backdrop race waits on the grid while the camera slowly circles the hero car in the player's livery, with drifting points of light. Leaving the title starts the race, which the TV cameras then follow.
+- **Menu music and sounds:** a synthwave loop generated in code (pads, bass, arpeggio with echo, drums) plays in the menus and fades while driving. Moving, selecting, tabs and back each have their own sound, and selections give a light controller rumble. Music and menu-sound volumes are in Settings.
+- **Graphical menus:**
+  - The main menu is icon tiles with 1–2 word labels, and hints appear only on focus.
+  - Car select is a compact list with stat bars (power, acceleration, top speed, grip), and the car in focus is shown in 3D behind the menu.
+  - Track descriptions appear only on focus.
+  - Every screen change gives the camera a short zoom.
+- **Loading screen:** a car silhouette with a light streak.
 

@@ -17,11 +17,22 @@ import {
 import { RUMBLE_CHANNELS } from '../../input/rumble';
 import type { AidLevel, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
-import { CARS, CAR_CLASSES, carById } from '../../sim/vehicle/cars';
+import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
 import type { Difficulty, MenuStore, ReplayCommand } from './store';
-import { Button, Choice, Note, Section, Slider, Tabs, Toggle, percent } from './widgets';
+import {
+  Button,
+  Choice,
+  Note,
+  Section,
+  Slider,
+  StatBar,
+  Tabs,
+  Tile,
+  Toggle,
+  percent,
+} from './widgets';
 
 interface ScreenProps {
   store: MenuStore;
@@ -115,15 +126,42 @@ function Header(props: { title: string; subtitle?: string }) {
 
 // ------------------------------------------------------------------ title & main
 
+/** Drifting points of light over the title screen (pure CSS animation). */
+function Particles({ count = 26 }: { count?: number }) {
+  return (
+    <div class="mn-particles" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => {
+        const r = (n: number) => (Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1;
+        const a = Math.abs(r(1));
+        const b = Math.abs(r(2));
+        const c = Math.abs(r(3));
+        return (
+          <span
+            style={{
+              left: `${a * 100}%`,
+              animationDelay: `${-b * 14}s`,
+              animationDuration: `${9 + c * 9}s`,
+              width: `${2 + c * 3}px`,
+              height: `${2 + c * 3}px`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function TitleScreen({ store }: ScreenProps) {
   return (
     <div class="mn-title-screen" onClick={() => store.set(['main'])}>
+      <Particles />
       <div class="logo big">
         APEX <span>GRAND PRIX</span>
       </div>
       <p class="mn-press">Press any button</p>
-      <Button label="Start" onPress={() => store.set(['main'])} autofocus primary />
-      <p class="mn-version">{VERSION_TEXT}</p>
+      <div class="mn-title-start">
+        <Button label="Start" onPress={() => store.set(['main'])} autofocus primary />
+      </div>
     </div>
   );
 }
@@ -133,45 +171,62 @@ export function MainScreen({ store }: ScreenProps) {
     store.update({ mode, trackId: store.setup.value.trackId || TRACKS[0]?.id || '' });
     store.push('trackSelect');
   };
+  const season = store.championship.value;
+  const inSeason = season !== null && season.round < season.tracks.length;
   return (
     <div class="mn-panel mn-main">
       <div class="logo">
         APEX <span>GRAND PRIX</span>
       </div>
-      <nav class="mn-list">
-        <Button
-          label="Quick Race"
-          hint="Race the AI on a circuit"
+      <nav class="mn-tiles">
+        <Tile
+          icon="race"
+          label="Race"
+          hint="Quick race against the AI"
+          size="big"
           onPress={() => go('race')}
           autofocus
-          primary
         />
-        <Button
+        <Tile
+          icon="trophy"
           label="Championship"
           hint={
-            store.championship.value &&
-            store.championship.value.round < store.championship.value.tracks.length
-              ? `Round ${store.championship.value.round + 1} of ${store.championship.value.tracks.length}`
-              : 'A season of races for points'
+            inSeason
+              ? `Round ${season.round + 1} of ${season.tracks.length}`
+              : 'A season for points'
           }
           onPress={() => {
             store.update({ mode: 'race' });
             store.push('championship');
           }}
         />
-        <Button label="Time Trial" hint="Chase the perfect lap" onPress={() => go('timeTrial')} />
-        <Button
+        <Tile
+          icon="stopwatch"
+          label="Time Trial"
+          hint="Beat your ghost"
+          onPress={() => go('timeTrial')}
+        />
+        <Tile
+          icon="road"
           label="Free Drive"
-          hint="Proving ground: loop, drag strip, skidpad"
+          hint="The proving ground"
           onPress={() => {
             store.update({ mode: 'free' });
             store.push('freeSetup');
           }}
         />
-        <Button label="Settings" onPress={() => store.push('settings')} />
-        <Button label="Controls" onPress={() => store.push('controls')} />
-        <Button label="Controller tester" onPress={() => store.push('tester')} />
-        <Button label="About" onPress={() => store.push('about')} />
+        <Tile
+          icon="brush"
+          label="Garage"
+          hint="Paint and livery"
+          onPress={() => store.push('livery')}
+        />
+      </nav>
+      <nav class="mn-tiles small">
+        <Tile icon="gear" label="Settings" size="small" onPress={() => store.push('settings')} />
+        <Tile icon="pad" label="Controls" size="small" onPress={() => store.push('controls')} />
+        <Tile icon="pulse" label="Tester" size="small" onPress={() => store.push('tester')} />
+        <Tile icon="info" label="About" size="small" onPress={() => store.push('about')} />
       </nav>
     </div>
   );
@@ -237,6 +292,37 @@ function useTabKeys<T>(
   }, []);
 }
 
+/** Car stats scaled 0…1 across the whole roster, for the bars. */
+const CAR_STATS = (() => {
+  const raw = CARS.map((c) => {
+    const s = c.spec;
+    const grip =
+      ((s.front.tyre.muY + s.rear.tyre.muY) / 2) * (1 + (s.aero.downforceArea / s.mass) * 40);
+    return {
+      id: c.id,
+      power: peakPower(s),
+      speed: topSpeed(s),
+      accel: peakPower(s) / s.mass,
+      grip,
+    };
+  });
+  const max = (k: 'power' | 'speed' | 'accel' | 'grip') => Math.max(...raw.map((r) => r[k]));
+  const min = (k: 'power' | 'speed' | 'accel' | 'grip') => Math.min(...raw.map((r) => r[k]));
+  const scale = (v: number, k: 'power' | 'speed' | 'accel' | 'grip') =>
+    0.15 + (0.85 * (v - min(k))) / Math.max(max(k) - min(k), 1e-6);
+  return new Map(
+    raw.map((r) => [
+      r.id,
+      {
+        power: scale(r.power, 'power'),
+        speed: scale(r.speed, 'speed'),
+        accel: scale(r.accel, 'accel'),
+        grip: scale(r.grip, 'grip'),
+      },
+    ]),
+  );
+})();
+
 export function CarSelectScreen({ store }: ScreenProps) {
   const setup = store.setup.value;
   const root = useRef<HTMLDivElement>(null);
@@ -248,34 +334,46 @@ export function CarSelectScreen({ store }: ScreenProps) {
   };
   const cars = CARS.filter((c) => c.className === cls);
   const focusId = cars.some((c) => c.id === setup.carId) ? setup.carId : cars[0]?.id;
+  const focused = carById(store.previewCar.value || focusId || setup.carId);
+  const stats = CAR_STATS.get(focused.id);
   return (
-    <div class="mn-panel mn-wide" ref={root}>
-      <Header title="Choose your car" subtitle="Every car in the race is the one you pick" />
+    <div class="mn-panel mn-cars" ref={root}>
       <Tabs tabs={CAR_CLASSES.map((c) => ({ id: c, label: c }))} active={cls} onSelect={setCls} />
-      <div class="mn-row-buttons">
+      <div class="mn-car-list" key={cls}>
+        {cars.map((c) => (
+          <button
+            type="button"
+            class={c.id === setup.carId ? 'mn-car-row selected' : 'mn-car-row'}
+            data-nav="button"
+            data-autofocus={c.id === focusId ? '' : undefined}
+            onFocus={() => (store.previewCar.value = c.id)}
+            onClick={() => pick(c.id)}
+          >
+            <span class="mn-car-name">{c.name}</span>
+            <span class="mn-car-power">{c.stats.power}</span>
+          </button>
+        ))}
+      </div>
+      <div class="mn-car-info">
+        <div class="mn-car-class">{focused.className}</div>
+        <div class="mn-car-title">{focused.name}</div>
+        {stats && (
+          <div class="mn-stats">
+            <StatBar label="Power" value={stats.power} />
+            <StatBar label="Accel" value={stats.accel} />
+            <StatBar label="Top speed" value={stats.speed} />
+            <StatBar label="Grip" value={stats.grip} />
+          </div>
+        )}
+        <div class="mn-car-meta">
+          {focused.stats.power} · {focused.stats.weight} · {focused.stats.topSpeed}
+        </div>
+        <p class="mn-car-text">{focused.description}</p>
         <Button
           label="Paint & livery"
           hint={liveryHint(store)}
           onPress={() => store.push('livery')}
         />
-      </div>
-      <div class="mn-cards" key={cls}>
-        {cars.map((c) => (
-          <button
-            type="button"
-            class={c.id === setup.carId ? 'mn-card selected' : 'mn-card'}
-            data-nav="button"
-            data-autofocus={c.id === focusId ? '' : undefined}
-            onClick={() => pick(c.id)}
-          >
-            <span class="mn-card-sub">{c.className}</span>
-            <span class="mn-card-title">{c.name}</span>
-            <span class="mn-card-meta">
-              {c.stats.power} · {c.stats.weight} · {c.stats.topSpeed}
-            </span>
-            <span class="mn-card-text">{c.description}</span>
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -1054,6 +1152,24 @@ export function SettingsScreen({ store }: ScreenProps) {
               step={0.05}
               format={percent}
               onChange={(v) => ((s.audio.volume = v), changed())}
+            />
+            <Slider
+              label="Music"
+              value={s.audio.music}
+              min={0}
+              max={1}
+              step={0.05}
+              format={percent}
+              onChange={(v) => ((s.audio.music = v), changed())}
+            />
+            <Slider
+              label="Menu sounds"
+              value={s.audio.sfx}
+              min={0}
+              max={1}
+              step={0.05}
+              format={percent}
+              onChange={(v) => ((s.audio.sfx = v), changed())}
             />
             <Toggle
               label="Mute"

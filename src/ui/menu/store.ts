@@ -212,6 +212,8 @@ export class MenuStore {
   /** A replay of the session just finished can be watched. */
   readonly replayAvailable = signal(false);
   readonly replay = signal<ReplayInfo | null>(null);
+  /** The car in focus in car select, shown in 3D behind the menu. */
+  readonly previewCar = signal('');
   /** Live controller state for the tester (updated every frame while it's open). */
   readonly pads = signal<PadSnapshot[]>([]);
   /** Short status line for the current screen (e.g. an import error). */

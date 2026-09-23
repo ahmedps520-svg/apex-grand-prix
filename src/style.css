@@ -120,6 +120,45 @@ body.running #loading {
   }
 }
 
+.loading-card .logo {
+  white-space: nowrap;
+  font-size: clamp(26px, 6vw, 48px);
+}
+
+.loading-car-wrap {
+  position: relative;
+  width: 220px;
+  margin: 14px auto 6px;
+  overflow: hidden;
+}
+
+.loading-car {
+  display: block;
+  width: 100%;
+  fill: #1c2230;
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-width: 1.5;
+}
+
+/* A light streak sweeping over the silhouette while loading. */
+.loading-car-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 35%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: skewX(-20deg);
+  animation: loading-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes loading-sweep {
+  to {
+    left: 120%;
+  }
+}
+
 #loading-text {
   color: var(--muted);
   margin: 0;

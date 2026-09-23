@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { NAV_ADJUST } from './focus';
+import { Icon, type IconName } from './icons';
 
 /**
  * Menu building blocks. Every control carries `data-nav` so the focus engine can reach it with
@@ -27,6 +28,45 @@ export function Button(props: {
       <span class="mn-label">{props.label}</span>
       {props.hint && <span class="mn-hint">{props.hint}</span>}
     </button>
+  );
+}
+
+/**
+ * A menu tile: an icon and a short label. The hint only appears while the tile has focus, so
+ * menus stay graphical.
+ */
+export function Tile(props: {
+  icon: IconName;
+  label: string;
+  hint?: string;
+  onPress: () => void;
+  autofocus?: boolean;
+  size?: 'big' | 'small';
+}) {
+  return (
+    <button
+      type="button"
+      class={`mn-tile ${props.size ?? ''}`}
+      data-nav="button"
+      data-autofocus={props.autofocus ? '' : undefined}
+      onClick={props.onPress}
+    >
+      <Icon name={props.icon} size={props.size === 'small' ? 22 : 34} />
+      <span class="mn-tile-label">{props.label}</span>
+      {props.hint && <span class="mn-tile-hint">{props.hint}</span>}
+    </button>
+  );
+}
+
+/** A labelled 0…1 bar, for car stats. */
+export function StatBar(props: { label: string; value: number }) {
+  return (
+    <div class="mn-stat">
+      <span class="mn-stat-label">{props.label}</span>
+      <span class="mn-stat-bar">
+        <span style={{ width: `${Math.round(Math.min(Math.max(props.value, 0.04), 1) * 100)}%` }} />
+      </span>
+    </div>
   );
 }
 
