@@ -221,12 +221,50 @@ export function MainScreen({ store }: ScreenProps) {
           hint="Paint and livery"
           onPress={() => store.push('livery')}
         />
+        <Tile
+          icon="school"
+          label="School"
+          hint={store.settings.schoolDone ? 'Graduated · drive it again' : 'Learn to race'}
+          onPress={() => store.actions.startSchool()}
+        />
       </nav>
       <nav class="mn-tiles small">
         <Tile icon="gear" label="Settings" size="small" onPress={() => store.push('settings')} />
         <Tile icon="pad" label="Controls" size="small" onPress={() => store.push('controls')} />
         <Tile icon="pulse" label="Tester" size="small" onPress={() => store.push('tester')} />
         <Tile icon="info" label="About" size="small" onPress={() => store.push('about')} />
+      </nav>
+    </div>
+  );
+}
+
+/** First visit: offer the driving school (it can always be found on the main menu). */
+export function SchoolOfferScreen({ store }: ScreenProps) {
+  const skip = () => {
+    store.settings.schoolOffered = true;
+    store.changed();
+    store.set(['main']);
+  };
+  return (
+    <div class="mn-panel mn-offer">
+      <div class="logo">
+        APEX <span>GRAND PRIX</span>
+      </div>
+      <p class="mn-offer-title">New here?</p>
+      <nav class="mn-tiles">
+        <Tile
+          icon="school"
+          label="Driving School"
+          hint="Seven quick lessons"
+          size="big"
+          autofocus
+          onPress={() => {
+            store.settings.schoolOffered = true;
+            store.changed();
+            store.actions.startSchool();
+          }}
+        />
+        <Tile icon="race" label="Skip" hint="Straight to the menu" onPress={skip} />
       </nav>
     </div>
   );
@@ -800,7 +838,7 @@ export function ResultsScreen({ store }: ScreenProps) {
                 <td>{formatTime(r.bestLap)}</td>
                 <td>
                   {!Number.isFinite(r.time)
-                    ? 'DNF'
+                    ? '—'
                     : i === 0
                       ? formatTime(r.time)
                       : `+${r.gap.toFixed(3)}`}

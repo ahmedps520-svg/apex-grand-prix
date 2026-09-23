@@ -142,6 +142,13 @@ const FORMULA: CarSpec = {
   },
   diff: { preload: 40, powerLock: 0.3, coastLock: 0.15 },
   aero: { dragArea: 1.1, downforceArea: 4.2, frontShare: 0.42 },
+  hybrid: {
+    drsDrag: 0.18,
+    drsDownforce: 0.22,
+    ersPower: 90_000,
+    ersCapacity: 2_500_000,
+    harvestPower: 90_000,
+  },
   body: { halfWidth: 0.95, front: 2.4, rear: 1.9, floor: -0.2, roof: 0.7 },
 };
 
@@ -204,6 +211,13 @@ const PROTOTYPE: CarSpec = {
   },
   diff: { preload: 50, powerLock: 0.32, coastLock: 0.18 },
   aero: { dragArea: 0.95, downforceArea: 3.8, frontShare: 0.44 },
+  hybrid: {
+    drsDrag: 0.12,
+    drsDownforce: 0.15,
+    ersPower: 120_000,
+    ersCapacity: 3_000_000,
+    harvestPower: 120_000,
+  },
   body: { halfWidth: 1.0, front: 2.35, rear: 2.35, floor: -0.25, roof: 0.8 },
 };
 

@@ -10,10 +10,11 @@ A browser racing game built with TypeScript, Vite and three.js. It renders with 
 
 Starts with a short studio and logo intro (any button skips it), then a title screen that circles your car on the grid while generated synthwave music plays. The menus are tiles and bars, not paragraphs, with sounds and a light rumble when you select.
 
-- **Quick Race:** pick a circuit and a car, 1–11 AI opponents, laps, difficulty and grid slot. Standing start with five red lights, positions, lap and sector timing, results.
+- **Quick Race:** pick a circuit and a car, 1–11 AI opponents, laps, difficulty and grid slot. A flyover of the circuit leads into the grid; standing start with five red lights, positions, lap and sector timing; the top three take the podium under confetti before the results.
 - **Championship:** a season of 3 to 6 races with points for the top ten (25-18-15-12-10-8-6-4-2-1); the grid lines up in championship order and a season in progress is saved.
 - **Time Trial:** hot laps with sector splits against your best and the stored track record, chasing a ghost of your best lap.
 - **Free Drive:** the proving ground with a handling loop, a timed 1 km drag strip and a 60 m skidpad.
+- **Driving school:** offered on the first visit and always in the menu. Throttle, braking, staying on track, the racing line, braking zones, DRS and ERS, each a button prompt and a progress bar rather than a paragraph, in a junior formula car on the club circuit.
 - **Circuits:** eight fictional tracks, from a 2.5 km club circuit to a 5.5 km high-speed autodrome, a street circuit, a roval and a desert finale, with kerbs, gravel or grass run-off, barriers, grandstands and working start lights.
 - **Replays:** watch the race again from TV cameras, a chase camera or onboard, at 0.25× to 4×, following any car. Between races, the menus show an AI race from the TV cameras.
 - **Cars:** 30 cars in six classes (GT, Formula, Prototype, Touring sedans, Street and all-wheel-drive SUVs), each with its own power, weight, grip and aero.
@@ -22,7 +23,7 @@ Starts with a short studio and logo intro (any button skips it), then a title sc
 - **Weather and time of day:** morning to dusk, clear to heavy rain. Rain darkens and wets the track, cuts grip for you and the AI, and throws up spray.
 - **Damage:** off, light or full. Crashes cost downforce, power or steering alignment, shown on the HUD and called out by the race engineer.
 - **Photo mode:** from the pause menu: free camera, depth of field, exposure, filters, and save the shot as a PNG.
-- **Handling:** a 400 Hz physics model with Pacejka tyres, limited-slip diff, ABS/TC Off/Low/High, manual paddles or automatic gears.
+- **Handling:** a 400 Hz physics model with Pacejka tyres, limited-slip diff, ABS/TC Off/Low/High, manual paddles or automatic gears. Formula and Prototype cars have DRS (open it in the zones when you are within a second of the car ahead) and an ERS boost that recharges under braking; the AI uses both.
 - **Controls:** keyboard, DualSense/Xbox controllers (with rumble on Chrome/Edge) and steering wheels (setup wizard, 1:1 steering). Menus work with a controller, keyboard, mouse or touch; buttons and keys can be rebound.
 - **Installable:** add it to the home screen (iPad: Share → Add to Home Screen); it works offline after the first visit.
 
@@ -32,6 +33,7 @@ Starts with a short studio and logo intro (any button skips it), then a title sc
 | Steer | A / D or ← / → | Left stick |
 | Shift up / down | E / Q | R1 / L1 (RB / LB) |
 | Handbrake | Space | ✕ (A) |
+| DRS / ERS boost | F / B | □ (X) / L3 |
 | Pause menu | Esc or P | Options (Menu) |
 | Camera | C | ○ (B) |
 | Reset car | R | △ (Y) |
@@ -47,6 +49,7 @@ URL options:
 - `?renderer=webgpu` retries WebGPU after an automatic fallback.
 - `?drive` skips the menus and starts free driving (used by the browser tests).
 - `?autopilot` lets the AI drive your car in races (for demos and tests).
+- `?cinematics` plays the race flyover and podium in automated browsers, which skip them otherwise.
 
 ## Development
 

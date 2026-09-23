@@ -1304,3 +1304,8 @@
     padding: 10px 12px;
   }
 }
+
+.mn-offer-title {
+  margin: 0;
+  font: italic 900 30px var(--font);
+}

@@ -849,3 +849,8 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
   - Every screen change gives the camera a short zoom.
 - **Loading screen:** a car silhouette with a light streak.
 
+### Push 7: Driving school, hybrid systems and race cinematics (v0.7.0)
+- **Driving school:** offered once on the first visit and always in the main menu. Seven short lessons in the junior formula car at Merriford Park: accelerate, brake, stay on track, follow the racing line (drawn on the road, red in the braking zones), brake in the red, open DRS, use the ERS boost. Each lesson is a controller, key or touch prompt with a progress bar and passes on its own; no paragraphs. Pit entry waits for pit lanes.
+- **DRS and ERS:** Formula and Prototype cars carry a drag reduction system (allowed in the zones found on straights of 400 m or more, in races only within a second of the car ahead after lap 1) and a hybrid boost (90–120 kW from a battery that harvests under braking). □ / X and L3 on a controller, F and B on the keyboard; the HUD shows the DRS lamp and the battery; the AI opens DRS and boosts when it is flat out with charge to spare.
+- **Race intro:** a seven-second flyover of the end of the lap into the grid under a title card (circuit, location, laps, weather); the grid waits and any button skips it.
+- **Podium:** after the flag the top three stand on a podium beside the start line under confetti with a winner banner while the camera circles them; the results come up over it. Any button skips ahead.

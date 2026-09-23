@@ -5,7 +5,16 @@
  */
 
 export type PadAction =
-  'shiftUp' | 'shiftDown' | 'handbrake' | 'camera' | 'reset' | 'telemetry' | 'overlay' | 'pause';
+  | 'shiftUp'
+  | 'shiftDown'
+  | 'handbrake'
+  | 'camera'
+  | 'reset'
+  | 'telemetry'
+  | 'overlay'
+  | 'pause'
+  | 'drs'
+  | 'boost';
 
 export type KeyAction =
   | 'throttle'
@@ -19,7 +28,9 @@ export type KeyAction =
   | 'reset'
   | 'telemetry'
   | 'overlay'
-  | 'pause';
+  | 'pause'
+  | 'drs'
+  | 'boost';
 
 export interface Bindings {
   /** Standard-mapping button index for each controller action. */
@@ -37,6 +48,8 @@ export const PAD_ACTIONS: ReadonlyArray<{ action: PadAction; label: string }> = 
   { action: 'telemetry', label: 'Telemetry panel' },
   { action: 'overlay', label: 'Performance overlay' },
   { action: 'pause', label: 'Pause' },
+  { action: 'drs', label: 'DRS' },
+  { action: 'boost', label: 'ERS boost' },
 ];
 
 export const KEY_ACTIONS: ReadonlyArray<{ action: KeyAction; label: string }> = [
@@ -52,6 +65,8 @@ export const KEY_ACTIONS: ReadonlyArray<{ action: KeyAction; label: string }> = 
   { action: 'telemetry', label: 'Telemetry panel' },
   { action: 'overlay', label: 'Performance overlay' },
   { action: 'pause', label: 'Pause' },
+  { action: 'drs', label: 'DRS' },
+  { action: 'boost', label: 'ERS boost' },
 ];
 
 export const defaultBindings = (): Bindings => ({
@@ -64,6 +79,8 @@ export const defaultBindings = (): Bindings => ({
     telemetry: 17, // touchpad click (L3 + R3 also works)
     overlay: 8, // Create / View
     pause: 9, // Options / Menu
+    drs: 2, // □ / X
+    boost: 10, // L3
   },
   keys: {
     throttle: ['KeyW', 'ArrowUp'],
@@ -78,6 +95,8 @@ export const defaultBindings = (): Bindings => ({
     telemetry: ['F3'],
     overlay: ['Backquote'],
     pause: ['Escape', 'KeyP'],
+    drs: ['KeyF'],
+    boost: ['KeyB'],
   },
 });
 

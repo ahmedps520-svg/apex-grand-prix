@@ -100,6 +100,18 @@ export interface GearboxSpec {
 }
 
 /** Clutch-pack limited-slip differential. */
+/** Hybrid race cars: a drag-reduction flap and an energy store with an electric motor. */
+export interface HybridSpec {
+  /** Share of drag and of downforce the open DRS flap removes. */
+  drsDrag: number;
+  drsDownforce: number;
+  /** Electric motor power while boosting, and the battery, W and J. */
+  ersPower: number;
+  ersCapacity: number;
+  /** Power recovered under braking, W. */
+  harvestPower: number;
+}
+
 /** Where the engine's torque goes; without it, the axles marked `driven` share it. */
 export interface DriveSpec {
   /** Share of the torque sent to the front axle: 0 = rear drive, 1 = front drive. */
@@ -150,6 +162,8 @@ export interface CarSpec {
   diff: DiffSpec;
   /** All-wheel drive split (optional; rear drive when absent and only the rear is driven). */
   drive?: DriveSpec;
+  /** DRS and ERS (formula and prototype cars). */
+  hybrid?: HybridSpec;
   aero: AeroSpec;
   body: BodySpec;
 }

@@ -16,7 +16,7 @@ import { Cones } from '../render/Cones';
 import { createCarRenderState, interpolateCar, type CarRenderState } from '../render/interpolate';
 import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene } from '../render/TestGroundScene';
-import { TrackScene } from '../render/TrackScene';
+import { TrackScene, type Footprint } from '../render/TrackScene';
 import {
   PhotoCamera,
   PhotoControls,
@@ -38,9 +38,12 @@ import {
 } from '../shared/protocol';
 import { mulberry32 } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
+import { computeRacingLine, type RacingLine } from '../sim/race/racingLine';
+import { lineOptionsFor } from '../sim/world';
 import { Track } from '../sim/track/Track';
 import { CARS, carById, type CarModel } from '../sim/vehicle/cars';
 import { TEST_MULE } from '../sim/vehicle/spec';
+import { el, setText } from '../ui/dom';
 import { HelpPanel } from '../ui/HelpPanel';
 import { Hud } from '../ui/Hud';
 import { FocusManager, type UiEvent } from '../ui/menu/focus';
@@ -65,6 +68,13 @@ import { TelemetryPanel } from '../ui/TelemetryPanel';
 import type { Toasts } from '../ui/Toasts';
 import { WheelSetup } from '../ui/WheelSetup';
 import { DragTimer, formatDragResult } from './dragTimer';
+import {
+  DrivingSchool,
+  nearestLinePoint,
+  offTrack,
+  racingLineMesh,
+  type Glyphs,
+} from './DrivingSchool';
 import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from './ghost';
 import { loadRecords, loadSeason, saveRecord, saveSeason } from './records';
 import { ReplayRecorder, type Replay } from './replay';
@@ -78,6 +88,7 @@ import {
   type Settings,
 } from './settings';
 import { SimClient } from './SimClient';
+import './cinematics.css';
 
 /** Read-only hooks for automated browser tests (and curious players with devtools open). */
 export interface DebugApi {
@@ -166,6 +177,18 @@ const ATTRACT_SHOT = 16;
 const HERO_FOV = 34;
 /** Engine sound level while the menus are open over the backdrop race. */
 const MENU_AUDIO = 0.35;
+/** Seconds of the circuit flyover before a race, and of the podium after one. */
+const FLYOVER_TIME = 7;
+const PODIUM_TIME = 5.5;
+/** Automated browsers skip the race cinematics unless the URL asks for them (`?cinematics`). */
+const CINEMATICS = !navigator.webdriver || new URLSearchParams(location.search).has('cinematics');
+const WEATHER_NAMES: Record<Weather, string> = {
+  clear: 'Clear',
+  cloudy: 'Cloudy',
+  overcast: 'Overcast',
+  lightRain: 'Light rain',
+  heavyRain: 'Heavy rain',
+};
 
 /** Random conditions for the backdrop race and championship rounds: mostly dry. */
 function randomConditions(): Pick<SessionSetup, 'time' | 'weather'> {
@@ -336,6 +359,27 @@ export class Game {
   private lastTop: string | null = null;
   private cameraKick = 0;
   private readonly menuAudio = new MenuAudio();
+  /** The driving school in progress, its racing line on the road, and where the car is on it. */
+  private school: DrivingSchool | null = null;
+  private schoolLine: { mesh: THREE.Mesh; braking: boolean[]; line: RacingLine } | null = null;
+  private schoolHint = -1;
+  private schoolTrackHint = -1;
+  private schoolDoneAt = -1;
+  /** Before a race: a flyover of the circuit with its title card, while the grid waits. */
+  private flyover: { time: number; card: HTMLElement } | null = null;
+  /** After a race: the top three on a podium beside the start line. */
+  private podium: {
+    group: THREE.Group;
+    views: CarView[];
+    geometries: THREE.BufferGeometry[];
+    material: THREE.Material;
+    time: number;
+    centre: THREE.Vector3;
+    /** Where the camera's orbit starts, radians. */
+    angle: number;
+    overlay: HTMLElement;
+    resultsShown: boolean;
+  } | null = null;
   /** The launch intro is playing: menu input waits for it. */
   introActive = false;
   private finishedAt = -1;
@@ -566,6 +610,9 @@ export class Game {
   /** Builds the scene and cars for a session and starts it in the worker. */
   private async startSession(setup: SessionSetup, idle = false, attract = false): Promise<void> {
     const config = this.configFor(setup, attract);
+    this.endSchool();
+    this.endPodium();
+    this.endFlyover();
     this.rumble.stop(this.input.activePad);
     const previous = this.session;
     this.session = config;
@@ -605,6 +652,7 @@ export class Game {
     this.driving = !idle;
     this.paused = false;
     this.menus.inSession.value = !idle;
+    if (!idle && CINEMATICS && config.mode === 'race' && this.track) this.startFlyover(config);
     this.applyHudVisibility();
   }
 
@@ -809,13 +857,15 @@ export class Game {
   }
 
   private applyHudVisibility(): void {
-    const driving = this.driving && !this.menus.open && !this.photo;
+    const driving =
+      this.driving && !this.menus.open && !this.photo && !this.flyover && !this.podium;
     this.hud.root.hidden = !driving;
-    this.raceHud.setVisible(driving && this.session?.mode !== 'free');
+    this.raceHud.setVisible(driving && this.session?.mode !== 'free' && !this.school);
     this.minimap?.setVisible(driving);
     this.telemetry.setVisible(driving && this.settings.telemetry);
     this.telemetry.root.classList.toggle('below-map', this.minimap !== null);
     if (!driving) this.radioBox.hide();
+    if (this.school) this.school.root.hidden = !driving;
     this.perf.setVisible(this.settings.overlay);
     const device = this.input.lastDevice;
     this.touch.setVisible(driving && hasTouch() && (device === 'touch' || device === 'none'));
@@ -838,6 +888,7 @@ export class Game {
     if (this.photo) this.handlePhotoInput(dt);
     else if (this.wheelSetup.visible) this.wheelSetup.update(input.wheelPad, dt);
     else if (menusOpen) this.handleMenuInput(dt);
+    else if (this.flyover || this.podium) this.handleCinematicInput();
     else if (this.driving) this.handleActions();
     this.menus.prompts.value = promptFamily(
       this.settings.prompts,
@@ -846,7 +897,13 @@ export class Game {
     );
     this.menus.padFamily.value = input.padFamily;
 
-    const controls = this.driving && !this.menus.open && !this.wheelSetup.visible && !this.photo;
+    const controls =
+      this.driving &&
+      !this.menus.open &&
+      !this.wheelSetup.visible &&
+      !this.photo &&
+      !this.flyover &&
+      !this.podium;
     if (controls) this.applyHudVisibility();
     this.sim.tick(now, [controls ? input.driver : this.idleInput]);
 
@@ -879,6 +936,8 @@ export class Game {
       this.updateShowroom();
       if (top === 'title' && this.attract) this.updateHeroCamera(dt, player);
       else if (this.attract && !showroom) this.updateAttractCamera(dt, count, snapshot.race);
+      else if (this.flyover) this.updateFlyover(dt);
+      else if (this.podium) this.updatePodium(dt);
       else this.camera.update(dt, player);
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
@@ -895,6 +954,7 @@ export class Game {
         });
       }
       this.updateRace(dt, player, count);
+      if (this.school && controls) this.updateSchool(dt, player);
       const focus = this.attract ? (this.states[this.attractCar] ?? player) : player;
       this.updateAudio(dt, focus);
       if (controls) this.rumble.update(dt, player, input.activePad);
@@ -960,7 +1020,20 @@ export class Game {
    * body for the car in focus, so the backdrop previews it.
    */
   private updateShowroom(): void {
-    const hold = this.attract && this.menus.top === 'title';
+    // First visit: offer the driving school once, on arriving at the main menu.
+    const s = this.settings;
+    if (
+      this.menus.top === 'main' &&
+      !s.schoolOffered &&
+      !s.schoolDone &&
+      !this.introActive &&
+      !navigator.webdriver
+    ) {
+      s.schoolOffered = true;
+      this.save();
+      this.menus.push('schoolOffer');
+    }
+    const hold = (this.attract && this.menus.top === 'title') || this.flyover !== null;
     if (hold !== this.gridHeld) {
       this.gridHeld = hold;
       this.sim.command({ kind: 'holdStart', hold });
@@ -1038,6 +1111,317 @@ export class Game {
     this.tvTarget.set(state.pos.x, state.pos.y, state.pos.z);
     this.tvVelocity.set(state.vel.x, state.vel.y, state.vel.z);
     this.tv.update(dt, this.tvTarget, this.tvVelocity, this.camera.camera);
+  }
+
+  // ---------------------------------------------------------------- race cinematics
+
+  /** Before a race: the camera sweeps over the end of the lap to the grid, under a title card. */
+  private startFlyover(config: SessionConfig): void {
+    const def = trackById(config.trackId);
+    if (!def || !this.track) return;
+    const card = el('div', 'flyover-card');
+    const name = el('div', 'flyover-name');
+    setText(name, def.name);
+    const sub = el('div', 'flyover-sub');
+    const weather = WEATHER_NAMES[config.conditions?.weather ?? 'clear'];
+    const laps = `${config.laps} ${config.laps === 1 ? 'lap' : 'laps'}`;
+    setText(sub, `${def.location} · ${laps} · ${weather}`);
+    const skip = el('div', 'flyover-skip');
+    setText(skip, 'Skip');
+    card.append(name, sub, skip);
+    card.addEventListener('pointerdown', () => this.endFlyover());
+    this.ui.appendChild(card);
+    this.flyover = { time: 0, card };
+    // The grid waits for the flyover; updateShowroom releases it when the flyover ends.
+    this.gridHeld = true;
+    this.sim.command({ kind: 'holdStart', hold: true });
+    this.applyHudVisibility();
+  }
+
+  private endFlyover(): void {
+    if (!this.flyover) return;
+    this.flyover.card.remove();
+    this.flyover = null;
+    this.camera.reset();
+  }
+
+  private updateFlyover(dt: number): void {
+    const fly = this.flyover!;
+    const track = this.track;
+    if (!track) {
+      this.endFlyover();
+      return;
+    }
+    fly.time += dt;
+    const t = Math.min(fly.time / FLYOVER_TIME, 1);
+    // Eases out: quick over the back of the lap, settling as it reaches the grid.
+    const u = 1 - (1 - t) * (1 - t);
+    const s = track.length * 0.62 + (track.length * 0.38 - 40) * u;
+    const p = track.at(s);
+    const ahead = track.at(s + 90);
+    const height = 60 - 42 * u;
+    const side = 28 - 16 * u;
+    const cam = this.camera.camera;
+    cam.up.set(0, 1, 0);
+    cam.position.set(p.x - p.tz * side, height, p.z + p.tx * side);
+    cam.lookAt(ahead.x, 0.5, ahead.z);
+    if (cam.fov !== 50) {
+      cam.fov = 50;
+      cam.updateProjectionMatrix();
+    }
+    fly.card.classList.toggle('leaving', t > 0.85);
+    if (t >= 1) this.endFlyover();
+  }
+
+  /**
+   * During a flyover or the podium any button skips ahead (after a moment, so a button held from
+   * the menus doesn't); pausing skips the flyover and opens the pause menu.
+   */
+  private handleCinematicInput(): void {
+    const time = this.flyover?.time ?? this.podium?.time ?? 0;
+    if (time < 0.6 || this.input.ui.length === 0) return;
+    const pause = this.input.ui.some(({ event }) => event === 'pause');
+    if (this.flyover) this.endFlyover();
+    else this.podiumResults();
+    if (pause && this.driving && !this.podium) this.pause();
+  }
+
+  /**
+   * After a race: the top three on a podium beside the start line, under confetti, with the
+   * camera circling them. Returns false when there is nothing to show.
+   */
+  private startPodium(race: RaceStatus): boolean {
+    const track = this.track;
+    if (!track || this.podium || !CINEMATICS) return false;
+    const top = race.order.slice(0, 3).filter((car) => race.cars[car]?.finished);
+    if (top.length === 0) return false;
+    // Beside the start straight beyond the barrier, on whichever side and at whichever spot
+    // nearest the line is clear of the grandstands (the camera circles it at 11 m).
+    const scene = this.scenery;
+    const stands: ReadonlyArray<Footprint> = 'obstacles' in scene ? scene.obstacles : [];
+    const dist = track.wallOffset + 12;
+    const spots = [0, -45, 45, -90, 90, -135, 135, -180, 180].flatMap((offset) =>
+      [1, -1].map((side) => {
+        const p = track.at(track.length + offset);
+        const dx = -p.tz * side;
+        const dz = p.tx * side;
+        return { x: p.x + dx * dist, z: p.z + dz * dist, dx, dz };
+      }),
+    );
+    const spot =
+      spots.find((s) => stands.every((f) => Math.hypot(f.x - s.x, f.z - s.z) > f.r + 14)) ??
+      spots[0]!;
+    const group = new THREE.Group();
+    group.position.set(spot.x, track.heightAt(), spot.z);
+    group.rotation.y = Math.atan2(spot.dx, spot.dz); // faces the track
+    const material = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.6 });
+    const geometries: THREE.BufferGeometry[] = [];
+    const base = new THREE.BoxGeometry(13.5, 0.16, 7.6);
+    geometries.push(base);
+    const slab = new THREE.Mesh(base, material);
+    slab.position.y = 0.08;
+    slab.receiveShadow = true;
+    group.add(slab);
+    const views: CarView[] = [];
+    const steps: Array<[number, number]> = [
+      [0, 1.1],
+      [-4.2, 0.7],
+      [4.2, 0.4],
+    ];
+    steps.forEach(([x, h], i) => {
+      const geo = new THREE.BoxGeometry(3.6, h, 6.6);
+      geometries.push(geo);
+      const block = new THREE.Mesh(geo, material);
+      block.position.set(x, h / 2, 0);
+      block.castShadow = true;
+      block.receiveShadow = true;
+      group.add(block);
+      const car = top[i];
+      if (car === undefined) return;
+      const model = this.carModels[car] ?? carById(this.session?.carId ?? CARS[0]!.id);
+      const view = new CarView(model.spec, 0xffffff, model.style, this.liveryFor(car));
+      const state = createCarRenderState();
+      state.pos.x = x;
+      state.pos.y = h + model.spec.cogHeight;
+      state.wheels.forEach((w, k) => {
+        w.length = k < 2 ? model.spec.front.staticLength : model.spec.rear.staticLength;
+      });
+      view.update(state);
+      group.add(view.root);
+      views.push(view);
+    });
+    this.scenery.scene.add(group);
+
+    const overlay = el('div', 'podium-overlay');
+    const confetti = el('div', 'podium-confetti');
+    const colours = ['#ff3b2f', '#ffd166', '#39d98a', '#ffffff', '#4cc9f0'];
+    for (let i = 0; i < 70; i++) {
+      const piece = el('span');
+      piece.style.setProperty('--x', `${(Math.random() * 100).toFixed(1)}%`);
+      piece.style.setProperty('--d', `${(Math.random() * 3).toFixed(2)}s`);
+      piece.style.setProperty('--t', `${(3 + Math.random() * 2.5).toFixed(2)}s`);
+      piece.style.setProperty('--c', colours[i % colours.length]!);
+      confetti.appendChild(piece);
+    }
+    const banner = el('div', 'podium-banner');
+    const label = el('span', 'podium-label');
+    setText(label, top[0] === 0 ? 'You win' : 'Winner');
+    const name = el('span', 'podium-name');
+    setText(name, this.driverName(top[0]!));
+    banner.append(label, name);
+    banner.addEventListener('pointerdown', () => this.podiumResults());
+    overlay.append(confetti, banner);
+    this.ui.appendChild(overlay);
+
+    this.podium = {
+      group,
+      views,
+      geometries,
+      material,
+      time: 0,
+      centre: group.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
+      angle: Math.atan2(-spot.dz, -spot.dx) - 0.6,
+      overlay,
+      resultsShown: false,
+    };
+    this.menuAudio.play('start');
+    return true;
+  }
+
+  private updatePodium(dt: number): void {
+    const podium = this.podium!;
+    podium.time += dt;
+    const t = podium.time;
+    const a = podium.angle + t * 0.2;
+    const radius = 11 - Math.min(t, PODIUM_TIME) * 0.3;
+    const cam = this.camera.camera;
+    cam.up.set(0, 1, 0);
+    cam.position.set(
+      podium.centre.x + Math.cos(a) * radius,
+      podium.centre.y + 3,
+      podium.centre.z + Math.sin(a) * radius,
+    );
+    cam.lookAt(podium.centre);
+    if (cam.fov !== 45) {
+      cam.fov = 45;
+      cam.updateProjectionMatrix();
+    }
+    if (!podium.resultsShown && t >= PODIUM_TIME) this.podiumResults();
+  }
+
+  /** The results come up over the podium, which stays as their backdrop. */
+  private podiumResults(): void {
+    const podium = this.podium;
+    if (!podium || podium.resultsShown) return;
+    podium.resultsShown = true;
+    podium.overlay.classList.add('podium-done');
+    this.menus.set(['results']);
+    this.applyHudVisibility();
+  }
+
+  private endPodium(): void {
+    const podium = this.podium;
+    if (!podium) return;
+    podium.group.removeFromParent();
+    for (const view of podium.views) view.dispose();
+    for (const g of podium.geometries) g.dispose();
+    podium.material.dispose();
+    podium.overlay.remove();
+    this.podium = null;
+    this.camera.reset();
+  }
+
+  // ---------------------------------------------------------------- driving school
+
+  private startSchool(): void {
+    this.seasonRound = -1;
+    const setup: SessionSetup = {
+      ...this.menus.setup.value,
+      mode: 'timeTrial',
+      trackId: 'merriford-park',
+      carId: 'formula-junior',
+      time: 'midday',
+      weather: 'clear',
+    };
+    this.menus.update(setup);
+    this.menus.set([]);
+    void this.startSession(setup).then(() => {
+      this.beginSchool();
+      this.resume();
+    });
+  }
+
+  private beginSchool(): void {
+    const track = this.track;
+    if (!track) return;
+    const model = carById('formula-junior');
+    const line = computeRacingLine(track, lineOptionsFor(model.spec, model.aiGrip));
+    const { mesh, braking } = racingLineMesh(line);
+    this.scenery.scene.add(mesh);
+    this.schoolLine = { mesh, braking, line };
+    this.school = new DrivingSchool(this.ui);
+    this.school.onPass = () => {
+      this.menuAudio.play('select');
+      this.menuPulse();
+    };
+    this.schoolHint = -1;
+    this.schoolTrackHint = -1;
+    this.schoolDoneAt = -1;
+    // No ghost in the school.
+    this.ghost = null;
+    if (this.ghostView) this.ghostView.root.visible = false;
+  }
+
+  private endSchool(): void {
+    this.school?.dispose();
+    this.school = null;
+    const line = this.schoolLine;
+    if (line) {
+      line.mesh.removeFromParent();
+      line.mesh.geometry.dispose();
+      (line.mesh.material as THREE.Material).dispose();
+    }
+    this.schoolLine = null;
+  }
+
+  /** Feeds the lesson in progress, and ends the school a few seconds after graduating. */
+  private updateSchool(dt: number, s: CarRenderState): void {
+    const school = this.school!;
+    const track = this.track;
+    const sl = this.schoolLine;
+    if (!track || !sl) return;
+    const pr = track.project(s.pos.x, s.pos.z, this.schoolTrackHint);
+    this.schoolTrackHint = pr.index;
+    const i = nearestLinePoint(sl.line, s.pos.x, s.pos.z, this.schoolHint);
+    this.schoolHint = i;
+    const device = this.input.lastDevice;
+    const glyphs: Glyphs =
+      device === 'touch'
+        ? 'touch'
+        : device === 'gamepad'
+          ? this.input.padFamily === 'playstation'
+            ? 'playstation'
+            : 'xbox'
+          : 'keyboard';
+    school.setGlyphs(glyphs);
+    school.update({
+      speed: Math.abs(s.speed) * 3.6,
+      brake: s.brake,
+      distance: Math.abs(s.speed) * dt,
+      onTrack: !offTrack(track, pr.lateral),
+      offLine: Math.hypot(sl.line.x[i]! - s.pos.x, sl.line.z[i]! - s.pos.z),
+      inBrakingZone: sl.braking[i] ?? false,
+      drs: s.drs,
+      ersBoost: s.ersBoost,
+      dt,
+    });
+    if (school.finished && this.schoolDoneAt < 0) {
+      this.schoolDoneAt = this.lastTime;
+      this.settings.schoolDone = true;
+      this.save();
+      this.menuAudio.play('start');
+    }
+    if (this.schoolDoneAt > 0 && this.lastTime - this.schoolDoneAt > 4) this.quitToMenu();
   }
 
   // ---------------------------------------------------------------- photo mode
@@ -1324,7 +1708,7 @@ export class Game {
   private updateRadio(dt: number, race: RaceStatus): void {
     this.radioBox.update(dt);
     const me = race.cars[0];
-    if (!me || race.mode === 'free') return;
+    if (!me || race.mode === 'free' || this.school) return;
     const r = this.radioInput;
     r.mode = race.mode;
     r.phase = race.phase;
@@ -1378,7 +1762,7 @@ export class Game {
     if (inSeason) this.scoreRound(season, race);
     this.menus.replayAvailable.value =
       this.lastReplay !== null || (this.replayRecorder?.duration ?? 0) > 5;
-    this.menus.set(['results']);
+    if (!this.startPodium(race)) this.menus.set(['results']);
     this.applyHudVisibility();
   }
 
@@ -1645,7 +2029,10 @@ export class Game {
         this.menus.set([]);
         const mode = this.session?.mode;
         if (mode === 'race' || mode === 'timeTrial') {
-          void this.startSession({ ...this.menus.setup.value, mode }).then(() => this.resume());
+          void this.startSession({ ...this.menus.setup.value, mode }).then(() => {
+            this.endFlyover();
+            this.resume();
+          });
         } else {
           this.resume();
           this.resetCar();
@@ -1678,6 +2065,7 @@ export class Game {
       nextRound: () => this.nextRound(),
       watchReplay: () => this.watchReplay(),
       photoMode: () => this.enterPhoto(),
+      startSchool: () => this.startSchool(),
       replay: (command) => this.replayCommand(command),
     };
   }

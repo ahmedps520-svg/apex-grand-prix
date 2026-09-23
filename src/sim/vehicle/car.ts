@@ -247,6 +247,15 @@ export class Car {
   /** Largest contact force from barriers or other cars during the last step (for effects). */
   impactForce = 0;
   readonly damage: CarDamage = { aero: 0, engine: 0, steering: 0 };
+  /** Set by the race each step: the car may open DRS here. */
+  drsAllowed = false;
+  drsOpen = false;
+  /** Energy in the battery, J, and whether the boost is on. */
+  ersEnergy = 0;
+  ersBoost = false;
+  /** The AI uses DRS and the boost by itself. */
+  autoHybrid = false;
+  private boostTime = 0;
   /** How much impacts hurt: 0 = no damage, 0.5 = light, 1 = full. */
   damageScale = 0;
   /** On the grid before the start: the handbrake is held on whatever the driver does. */
@@ -299,6 +308,7 @@ export class Car {
       }
     }
     this.engineRpm = spec.engine.idleRpm;
+    this.ersEnergy = (spec.hybrid?.ersCapacity ?? 0) * 0.5;
     this.spawn = spawn;
     this.reset(spawn);
   }
@@ -307,6 +317,11 @@ export class Car {
   setInput(input: DriverInput): void {
     this.input = input;
     this.pendingUp = Math.min(this.pendingUp + input.shiftUp, 3);
+    const hybrid = this.spec.hybrid;
+    if (hybrid) {
+      if (input.drs > 0 && this.drsAllowed) this.drsOpen = !this.drsOpen;
+      if (input.boost > 0) this.setBoost(!this.ersBoost);
+    }
     this.pendingDown = Math.min(this.pendingDown + input.shiftDown, 3);
   }
 
@@ -418,6 +433,7 @@ export class Car {
     rotateV(this.fwd, this.rot, FORWARD);
     rotateV(this.right, this.rot, RIGHT);
     this.updateControls(dt);
+    this.updateHybrid(dt);
     this.absActive = false;
     this.tcActive = false;
     this.impactForce = 0;
@@ -643,7 +659,15 @@ export class Car {
         }
       }
     }
-    return throttle * full * (1 - DAMAGE_TORQUE * this.damage.engine) - (1 - throttle) * friction;
+    // ERS boost: the electric motor's power as extra torque at the crank.
+    const boost =
+      this.ersBoost && this.spec.hybrid
+        ? this.spec.hybrid.ersPower / Math.max(rpm / RPM_PER_RAD_S, 150)
+        : 0;
+    return (
+      throttle * (full * (1 - DAMAGE_TORQUE * this.damage.engine) + boost) -
+      (1 - throttle) * friction
+    );
   }
 
   /** Share of the drive torque going to the front axle (0 = rear drive). */
@@ -924,11 +948,25 @@ export class Car {
     const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
     if (speed < 0.1) return;
     const hurt = this.damage.aero;
-    const dragScale = -0.5 * AIR_DENSITY * a.dragArea * (1 + DAMAGE_DRAG * hurt) * speed;
+    const hybrid = this.spec.hybrid;
+    const drs = this.drsOpen && hybrid ? hybrid : null;
+    const dragScale =
+      -0.5 *
+      AIR_DENSITY *
+      a.dragArea *
+      (1 + DAMAGE_DRAG * hurt) *
+      (1 - (drs?.drsDrag ?? 0)) *
+      speed;
     addScaledV(this.force, this.force, v, dragScale);
     const vLong = dotV(v, this.fwd);
     const downforce =
-      0.5 * AIR_DENSITY * a.downforceArea * (1 - DAMAGE_DOWNFORCE * hurt) * vLong * vLong;
+      0.5 *
+      AIR_DENSITY *
+      a.downforceArea *
+      (1 - DAMAGE_DOWNFORCE * hurt) *
+      (1 - (drs?.drsDownforce ?? 0)) *
+      vLong *
+      vLong;
     const frontPoint = addScaledV(this.t0, this.pos, this.fwd, this.spec.front.offset);
     this.applyForce(this.up, -downforce * a.frontShare, frontPoint);
     const rearPoint = addScaledV(this.t1, this.pos, this.fwd, this.spec.rear.offset);
@@ -1032,6 +1070,45 @@ export class Car {
       d.aero = Math.min(d.aero + units * 0.6, 1);
       d.engine = Math.min(d.engine + units * 0.35, 1);
     }
+  }
+
+  private setBoost(on: boolean): void {
+    this.ersBoost = on && this.ersEnergy > 0;
+    this.boostTime = 0;
+  }
+
+  /**
+   * DRS shuts on the brakes or outside a zone; the battery charges under braking and drains while
+   * boosting on the throttle. The AI opens DRS and boosts by itself.
+   */
+  private updateHybrid(dt: number): void {
+    const h = this.spec.hybrid;
+    if (!h) return;
+    const speed = Math.abs(dotV(this.vel, this.fwd));
+    if (this.drsOpen && (!this.drsAllowed || this.brake > 0.1)) this.drsOpen = false;
+    if (this.autoHybrid) {
+      if (this.drsAllowed && !this.drsOpen && this.throttle > 0.9) this.drsOpen = true;
+      this.ersBoost =
+        this.throttle > 0.95 &&
+        speed > 30 &&
+        this.ersEnergy > h.ersCapacity * (this.ersBoost ? 0.1 : 0.4);
+    }
+    if (this.ersBoost) {
+      this.boostTime += dt;
+      if (this.throttle > 0.05) this.ersEnergy -= h.ersPower * this.throttle * dt;
+      if (this.ersEnergy <= 0) {
+        this.ersEnergy = 0;
+        this.ersBoost = false;
+      }
+    }
+    if (this.brake > 0.1 && speed > 8) {
+      this.ersEnergy = Math.min(this.ersEnergy + h.harvestPower * this.brake * dt, h.ersCapacity);
+    }
+  }
+
+  /** Seconds the current boost has been on (the HUD and the tutorial read it). */
+  get boostSeconds(): number {
+    return this.ersBoost ? this.boostTime : 0;
   }
 
   /** Back to as new (a restart). */
@@ -1207,6 +1284,10 @@ export class Car {
     out[base + C.DAMAGE_AERO] = this.damage.aero;
     out[base + C.DAMAGE_ENGINE] = this.damage.engine;
     out[base + C.DAMAGE_STEER] = this.damage.steering;
+    const hybrid = this.spec.hybrid;
+    out[base + C.DRS] = !hybrid ? 0 : this.drsOpen ? 2 : this.drsAllowed ? 1 : 0;
+    out[base + C.ERS] = hybrid ? this.ersEnergy / hybrid.ersCapacity : -1;
+    out[base + C.ERS_BOOST] = this.ersBoost ? 1 : 0;
     for (let i = 0; i < this.wheels.length; i++) {
       const w = this.wheels[i]!;
       const o = base + C.WHEELS + i * WHEEL_STRIDE;

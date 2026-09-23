@@ -50,6 +50,9 @@ export interface Settings {
   audio: { volume: number; muted: boolean; music: number; sfx: number };
   /** Time trial: show the best lap as a see-through car. */
   ghost: boolean;
+  /** Driving school: finished, and offered once on the first visit. */
+  schoolDone: boolean;
+  schoolOffered: boolean;
   /** How much crashes damage the car. */
   damage: DamageLevel;
   /** Race engineer: spoken calls and subtitles. */
@@ -100,6 +103,8 @@ export const defaultSettings = (): Settings => ({
   pad: defaultPadSettings(),
   audio: { volume: 0.7, muted: false, music: 0.6, sfx: 0.7 },
   ghost: true,
+  schoolDone: false,
+  schoolOffered: false,
   damage: 'light',
   radio: { voice: true, subtitles: true, volume: 0.9 },
   wheels: {},
@@ -189,6 +194,8 @@ export function parseSettings(raw: unknown): Settings {
       sfx: num(audio.sfx, 0, 1, d.audio.sfx),
     },
     ghost: typeof raw.ghost === 'boolean' ? raw.ghost : d.ghost,
+    schoolDone: raw.schoolDone === true,
+    schoolOffered: raw.schoolOffered === true,
     damage: oneOf(raw.damage, DAMAGE_LEVELS, d.damage),
     radio: {
       voice: typeof radio.voice === 'boolean' ? radio.voice : d.radio.voice,
