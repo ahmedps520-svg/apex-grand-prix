@@ -61,21 +61,22 @@ const LEVEL = {
   exhaust: 0.8,
   rasp: 2.5,
   engine: 0.5,
-  squeal: 0.1,
+  squeal: 0.7,
   wind: 0.25,
-  grass: 1.2,
+  grass: 0.9,
 } as const;
 
+// Short pulses in both: real blowdown pulses stay short at idle, and the lowpass sets brightness.
 const LOAD_SHAPE: ExhaustShape = {
-  decay: 0.018,
-  rise: 0.0025,
+  decay: 0.013,
+  rise: 0.002,
   farBank: 0.75,
   spread: 0.06,
   seed: 11,
 };
 const IDLE_SHAPE: ExhaustShape = {
-  decay: 0.03,
-  rise: 0.006,
+  decay: 0.012,
+  rise: 0.0025,
   farBank: 0.45,
   spread: 0.12,
   seed: 23,
@@ -444,9 +445,11 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   shaper.oversample = '2x';
   // Lowpass Q is in dB: a mild resonance that moves with rpm, like intake roar.
   const lowpass = filterNode(ctx, 'lowpass', 600, 3);
-  const body = filterNode(ctx, 'peaking', 150, 0.9, 4);
-  const pipe = filterNode(ctx, 'peaking', 520, 1.5, 3);
-  const dcBlock = filterNode(ctx, 'highpass', 35, 0);
+  // Fixed resonances the harmonics sweep through as rpm changes, placed where small speakers
+  // still play; the highpass drops sub-audio orders that would only eat headroom.
+  const body = filterNode(ctx, 'peaking', 180, 0.8, 3);
+  const pipe = filterNode(ctx, 'peaking', 700, 1.2, 4);
+  const dcBlock = filterNode(ctx, 'highpass', 50, -3);
   const wobble = gainNode(ctx, 1);
   const level = gainNode(ctx, 0);
   const cut = gainNode(ctx, 1);

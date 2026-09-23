@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './app/Game';
+import { VERSION, VERSION_TEXT, takeVersionChange } from './app/version';
 import { chooseRenderer, rememberFallback } from './app/rendererChoice';
 import { registerServiceWorker } from './pwa/register';
 import { RendererHost } from './render/RendererHost';
@@ -30,7 +31,19 @@ async function boot(): Promise<void> {
   const ui = document.getElementById('ui');
   if (!container || !ui) throw new Error('Page markup is missing #app or #ui');
 
+  const version = document.getElementById('loading-version');
+  if (version) version.textContent = VERSION_TEXT;
   const toasts = new Toasts(ui);
+  const tag = document.createElement('div');
+  tag.className = 'version-tag';
+  tag.textContent = VERSION_TEXT;
+  ui.appendChild(tag);
+  const previous = takeVersionChange();
+  if (previous) {
+    toasts.show(`Updated to v${VERSION} (was v${previous.split('+')[0]}). Press H for controls.`, {
+      timeout: 8,
+    });
+  }
   registerServiceWorker((apply) =>
     toasts.show('A new version is ready.', { timeout: 0, action: { label: 'Reload', run: apply } }),
   );

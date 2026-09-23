@@ -219,7 +219,8 @@ export class Game {
     );
     // Browsers only start audio from a user gesture.
     const unlock = () => this.audio.unlock();
-    for (const type of ['keydown', 'pointerdown', 'touchend']) {
+    // (iPad only counts the end of a touch as a gesture.)
+    for (const type of ['keydown', 'pointerdown', 'pointerup', 'touchend']) {
       window.addEventListener(type, unlock, { capture: true });
     }
 

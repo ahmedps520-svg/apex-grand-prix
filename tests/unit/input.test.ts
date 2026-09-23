@@ -94,21 +94,21 @@ describe('input manager', () => {
     const input = new InputManager();
     pad.press(17);
     input.update();
-    expect(input.actions.has('telemetry')).toBe(true);
+    expect(input.actions.includes('telemetry')).toBe(true);
     pad.press(17, false);
     pad.press(10);
     input.update();
-    expect(input.actions.has('telemetry')).toBe(false);
+    expect(input.actions.includes('telemetry')).toBe(false);
     pad.press(11);
     input.update();
-    expect(input.actions.has('telemetry')).toBe(true);
+    expect(input.actions.includes('telemetry')).toBe(true);
     pad.press(10, false);
     pad.press(11, false);
     pad.press(15);
     pad.press(12);
     input.update();
-    expect(input.actions.has('menuNext')).toBe(true);
-    expect(input.actions.has('menuUp')).toBe(true);
+    expect(input.actions.includes('menuNext')).toBe(true);
+    expect(input.actions.includes('menuUp')).toBe(true);
     input.dispose();
   });
 
@@ -141,6 +141,21 @@ describe('input manager', () => {
     input.dispose();
   });
 
+  it('keeps every key press, even several in one frame', () => {
+    const input = new InputManager();
+    key('keydown', 'Tab');
+    key('keyup', 'Tab');
+    key('keydown', 'Tab');
+    key('keyup', 'Tab');
+    key('keydown', 'KeyE');
+    key('keyup', 'KeyE');
+    key('keydown', 'KeyE');
+    input.update();
+    expect(input.actions.filter((a) => a === 'menuNext')).toHaveLength(2);
+    expect(input.driver.shiftUp).toBe(2);
+    input.dispose();
+  });
+
   it('uses the keyboard: E/Q shift, Tab walks the quick menu, keys steer digitally', () => {
     const input = new InputManager();
     key('keydown', 'KeyE');
@@ -148,7 +163,7 @@ describe('input manager', () => {
     key('keydown', 'KeyD');
     input.update();
     expect(input.driver.shiftUp).toBe(1);
-    expect(input.actions.has('menuPrev')).toBe(true);
+    expect(input.actions.includes('menuPrev')).toBe(true);
     expect(input.driver.steerMode).toBe('keyboard');
     expect(input.driver.steer).toBe(1);
     key('keyup', 'KeyD');

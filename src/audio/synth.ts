@@ -50,13 +50,13 @@ export const cycleFrequency = (rpm: number): number => engineRpm(rpm) / 120;
 
 /** Engine loudness 0…1: louder with rpm, and on load than on overrun. */
 export function engineGain(rpm: number, throttle: number): number {
-  return (0.45 + 0.55 * rpmFraction(rpm)) * (0.4 + 0.6 * clamp01(throttle));
+  return (0.6 + 0.4 * rpmFraction(rpm)) * (0.35 + 0.65 * clamp01(throttle));
 }
 
 /** Engine lowpass cutoff, Hz: opens with rpm and much more on load; muffled on overrun. */
 export function engineCutoff(rpm: number, throttle: number): number {
   const t = clamp01(throttle);
-  return 450 + 450 * t + firingFrequency(rpm) * (2.5 + 4 * t);
+  return 700 + 500 * t + firingFrequency(rpm) * (2.5 + 4 * t);
 }
 
 /** Pre-gain into the saturator: harder on load for a harsher, more mechanical tone. */

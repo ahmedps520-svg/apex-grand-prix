@@ -1,4 +1,5 @@
 import type { PadFamily } from '../input/InputManager';
+import { VERSION_TEXT } from '../app/version';
 import { el } from './dom';
 
 interface Row {
@@ -65,7 +66,7 @@ export class HelpPanel {
   constructor(parent: HTMLElement) {
     const card = el('div', 'help-card');
     card.appendChild(el('h1', 'help-title', 'APEX GRAND PRIX'));
-    card.appendChild(el('p', 'help-sub', 'Round 2 test build — the GT car on the proving ground'));
+    card.appendChild(el('p', 'help-sub', `GT car on the proving ground · ${VERSION_TEXT}`));
     const table = el('table', 'help-table');
     const head = el('tr');
     head.append(el('th', undefined, ''), el('th', undefined, 'Keyboard'), this.padHeader);

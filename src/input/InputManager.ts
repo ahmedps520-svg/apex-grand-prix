@@ -119,7 +119,8 @@ const ACTIVITY = 0.15;
  */
 export class InputManager {
   readonly driver: DriverInput = neutralInput();
-  readonly actions = new Set<Action>();
+  /** This frame's one-shot actions, in order (a key tapped twice in one frame counts twice). */
+  readonly actions: Action[] = [];
   lastDevice: DeviceKind = 'none';
   padName = '';
   padFamily: PadFamily = 'generic';
@@ -156,8 +157,8 @@ export class InputManager {
 
   /** Call once per frame before reading `driver` / `actions`. */
   update(): void {
-    this.actions.clear();
-    for (const a of this.pendingKeyActions) this.actions.add(a);
+    this.actions.length = 0;
+    this.actions.push(...this.pendingKeyActions);
     this.pendingKeyActions.length = 0;
     const d = this.driver;
     d.shiftUp = this.pendingShiftUp;
@@ -195,12 +196,12 @@ export class InputManager {
       const prev = this.prevButtons.get(pad.index) ?? [];
       const now = pad.buttons.map((b) => b.pressed);
       const pressed = (i: number) => now[i] === true && prev[i] !== true;
-      for (const [button, action] of PAD_ACTIONS) if (pressed(button)) this.actions.add(action);
+      for (const [button, action] of PAD_ACTIONS) if (pressed(button)) this.actions.push(action);
       if (pressed(PAD.R1)) d.shiftUp++;
       if (pressed(PAD.L1)) d.shiftDown++;
       // L3 + R3 together also toggle the telemetry (for pads without a touchpad).
       if ((pressed(PAD.L3) && now[PAD.R3]) || (pressed(PAD.R3) && now[PAD.L3])) {
-        this.actions.add('telemetry');
+        this.actions.push('telemetry');
       }
       this.prevButtons.set(pad.index, now);
       if (
@@ -234,7 +235,7 @@ export class InputManager {
       last.throttle = r.throttle;
       last.brake = r.brake;
       for (const [binding, action] of WHEEL_BUTTON_ACTIONS) {
-        if (this.wheelPressed(binding, wheel, profile)) this.actions.add(action);
+        if (this.wheelPressed(binding, wheel, profile)) this.actions.push(action);
       }
       if (this.wheelPressed('shiftUp', wheel, profile)) d.shiftUp++;
       if (this.wheelPressed('shiftDown', wheel, profile)) d.shiftDown++;
