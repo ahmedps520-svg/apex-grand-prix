@@ -9,6 +9,7 @@ import {
   FLAG_HEADLIGHTS,
   FLAG_INDICATOR_LEFT,
   FLAG_INDICATOR_RIGHT,
+  FLAG_SIREN,
 } from '../shared/protocol';
 import type { CarRenderState } from './interpolate';
 import { LiveryMaterial, type LiveryLayout } from './liveryMaterial';
@@ -22,7 +23,19 @@ interface WheelView {
 }
 
 /** Materials of the static body parts; each becomes one merged mesh (one draw call). */
-type Part = 'paint' | 'glass' | 'carbon' | 'head' | 'tail' | 'indicatorL' | 'indicatorR';
+type Part =
+  | 'paint'
+  | 'glass'
+  | 'carbon'
+  | 'head'
+  | 'tail'
+  | 'indicatorL'
+  | 'indicatorR'
+  | 'strobeR'
+  | 'strobeB';
+
+/** The police light bar's strobes alternate red and blue this often, ms. */
+const STROBE_PERIOD = 440;
 
 /** Proportions of the closed-cockpit body styles. */
 const CLOSED_LOOKS: Record<
@@ -149,6 +162,8 @@ export class CarView {
     tail: [],
     indicatorL: [],
     indicatorR: [],
+    strobeR: [],
+    strobeB: [],
   };
   private readonly paint: LiveryMaterial;
   /** Lamp materials, driven by the car's lights and brakes each frame. */
@@ -157,9 +172,13 @@ export class CarView {
     tail: THREE.MeshStandardMaterial;
     left: THREE.MeshStandardMaterial;
     right: THREE.MeshStandardMaterial;
+    strobeR: THREE.MeshStandardMaterial;
+    strobeB: THREE.MeshStandardMaterial;
   };
   /** The player's car casts real headlight beams. */
   private readonly beams: THREE.SpotLight[] = [];
+  /** A police car: a light bar on the roof whose strobes run with the siren. */
+  private readonly police: boolean;
 
   /** `livery` wins over `paint`; without one the car wears the default livery in `paint`. */
   constructor(
@@ -168,7 +187,9 @@ export class CarView {
     style: CarStyle = 'gt',
     livery?: Livery,
     beams = false,
+    police = false,
   ) {
+    this.police = police;
     const mat = {
       glass: this.material(
         new THREE.MeshPhysicalMaterial({ color: 0x0d141c, roughness: 0.08, metalness: 0.3 }),
@@ -207,8 +228,29 @@ export class CarView {
           emissiveIntensity: 0.15,
         }),
       ),
+      strobeR: this.material(
+        new THREE.MeshStandardMaterial({
+          color: 0x5a0a0a,
+          emissive: 0xff2020,
+          emissiveIntensity: 0.2,
+        }),
+      ),
+      strobeB: this.material(
+        new THREE.MeshStandardMaterial({
+          color: 0x0a1a5a,
+          emissive: 0x2050ff,
+          emissiveIntensity: 0.2,
+        }),
+      ),
     };
-    this.lamps = { head: mat.head, tail: mat.tail, left: mat.indicatorL, right: mat.indicatorR };
+    this.lamps = {
+      head: mat.head,
+      tail: mat.tail,
+      left: mat.indicatorL,
+      right: mat.indicatorR,
+      strobeR: mat.strobeR,
+      strobeB: mat.strobeB,
+    };
 
     const layout = style === 'formula' ? this.buildFormula(spec) : this.buildClosed(spec, style);
     this.paint = new LiveryMaterial(layout, livery ?? { ...defaultLivery(), primary: paint });
@@ -249,6 +291,14 @@ export class CarView {
     lamps.head.emissiveIntensity = lights ? 4.5 : 1.6;
     lamps.tail.emissiveIntensity = state.brake > 0.05 ? 3.5 : lights ? 1.6 : 0.6;
     for (const beam of this.beams) beam.visible = lights;
+    if (this.police) {
+      const siren = (flags & FLAG_SIREN) !== 0;
+      const red = performance.now() % STROBE_PERIOD < STROBE_PERIOD / 2;
+      lamps.strobeR.emissiveIntensity = siren && red ? 7 : 0.2;
+      lamps.strobeB.emissiveIntensity = siren && !red ? 7 : 0.2;
+      // The headlamps wig-wag with the strobes.
+      if (siren) lamps.head.emissiveIntensity = red ? 5 : 1;
+    }
     this.root.quaternion.set(state.rot.x, state.rot.y, state.rot.z, state.rot.w);
     for (let i = 0; i < this.wheels.length; i++) {
       const view = this.wheels[i]!;
@@ -346,6 +396,14 @@ export class CarView {
       cabinTop + 0.005,
       (roofFront + roofRear) / 2,
     ]);
+    if (this.police) {
+      // The light bar: a dark base across the roof, red strobes left and blue right.
+      const barZ = (roofFront + roofRear) / 2 - 0.05;
+      const barWidth = roofWidth * 0.88;
+      this.block('carbon', barWidth, 0.05, 0.24, [0, cabinTop + 0.04, barZ]);
+      this.block('strobeR', barWidth * 0.42, 0.09, 0.2, [-barWidth * 0.24, cabinTop + 0.11, barZ]);
+      this.block('strobeB', barWidth * 0.42, 0.09, 0.2, [barWidth * 0.24, cabinTop + 0.11, barZ]);
+    }
 
     if (look.splitter) {
       this.box('carbon', body.halfWidth * 1.9, 0.04, 0.34, 0.01, [

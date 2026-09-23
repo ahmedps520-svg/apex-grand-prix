@@ -833,6 +833,17 @@ export function projectOnPiece(piece: RoadPiece, x: number, z: number): RoadProj
   };
 }
 
+/** Whether a point on the ground lies inside a lot's footprint. */
+export function insideLot(lot: Lot, x: number, z: number): boolean {
+  const c = Math.cos(lot.yaw);
+  const s = Math.sin(lot.yaw);
+  const rx = x - lot.x;
+  const rz = z - lot.z;
+  const lx = rx * c - rz * s;
+  const lz = rx * s + rz * c;
+  return Math.abs(lx) < lot.w / 2 && Math.abs(lz) < lot.d / 2;
+}
+
 /** Inside the map (with a margin the soft boundary wall uses). */
 export function insideMap(x: number, z: number, margin = 0): boolean {
   return (

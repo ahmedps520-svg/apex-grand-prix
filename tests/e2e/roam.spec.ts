@@ -19,6 +19,9 @@ test('drives into the open world from the menus', async ({ page }) => {
   await page.keyboard.press('Enter'); // Drive (focused first)
   await expect.poll(screen, { timeout: 120_000 }).toBe('');
   await expect.poll(() => page.evaluate(() => window.__apex!.mode)).toBe('roam');
+  // The wanted level is there, and hidden while the police have nothing on us.
+  await expect(page.locator('.hud-heat')).toBeAttached();
+  await expect(page.locator('.hud-heat')).toBeHidden();
 
   // Headlights and hazards on, then drive off down the avenue.
   await page.keyboard.press('l');

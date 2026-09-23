@@ -1,4 +1,4 @@
-import { trafficModel } from '../../content/city/fleet';
+import { policeModel, trafficModel } from '../../content/city/fleet';
 import {
   laneGraph,
   signalState,
@@ -15,6 +15,7 @@ import {
   FLAG_HEADLIGHTS,
   FLAG_INDICATOR_LEFT,
   FLAG_INDICATOR_RIGHT,
+  FLAG_SIREN,
   W,
   WHEEL_COUNT,
   WHEEL_STRIDE,
@@ -47,10 +48,23 @@ const HARD_BRAKE = 4.5;
 const STOP_WAIT = 0.9;
 const HAZARD_TIME = 12;
 
-interface Vehicle {
+export type VehicleMode = 'lane' | 'free' | 'block';
+
+export interface Vehicle {
   slot: number;
   spec: CarSpec;
   active: boolean;
+  /** A police car (the police module drives its modes and targets). */
+  police: boolean;
+  /** On the lanes, driving freely at a target (pursuits), or parked as a block. */
+  mode: VehicleMode;
+  /** Pursuit: follow the lanes towards the target instead of picking turns at random. */
+  chase: boolean;
+  siren: boolean;
+  heading: number;
+  targetX: number;
+  targetZ: number;
+  targetSpeed: number;
   link: LaneLink;
   s: number;
   v: number;
@@ -92,22 +106,38 @@ export class Traffic {
   private time = 0;
   private readonly playerBox = { x: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, front: 2, rear: 2 };
 
+  /** Slots in the snapshot: the traffic, then the police. */
+  readonly count: number;
+  /** Times the player has hit a car (the police count it as an offence when they see it). */
+  playerHits = 0;
+
   constructor(
-    map: CityMap,
-    readonly count: number,
+    readonly map: CityMap,
+    trafficCount: number,
+    policeCount: number,
     seed: number,
     /** Headlights on (dusk and night). */
     readonly lightsOn: boolean,
   ) {
     this.graph = laneGraph(map);
     this.rand = mulberry32(seed ^ 0x7a11c);
-    for (let slot = 0; slot < count; slot++) {
-      const model = trafficModel(slot);
+    this.count = trafficCount + policeCount;
+    for (let slot = 0; slot < this.count; slot++) {
+      const police = slot >= trafficCount;
+      const model = police ? policeModel() : trafficModel(slot);
       const spec = model.spec;
       this.vehicles.push({
         slot,
         spec,
         active: false,
+        police,
+        mode: 'lane',
+        chase: false,
+        siren: false,
+        heading: 0,
+        targetX: 0,
+        targetZ: 0,
+        targetSpeed: 0,
         link: this.graph.links[0]!,
         s: 0,
         v: 0,
@@ -148,18 +178,31 @@ export class Traffic {
       this.controlTimer = 0;
       this.placePlayer(player);
       this.respawn(px, pz);
-      for (const car of this.vehicles) if (car.active) this.decide(car, cdt, player);
+      for (const car of this.vehicles) {
+        if (car.active && car.mode === 'lane') this.decide(car, cdt, player);
+      }
     }
     for (const car of this.vehicles) {
       if (!car.active) continue;
-      car.v = Math.max(car.v + car.a * dt, 0);
-      car.s += car.v * dt;
       if (car.hazards > 0) car.hazards -= dt;
       const decay = Math.exp(-dt * 0.8);
       car.shoveX *= decay;
       car.shoveZ *= decay;
+      if (car.mode === 'block') {
+        car.v = 0;
+        car.a = 0;
+        continue;
+      }
+      if (car.mode === 'free') {
+        this.driveFree(car, dt);
+        continue;
+      }
+      car.v = Math.max(car.v + car.a * dt, 0);
+      car.s += car.v * dt;
       while (car.s >= car.link.length) {
-        const next = car.next ?? this.choose(car.link);
+        const next =
+          car.next ??
+          (car.chase ? this.towards(car.link, car.targetX, car.targetZ) : this.choose(car.link));
         if (!next) {
           car.active = false;
           break;
@@ -219,6 +262,7 @@ export class Traffic {
       out[base + C.STEER_AUTHORITY] = 0.5;
       out[base + C.FLAGS] =
         (this.lightsOn && car.active ? FLAG_HEADLIGHTS : 0) |
+        (car.siren && car.active ? FLAG_SIREN : 0) |
         (car.hazards > 0 ? FLAG_HAZARDS : 0) |
         (car.indicator < 0 ? FLAG_INDICATOR_LEFT : 0) |
         (car.indicator > 0 ? FLAG_INDICATOR_RIGHT : 0);
@@ -242,9 +286,25 @@ export class Traffic {
 
   private decide(car: Vehicle, dt: number, player: Car): void {
     const link = car.link;
-    if (!car.next) car.next = this.choose(link);
+    const chasing = car.chase;
+    if (!car.next) {
+      car.next = chasing ? this.towards(link, car.targetX, car.targetZ) : this.choose(link);
+    }
     const remaining = link.length - car.s;
-    const limit = kmh(link.speedLimit || 60) * car.pace;
+    // In a pursuit the limits mean nothing: a unit runs at least as fast as the player — unless
+    // the target is behind it, when it holds the limit and takes the next turn (or turns around).
+    this.graph.pointAt(link, car.s, point);
+    const behind =
+      chasing && (car.targetX - car.x) * point.tx + (car.targetZ - car.z) * point.tz < 0;
+    const limit = chasing
+      ? behind
+        ? kmh(link.speedLimit || 60)
+        : Math.max(
+            kmh(link.speedLimit || 60) * 2.2,
+            Math.hypot(player.vel.x, player.vel.z) * 1.15 + 5,
+            22,
+          )
+      : kmh(link.speedLimit || 60) * car.pace;
     // Slow for the next link's limit as its start nears.
     let target = limit;
     if (car.next) {
@@ -265,8 +325,9 @@ export class Traffic {
         leadSpeed = speed;
       }
     };
+    // A unit in a pursuit doesn't queue behind the traffic (the sirens clear its way).
     for (const other of this.vehicles) {
-      if (other === car || !other.active) continue;
+      if (other === car || !other.active || chasing) continue;
       if (other.link === link && other.s > car.s) {
         consider(other.s - car.s - car.front - other.rear, other.v);
       } else if (car.next && other.link === car.next) {
@@ -275,14 +336,14 @@ export class Traffic {
         consider(remaining + car.next.length + other.s - car.front - other.rear, other.v);
       }
     }
-    this.playerAhead(car, player, remaining, consider);
+    if (!chasing) this.playerAhead(car, player, remaining, consider);
 
     // The line at the end of the link: signals, stop signs, giving way, left turns.
     const stopLine = remaining - 1.5;
     const control = link.control;
     const node = link.to >= 0 ? this.graph.nodes[link.to]! : null;
     let mustStop = false;
-    if (node && link.kind === 'lane') {
+    if (node && link.kind === 'lane' && !chasing) {
       if (control === 'signal') {
         const state = signalState(node, link.axis, this.time);
         // Amber: stop unless it would take a hard brake.
@@ -383,6 +444,128 @@ export class Traffic {
     return p !== null && p.lateral < -2 && p.lateral > -12 && p.s > mine.length - reach;
   }
 
+  /**
+   * The successor that passes nearest a point (a pursuit heading for the player): the lane
+   * after each connector is measured by how close the point lies beside it, or to its end.
+   */
+  private towards(link: LaneLink, tx: number, tz: number): LaneLink | null {
+    let best: LaneLink | null = null;
+    let bestD = Infinity;
+    for (const option of link.next) {
+      const lane = option.kind === 'turn' && option.next[0] ? option.next[0] : option;
+      const pts = lane.points;
+      let d = Infinity;
+      for (let i = 0; i < pts.length / 2 - 1; i++) {
+        const ax = pts[i * 2]!;
+        const az = pts[i * 2 + 1]!;
+        const bx = pts[i * 2 + 2]!;
+        const bz = pts[i * 2 + 3]!;
+        const len = Math.hypot(bx - ax, bz - az);
+        if (len < 1e-6) continue;
+        const t = Math.min(
+          Math.max(((tx - ax) * (bx - ax) + (tz - az) * (bz - az)) / (len * len), 0),
+          1,
+        );
+        d = Math.min(d, Math.hypot(tx - (ax + (bx - ax) * t), tz - (az + (bz - az) * t)));
+      }
+      if (d < bestD) {
+        bestD = d;
+        best = option;
+      }
+    }
+    return best;
+  }
+
+  /** Free driving (pursuits): steer at the target with a limited yaw rate, chase the speed. */
+  private driveFree(car: Vehicle, dt: number): void {
+    const dx = car.targetX - car.x;
+    const dz = car.targetZ - car.z;
+    const want = Math.atan2(-dx, -dz);
+    let turn = want - car.heading;
+    while (turn > Math.PI) turn -= Math.PI * 2;
+    while (turn < -Math.PI) turn += Math.PI * 2;
+    const maxRate = Math.min(2.4, 9 / Math.max(car.v, 3));
+    const applied = Math.max(-maxRate * dt, Math.min(maxRate * dt, turn));
+    car.heading += applied;
+    // A sharp turn (turning around for a target behind) is taken slowly, so it fits the road.
+    const goal = Math.abs(turn) > 1 ? Math.min(car.targetSpeed, 9) : car.targetSpeed;
+    const accel = goal > car.v ? 3.8 : -6.5;
+    let v = car.v + accel * dt;
+    if ((accel > 0 && v > goal) || (accel < 0 && v < goal)) v = goal;
+    car.v = Math.max(v, 0);
+    car.a = accel;
+    car.brake = accel < 0 && car.v > 0.5 ? 1 : 0;
+    car.x += -Math.sin(car.heading) * car.v * dt;
+    car.z += -Math.cos(car.heading) * car.v * dt;
+    const deck = this.map.deckAt(car.x, car.z, 0.5);
+    car.y = (deck ? deck.height : this.map.groundHeight(car.x, car.z)) + car.spec.cogHeight;
+    car.yaw = car.heading;
+    const wanted = Math.max(
+      -1,
+      Math.min(1, ((applied / Math.max(dt, 1e-3)) * 2.6) / Math.max(car.v, 3)),
+    );
+    car.steer += (wanted - car.steer) * Math.min(dt * 12, 1);
+    car.spin += (car.v * dt) / car.spec.front.wheelRadius;
+    car.indicator = 0;
+  }
+
+  /** Puts a car back on the nearest lane (after driving freely), or false when none is near. */
+  attachToLane(car: Vehicle): boolean {
+    let best: { link: LaneLink; s: number; d: number } | null = null;
+    for (const link of this.graph.linksNear(car.x, car.z, 60)) {
+      if (link.kind !== 'lane') continue;
+      const p = this.projectOnLink(link, car.x, car.z);
+      if (!p) continue;
+      const d = Math.abs(p.lateral);
+      if (!best || d < best.d) best = { link, s: p.s, d };
+    }
+    if (!best) return false;
+    car.mode = 'lane';
+    car.link = best.link;
+    car.s = Math.min(best.s, best.link.length - 0.1);
+    car.next = null;
+    car.waited = 0;
+    this.pose(car, 0);
+    return true;
+  }
+
+  /** Puts a car on a random lane between `min` and `max` metres from a point. */
+  spawnNear(car: Vehicle, px: number, pz: number, min: number, max: number): boolean {
+    const nearby = this.graph
+      .linksNear(px, pz, max)
+      .filter((l) => l.kind === 'lane' && l.length > 30);
+    for (let attempt = 0; attempt < 10 && nearby.length > 0; attempt++) {
+      const link = nearby[Math.floor(this.rand() * nearby.length)]!;
+      const s = 6 + this.rand() * (link.length - 12);
+      this.graph.pointAt(link, s, point);
+      if (Math.hypot(point.x - px, point.z - pz) < min) continue;
+      if (this.vehicles.some((o) => o.active && o.link === link && Math.abs(o.s - s) < 14)) {
+        continue;
+      }
+      car.active = true;
+      car.mode = 'lane';
+      car.link = link;
+      car.s = s;
+      car.v = kmh(link.speedLimit || 40) * 0.6;
+      car.a = 0;
+      car.next = null;
+      car.hazards = 0;
+      car.waited = 0;
+      car.shoveX = 0;
+      car.shoveZ = 0;
+      car.yaw = Math.atan2(-point.tx, -point.tz);
+      car.heading = car.yaw;
+      car.steer = 0;
+      this.pose(car, 0);
+      car.prevX = car.x;
+      car.prevY = car.y;
+      car.prevZ = car.z;
+      car.prevYaw = car.yaw;
+      return true;
+    }
+    return false;
+  }
+
   private choose(link: LaneLink): LaneLink | null {
     const options = link.next;
     if (options.length === 0) return null;
@@ -422,43 +605,12 @@ export class Traffic {
   // ---------------------------------------------------------------- spawning
 
   private respawn(px: number, pz: number): void {
-    let nearby: LaneLink[] | null = null;
     for (const car of this.vehicles) {
+      // The police module places its own cars while they are working.
+      if (car.police && (car.mode !== 'lane' || car.chase)) continue;
       const d = car.active ? Math.hypot(car.x - px, car.z - pz) : Infinity;
       if (d <= DESPAWN_RADIUS) continue;
-      nearby ??= this.graph
-        .linksNear(px, pz, SPAWN_RADIUS)
-        .filter((l) => l.kind === 'lane' && l.length > 30);
-      if (nearby.length === 0) {
-        car.active = false;
-        continue;
-      }
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const link = nearby[Math.floor(this.rand() * nearby.length)]!;
-        const s = 6 + this.rand() * (link.length - 12);
-        this.graph.pointAt(link, s, point);
-        if (Math.hypot(point.x - px, point.z - pz) < SPAWN_CLEAR) continue;
-        if (this.vehicles.some((o) => o.active && o.link === link && Math.abs(o.s - s) < 14))
-          continue;
-        car.active = true;
-        car.link = link;
-        car.s = s;
-        car.v = kmh(link.speedLimit || 40) * 0.6;
-        car.a = 0;
-        car.next = null;
-        car.hazards = 0;
-        car.waited = 0;
-        car.shoveX = 0;
-        car.shoveZ = 0;
-        car.yaw = Math.atan2(-point.tx, -point.tz);
-        car.steer = 0;
-        this.pose(car, 0);
-        car.prevX = car.x;
-        car.prevY = car.y;
-        car.prevZ = car.z;
-        car.prevYaw = car.yaw;
-        break;
-      }
+      if (!this.spawnNear(car, px, pz, SPAWN_CLEAR, SPAWN_RADIUS)) car.active = false;
     }
   }
 
@@ -518,6 +670,9 @@ export class Traffic {
       car.shoveZ -= hit.nz * hit.depth * 0.5;
       car.v = Math.max(car.v - Math.abs(vn) * 0.5, 0);
       car.a = -HARD_BRAKE;
+      // A unit ramming the player in a pursuit is its own doing: no hazards, no offence.
+      if (car.police && car.mode === 'free') continue;
+      if (Math.abs(vn) > 1.5 && car.hazards <= 0) this.playerHits++;
       car.hazards = HAZARD_TIME;
     }
   }
@@ -559,7 +714,7 @@ export class Traffic {
  * reaches ahead of and behind the centre): the smallest push that separates them, as the
  * direction to move the first box, its depth and a contact point. Null when apart.
  */
-function overlap(
+export function overlap(
   ax: number,
   az: number,
   afx: number,
