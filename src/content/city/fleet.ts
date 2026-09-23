@@ -55,3 +55,8 @@ export function policeModel(): CarModel {
 }
 
 export const POLICE_PAINT = 0xf4f5f7;
+
+/** Pedestrians for a detail level (none on a phone). */
+export function pedestrianSlotsFor(chunks: number): number {
+  return chunks <= 2 ? 0 : chunks === 3 ? 60 : 100;
+}

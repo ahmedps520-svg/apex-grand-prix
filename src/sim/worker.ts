@@ -90,7 +90,7 @@ scope.onmessage = (event) => {
         session = msg.session;
         world = World.forSession(msg.session);
         world.setHandling(msg.session.handling ?? 'sim');
-        bufferBytes = snapshotBytes(world.snapshotCount);
+        bufferBytes = snapshotBytes(world.snapshotCount, world.pedestrianCount);
         pool.length = 0;
         clock.resetBaseline();
         post({ type: 'ready', carCount: world.cars.length });
