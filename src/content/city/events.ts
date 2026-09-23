@@ -47,6 +47,8 @@ export interface FestivalEvent {
   par: number;
   /** Drift zones: the road, the stretch along it, and the road's pieces (for the zone test). */
   zone?: { road: Road; s0: number; s1: number; pieces: RoadPiece[] };
+  /** Races: the road and the stretch along it the route follows (the rivals drive it). */
+  route?: { road: Road; s0: number; s1: number };
   ramp?: RampSpec;
 }
 
@@ -199,6 +201,7 @@ function build(map: CityMap): FestivalEvent[] {
     }
     if (checkpoints.length < 3) continue;
     e.checkpoints = checkpoints;
+    e.route = { road, s0: start, s1: end };
     e.length = length;
     e.par = length / pace;
     events.push(e);

@@ -1,4 +1,4 @@
-import { policeModel, trafficModel } from '../../content/city/fleet';
+import { policeModel, racerModel, trafficModel } from '../../content/city/fleet';
 import {
   laneGraph,
   signalState,
@@ -48,7 +48,7 @@ const HARD_BRAKE = 4.5;
 const STOP_WAIT = 0.9;
 const HAZARD_TIME = 12;
 
-export type VehicleMode = 'lane' | 'free' | 'block';
+export type VehicleMode = 'lane' | 'free' | 'block' | 'race';
 
 export interface Vehicle {
   slot: number;
@@ -56,7 +56,9 @@ export interface Vehicle {
   active: boolean;
   /** A police car (the police module drives its modes and targets). */
   police: boolean;
-  /** On the lanes, driving freely at a target (pursuits), or parked as a block. */
+  /** A street racer (the racers module drives it along a race's route). */
+  racer: boolean;
+  /** On the lanes, driving freely at a target (pursuits), parked as a block, or racing. */
   mode: VehicleMode;
   /** Pursuit: follow the lanes towards the target instead of picking turns at random. */
   chase: boolean;
@@ -109,7 +111,7 @@ export class Traffic {
   private time = 0;
   private readonly playerBox = { x: 0, z: 0, fx: 0, fz: 1, halfWidth: 1, front: 2, rear: 2 };
 
-  /** Slots in the snapshot: the traffic, then the police. */
+  /** Slots in the snapshot: the traffic, then the police, then the racers. */
   readonly count: number;
   /** Times the player has hit a car (the police count it as an offence when they see it). */
   playerHits = 0;
@@ -121,20 +123,27 @@ export class Traffic {
     seed: number,
     /** Headlights on (dusk and night). */
     readonly lightsOn: boolean,
+    racerCount = 0,
   ) {
     this.graph = laneGraph(map);
     this.rand = mulberry32(seed ^ 0x7a11c);
-    this.count = trafficCount + policeCount;
+    this.count = trafficCount + policeCount + racerCount;
     for (let slot = 0; slot < this.count; slot++) {
-      const police = slot >= trafficCount;
-      const model = police ? policeModel() : trafficModel(slot);
+      const police = slot >= trafficCount && slot < trafficCount + policeCount;
+      const racer = slot >= trafficCount + policeCount;
+      const model = racer
+        ? racerModel(slot - trafficCount - policeCount)
+        : police
+          ? policeModel()
+          : trafficModel(slot);
       const spec = model.spec;
       this.vehicles.push({
         slot,
         spec,
         active: false,
         police,
-        mode: 'lane',
+        racer,
+        mode: racer ? 'race' : 'lane',
         chase: false,
         siren: false,
         heading: 0,
@@ -193,6 +202,8 @@ export class Traffic {
       const decay = Math.exp(-dt * 0.8);
       car.shoveX *= decay;
       car.shoveZ *= decay;
+      // Racers are driven by the racers module along their route.
+      if (car.mode === 'race') continue;
       if (car.mode === 'block') {
         car.v = 0;
         car.a = 0;
@@ -334,7 +345,7 @@ export class Traffic {
     };
     // A unit in a pursuit doesn't queue behind the traffic (the sirens clear its way).
     for (const other of this.vehicles) {
-      if (other === car || !other.active || chasing) continue;
+      if (other === car || !other.active || chasing || other.mode === 'race') continue;
       if (other.link === link && other.s > car.s) {
         consider(other.s - car.s - car.front - other.rear, other.v);
       } else if (car.next && other.link === car.next) {
@@ -426,7 +437,7 @@ export class Traffic {
     player: Car,
   ): boolean {
     for (const other of this.vehicles) {
-      if (!other.active || other.link === mine) continue;
+      if (!other.active || other.link === mine || other.mode === 'race') continue;
       if (other.link.road === mine.road && other.link.kind === 'lane') continue;
       if (!node.ins.includes(other.link) && other.link.from !== mine.to) continue;
       if (other.link.kind === 'lane' && node.ins.includes(other.link)) {
@@ -444,6 +455,7 @@ export class Traffic {
   private oncoming(node: { ins: LaneLink[] }, mine: LaneLink, reach: number, player: Car): boolean {
     for (const other of this.vehicles) {
       if (!other.active || other.link === mine || other.link.kind !== 'lane') continue;
+      if (other.mode === 'race') continue;
       if (other.link.road !== mine.road || !node.ins.includes(other.link)) continue;
       if (other.link.length - other.s < reach && other.v > 1) return true;
     }
@@ -546,7 +558,11 @@ export class Traffic {
       const s = 6 + this.rand() * (link.length - 12);
       this.graph.pointAt(link, s, point);
       if (Math.hypot(point.x - px, point.z - pz) < min) continue;
-      if (this.vehicles.some((o) => o.active && o.link === link && Math.abs(o.s - s) < 14)) {
+      if (
+        this.vehicles.some(
+          (o) => o.active && o.mode !== 'race' && o.link === link && Math.abs(o.s - s) < 14,
+        )
+      ) {
         continue;
       }
       car.active = true;
@@ -615,8 +631,9 @@ export class Traffic {
 
   private respawn(px: number, pz: number): void {
     for (const car of this.vehicles) {
-      // The police module places its own cars while they are working.
-      if (car.police && (car.mode !== 'lane' || car.chase)) continue;
+      // The police module places its own cars while they are working; the racers are placed
+      // by the racers module only.
+      if (car.racer || (car.police && (car.mode !== 'lane' || car.chase))) continue;
       const d = car.active ? Math.hypot(car.x - px, car.z - pz) : Infinity;
       if (d <= DESPAWN_RADIUS) continue;
       if (!this.spawnNear(car, px, pz, SPAWN_CLEAR, SPAWN_RADIUS)) car.active = false;
@@ -677,13 +694,18 @@ export class Traffic {
       player.applyImpulse(point, { x: hit.nx * impulse, y: 0, z: hit.nz * impulse });
       car.shoveX -= hit.nx * hit.depth * 0.5;
       car.shoveZ -= hit.nz * hit.depth * 0.5;
-      car.v = Math.max(car.v - Math.abs(vn) * 0.5, 0);
-      car.a = -HARD_BRAKE;
       // The simple damage: a dent at whichever end was hit, by the closing speed.
       const along = (hit.x - car.x) * fx + (hit.z - car.z) * fz;
       const dent = Math.min(Math.abs(vn) / 10, 0.6);
       if (along >= 0) car.dentFront = Math.min(car.dentFront + dent, 1);
       else car.dentRear = Math.min(car.dentRear + dent, 1);
+      // A racer is knocked about but races on: rubbing is racing, and no offence.
+      if (car.mode === 'race') {
+        car.v = Math.max(car.v - Math.abs(vn) * 0.25, 0);
+        continue;
+      }
+      car.v = Math.max(car.v - Math.abs(vn) * 0.5, 0);
+      car.a = -HARD_BRAKE;
       // A unit ramming the player in a pursuit is its own doing: no hazards, no offence.
       if (car.police && car.mode === 'free') continue;
       if (Math.abs(vn) > 1.5 && car.hazards <= 0) this.playerHits++;

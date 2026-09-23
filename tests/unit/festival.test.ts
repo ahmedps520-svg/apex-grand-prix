@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Festival, formatTime, medalFor } from '../../src/app/Festival';
+import type { RoamRaceStatus } from '../../src/shared/protocol';
 import { festivalEvents, rampOf } from '../../src/content/city/events';
 import { cityMap } from '../../src/content/city/map';
 import { createCarRenderState, type CarRenderState } from '../../src/render/interpolate';
@@ -44,39 +45,98 @@ describe('festival events', () => {
 });
 
 describe("the festival's rules", () => {
-  it('times a race through its checkpoints and awards a medal', () => {
+  it("runs a race from the sim's countdown through its checkpoints to its flag", () => {
     const race = events.find((e) => e.id === 'race-avenue')!;
-    const fest = new Festival(events, {});
+    let ended = 0;
+    const fest = new Festival(events, {}, undefined, () => ended++);
     const p = car();
-    p.speed = 20;
-    p.vel.x = race.tx * 20;
-    p.vel.z = race.tz * 20;
     p.pos.y = race.y;
-    // Approach the start line from behind and cross it.
-    p.pos.x = race.x - race.tx * 10;
-    p.pos.z = race.z - race.tz * 10;
-    fest.update(0.05, 0, p);
     p.pos.x = race.x + race.tx * 5;
     p.pos.z = race.z + race.tz * 5;
-    fest.update(0.05, 0.05, p);
+    // The sim has the car on the grid, counting down.
+    const status: RoamRaceStatus = {
+      id: race.id,
+      phase: 'countdown',
+      countdown: 2.4,
+      time: 0,
+      count: 4,
+      position: 4,
+      progress: 5,
+      finished: -1,
+      rivals: [],
+    };
+    fest.update(0.05, p, status);
     expect(fest.view.active?.kind).toBe('race');
-    let t = 0.05;
+    expect(fest.view.active?.countdown).toBe(true);
+    expect(fest.view.active?.line).toBe('3');
+    expect(fest.view.active?.detail).toContain('3 rivals');
+    // Racing: through the checkpoints in second place.
+    status.phase = 'racing';
+    status.countdown = 0;
+    status.position = 2;
+    let t = 0;
     for (let i = 1; i < race.checkpoints.length; i++) {
       const cp = race.checkpoints[i]!;
       t += 5;
+      status.time = t;
+      p.speed = 20;
       p.pos.x = cp.x;
       p.pos.z = cp.z;
       p.pos.y = cp.y;
-      fest.update(0.05, t, p);
+      fest.update(0.05, p, status);
     }
+    expect(fest.view.active?.kind).toBe('race');
+    expect(fest.view.active?.line).toContain('P2');
+    expect(fest.view.active?.line).toContain(formatTime(t));
+    expect(fest.nextCheckpoint()).toEqual(race.checkpoints.at(-1));
+    // The flag (and the position) come from the sim.
+    status.finished = t;
+    status.position = 1;
+    fest.update(0.05, p, status);
     expect(fest.view.active).toBeNull();
     const notice = fest.notices.at(-1)!;
     expect(notice.event.id).toBe('race-avenue');
     expect(notice.best).toBe(true);
-    const time = fest.records['race-avenue']!;
-    expect(time).toBeCloseTo(t - 0.05, 1);
-    expect(notice.medal).toBe(medalFor(race, time));
-    expect(notice.text).toContain(formatTime(time));
+    expect(notice.position).toBe(1);
+    expect(notice.text).toContain('P1 of 4');
+    expect(notice.text).toContain(formatTime(t));
+    expect(fest.records['race-avenue']).toBe(t);
+    expect(notice.medal).toBe(medalFor(race, t));
+    // The same finished status doesn't start it again.
+    fest.update(0.05, p, status);
+    fest.update(0.05, p, status);
+    expect(fest.notices.length).toBe(1);
+    expect(ended).toBe(0);
+  });
+
+  it('abandons a race when the car stops, and tells the sim', () => {
+    const race = events.find((e) => e.id === 'race-avenue')!;
+    let ended = 0;
+    const fest = new Festival(events, {}, undefined, () => ended++);
+    const p = car();
+    p.pos.y = race.y;
+    p.pos.x = race.x + race.tx * 5;
+    p.pos.z = race.z + race.tz * 5;
+    const status: RoamRaceStatus = {
+      id: race.id,
+      phase: 'racing',
+      countdown: 0,
+      time: 1,
+      count: 4,
+      position: 4,
+      progress: 5,
+      finished: -1,
+      rivals: [],
+    };
+    fest.update(0.05, p, status);
+    expect(fest.view.active?.kind).toBe('race');
+    for (let i = 0; i < 30; i++) fest.update(1, p, status);
+    expect(fest.view.active).toBeNull();
+    expect(fest.notices.at(-1)!.text).toContain('abandoned');
+    expect(ended).toBe(1);
+    // The sim still says racing for a moment: it isn't picked up again.
+    fest.update(0.05, p, status);
+    expect(fest.view.active).toBeNull();
   });
 
   it('registers the speed at a camera when its line is crossed', () => {
@@ -87,14 +147,14 @@ describe("the festival's rules", () => {
     p.pos.y = cam.y;
     p.pos.x = cam.x - cam.tx * 8;
     p.pos.z = cam.z - cam.tz * 8;
-    fest.update(0.05, 0, p);
+    fest.update(0.05, p);
     p.pos.x = cam.x + cam.tx * 8;
     p.pos.z = cam.z + cam.tz * 8;
-    fest.update(0.05, 0.05, p);
+    fest.update(0.05, p);
     expect(fest.records['cam-avenue']).toBeCloseTo(144, 0);
     expect(fest.notices[0]!.text).toContain('144 km/h');
     // Sitting on the line doesn't fire again.
-    fest.update(0.05, 0.1, p);
+    fest.update(0.05, p);
     expect(fest.notices.length).toBe(1);
   });
 
@@ -109,11 +169,10 @@ describe("the festival's rules", () => {
     p.speed = 20;
     p.wheels[2]!.slipAngle = 0.3;
     p.wheels[3]!.slipAngle = 0.3;
-    let t = 0;
-    for (let i = 0; i < 40; i++) fest.update(0.05, (t += 0.05), p);
+    for (let i = 0; i < 40; i++) fest.update(0.05, p);
     expect(fest.view.active?.kind).toBe('drift');
     p.pos.x += 600;
-    for (let i = 0; i < 40; i++) fest.update(0.05, (t += 0.05), p);
+    for (let i = 0; i < 40; i++) fest.update(0.05, p);
     expect(fest.view.active).toBeNull();
     expect(fest.records[zone.id]).toBeGreaterThan(100);
     expect(fest.notices.at(-1)!.text).toContain('Drift zone');
@@ -128,7 +187,7 @@ describe("the festival's rules", () => {
     // On the ramp, then in the air past the lip, then down 20 m beyond it.
     p.pos.x = jump.x + jump.tx * 6;
     p.pos.z = jump.z + jump.tz * 6;
-    fest.update(0.05, 0, p);
+    fest.update(0.05, p);
     expect(fest.view.active?.kind).toBe('jump');
     for (const w of p.wheels) w.contact = false;
     const lipX = jump.x + jump.tx * jump.ramp!.length;
@@ -136,10 +195,10 @@ describe("the festival's rules", () => {
     for (let i = 1; i <= 12; i++) {
       p.pos.x = lipX + (jump.tx * (20 * i)) / 12;
       p.pos.z = lipZ + (jump.tz * (20 * i)) / 12;
-      fest.update(0.05, i * 0.05, p);
+      fest.update(0.05, p);
     }
     for (const w of p.wheels) w.contact = true;
-    fest.update(0.05, 0.7, p);
+    fest.update(0.05, p);
     expect(fest.records[jump.id]).toBeCloseTo(20, 0);
     expect(fest.notices.at(-1)!.text).toContain('Jump');
   });

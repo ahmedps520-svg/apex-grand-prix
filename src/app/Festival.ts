@@ -1,11 +1,14 @@
 import { MEDALS, type EventKind, type FestivalEvent } from '../content/city/events';
 import type { CarRenderState } from '../render/interpolate';
+import type { RoamRaceStatus } from '../shared/protocol';
 
 /**
- * The festival's rules, on the main thread from the render states and the simulation clock:
- * speed cameras register a crossing, drift zones tally a drift while you are in them, jumps
- * measure the flight from the ramp's lip, and races time you through their checkpoints against
- * the clock, with medals. Best results go to `save`.
+ * The festival's rules, on the main thread from the render states: speed cameras register a
+ * crossing, drift zones tally a drift while you are in them, jumps measure the flight from the
+ * ramp's lip, and races run you through their checkpoints against rivals and the clock, with
+ * medals. The simulation forms a race's grid, counts down, drives the rivals and keeps the
+ * time and the positions (its status comes in with each update); this keeps the checkpoints,
+ * the abandonment, the notices and the records. Best results go to `save`.
  */
 
 export type Medal = 'gold' | 'silver' | 'bronze' | null;
@@ -13,15 +16,23 @@ export type Medal = 'gold' | 'silver' | 'bronze' | null;
 export interface FestivalNotice {
   event: FestivalEvent;
   text: string;
-  /** A finished race's medal, when it is one. */
+  /** A finished race's medal, when it is one, and the finishing position. */
   medal?: Medal;
+  position?: number;
   /** A new best. */
   best: boolean;
 }
 
 /** What the HUD shows: the event under way, or the nearest one to head for. */
 export interface FestivalView {
-  active: { kind: EventKind; name: string; line: string; detail: string } | null;
+  active: {
+    kind: EventKind;
+    name: string;
+    line: string;
+    detail: string;
+    /** A race's countdown is showing. */
+    countdown?: boolean;
+  } | null;
   hint: { kind: EventKind; name: string; distance: number } | null;
 }
 
@@ -33,9 +44,11 @@ type Active =
       kind: 'race';
       event: FestivalEvent;
       next: number;
-      startedAt: number;
       time: number;
       idle: number;
+      position: number;
+      count: number;
+      countdown: number;
     }
   | { kind: 'drift'; event: FestivalEvent; points: number; out: number }
   | {
@@ -63,11 +76,15 @@ export class Festival {
   private prevX = 0;
   private prevZ = 0;
   private started = false;
+  /** A race the sim still reports after this finished or abandoned it (until it is reset). */
+  private ignoreId = '';
 
   constructor(
     readonly events: readonly FestivalEvent[],
     readonly records: FestivalRecords,
     private readonly save: (id: string, value: number) => void = () => undefined,
+    /** Tells the simulation the race under way is off (its rivals stand down). */
+    private readonly endRace: () => void = () => undefined,
   ) {}
 
   /** Whether a lower result is better for an event (races), or a higher one. */
@@ -91,13 +108,17 @@ export class Festival {
 
   /** Forgets the event under way (a reset or a fast travel). */
   abandon(): void {
-    if (this.active?.kind === 'race') this.notice(this.active.event, 'Race abandoned.', false);
+    if (this.active?.kind === 'race') {
+      this.ignoreId = this.active.event.id;
+      this.notice(this.active.event, 'Race abandoned.', false);
+      this.endRace();
+    }
     this.active = null;
     this.started = false;
     this.prevAlong.clear();
   }
 
-  update(dt: number, simTime: number, player: CarRenderState): void {
+  update(dt: number, player: CarRenderState, race: RoamRaceStatus | null = null): void {
     const x = player.pos.x;
     const z = player.pos.z;
     if (!this.started) {
@@ -106,28 +127,39 @@ export class Festival {
       this.prevZ = z;
     }
     const speed = Math.abs(player.speed);
-    const active = this.active;
-    if (active) this.updateActive(active, dt, simTime, player);
-    // Lines: cameras always; a race's start line when nothing is under way.
-    for (const event of this.events) {
-      if (event.kind === 'camera') {
-        if (this.crossed(event, x, z, player.pos.y)) {
-          const kmh = speed * 3.6;
-          const best = this.record(event, kmh);
-          this.notice(event, `Speed trap · ${event.name}: ${Math.round(kmh)} km/h`, best);
-        }
-      } else if (event.kind === 'race' && !this.active) {
-        const forward = player.vel.x * event.tx + player.vel.z * event.tz > 0;
-        if (speed > 2 && forward && this.crossed(event, x, z, player.pos.y)) {
+    // A race starts in the simulation (the grid, the countdown): follow it.
+    if (!race || race.phase === 'grid' || race.phase === 'countdown') this.ignoreId = '';
+    if (
+      race &&
+      (race.phase === 'countdown' || race.phase === 'racing') &&
+      race.finished < 0 &&
+      race.id !== this.ignoreId
+    ) {
+      const a = this.active;
+      if (a?.kind !== 'race' || a.event.id !== race.id) {
+        const event = this.events.find((e) => e.id === race.id);
+        if (event) {
           this.active = {
             kind: 'race',
             event,
             next: 1,
-            startedAt: simTime,
             time: 0,
             idle: 0,
+            position: race.position,
+            count: race.count,
+            countdown: race.countdown,
           };
         }
+      }
+    }
+    const active = this.active;
+    if (active) this.updateActive(active, dt, player, race);
+    // Lines: the cameras register a crossing.
+    for (const event of this.events) {
+      if (event.kind === 'camera' && this.crossed(event, x, z, player.pos.y)) {
+        const kmh = speed * 3.6;
+        const best = this.record(event, kmh);
+        this.notice(event, `Speed trap · ${event.name}: ${Math.round(kmh)} km/h`, best);
       }
     }
     // Drift zones and jumps start by being there.
@@ -162,33 +194,55 @@ export class Festival {
     return value === undefined ? null : Festival.format(event.kind, value);
   }
 
-  private updateActive(a: Active, dt: number, simTime: number, player: CarRenderState): void {
+  private updateActive(
+    a: Active,
+    dt: number,
+    player: CarRenderState,
+    race: RoamRaceStatus | null,
+  ): void {
     const x = player.pos.x;
     const z = player.pos.z;
     const speed = Math.abs(player.speed);
     if (a.kind === 'race') {
-      a.time = simTime - a.startedAt;
+      // The simulation dropped it (a reset, a fast travel): so does this.
+      if (!race || race.id !== a.event.id || race.phase === 'grid') {
+        this.active = null;
+        return;
+      }
+      a.position = race.position;
+      a.count = race.count;
+      a.countdown = race.phase === 'countdown' ? race.countdown : 0;
+      a.time = race.time;
+      if (race.phase === 'countdown') return;
+      if (race.finished >= 0) {
+        // Over the line: the time and the position come from the simulation.
+        this.active = null;
+        this.ignoreId = race.id;
+        const time = race.finished;
+        const best = this.record(a.event, time);
+        const medal = medalFor(a.event, time);
+        this.notice(
+          a.event,
+          `${a.event.name}: P${race.position} of ${race.count} · ${formatTime(time)}${medal ? ` · ${medal.toUpperCase()}` : ''}`,
+          best,
+          medal,
+          race.position,
+        );
+        return;
+      }
       const cp = a.event.checkpoints[a.next]!;
       const d = Math.hypot(cp.x - x, cp.z - z);
       a.idle = speed < 1 ? a.idle + dt : 0;
       if (d > RACE_LOST || a.idle > RACE_IDLE) {
         this.active = null;
+        this.ignoreId = race.id;
         this.notice(a.event, 'Race abandoned.', false);
+        this.endRace();
         return;
       }
+      // Through a checkpoint: the next one (the finish line stays until the sim calls it).
       if (d < cp.radius && Math.abs(cp.y - player.pos.y) < 6) {
-        a.next++;
-        if (a.next >= a.event.checkpoints.length) {
-          this.active = null;
-          const best = this.record(a.event, a.time);
-          const medal = medalFor(a.event, a.time);
-          this.notice(
-            a.event,
-            `${a.event.name}: ${formatTime(a.time)}${medal ? ` · ${medal.toUpperCase()}` : ''}`,
-            best,
-            medal,
-          );
-        }
+        a.next = Math.min(a.next + 1, a.event.checkpoints.length - 1);
       }
       return;
     }
@@ -245,12 +299,25 @@ export class Festival {
       view.hint = null;
       if (a.kind === 'race') {
         const cp = a.event.checkpoints[a.next]!;
-        view.active = {
-          kind: 'race',
-          name: a.event.name,
-          line: formatTime(a.time),
-          detail: `Checkpoint ${a.next} / ${a.event.checkpoints.length - 1} · ${Math.round(Math.hypot(cp.x - x, cp.z - z))} m`,
-        };
+        const rivals = a.count - 1;
+        view.active =
+          a.countdown > 0
+            ? {
+                kind: 'race',
+                name: a.event.name,
+                line: String(Math.ceil(a.countdown)),
+                detail: `Standing start · ${rivals} rival${rivals === 1 ? '' : 's'}`,
+                countdown: true,
+              }
+            : {
+                kind: 'race',
+                name: a.event.name,
+                line: `P${a.position} · ${formatTime(a.time)}`,
+                detail:
+                  a.time < 1.5
+                    ? 'GO!'
+                    : `Checkpoint ${a.next} / ${a.event.checkpoints.length - 1} · ${Math.round(Math.hypot(cp.x - x, cp.z - z))} m`,
+              };
       } else if (a.kind === 'drift') {
         view.active = {
           kind: 'drift',
@@ -338,8 +405,20 @@ export class Festival {
     return better;
   }
 
-  private notice(event: FestivalEvent, text: string, best: boolean, medal: Medal = null): void {
-    this.notices.push({ event, text: best ? `${text} · new best!` : text, best, medal });
+  private notice(
+    event: FestivalEvent,
+    text: string,
+    best: boolean,
+    medal: Medal = null,
+    position?: number,
+  ): void {
+    this.notices.push({
+      event,
+      text: best ? `${text} · new best!` : text,
+      best,
+      medal,
+      position,
+    });
   }
 }
 

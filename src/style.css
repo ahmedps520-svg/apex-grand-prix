@@ -1332,6 +1332,11 @@ body.fatal #loading-text {
   color: var(--muted);
 }
 
+.fest.countdown .fest-line {
+  font-size: 48px;
+  color: #ff3b2f;
+}
+
 .fest-detail {
   font: 600 11px var(--font);
   letter-spacing: 0.06em;
