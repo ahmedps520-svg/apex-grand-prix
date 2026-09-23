@@ -1,6 +1,6 @@
 # APEX GRAND PRIX: Master Plan
 
-> **Status:** Round 0 (planning only, no game code yet).
+> **Status:** Round 1 (Foundations) built and in review. See the progress log (§10).
 > This plan changes as we go. I update it at the end of every round with status, decisions and what we learned.
 
 **TL;DR**
@@ -12,18 +12,20 @@
 
 ## 0. Starting point
 
-The repository `ahmedps520-svg/apex-grand-prix` is **empty**: no commits, no branches, no files. This `PLAN.md` is the first commit. The repo is public. Its default branch is set to `main`, but `main` doesn't exist yet. GitHub Pages is not enabled. Work happens on the branch `claude/eloquent-hypatia-2dn5u6`.
+At the start of Round 0 the repository `ahmedps520-svg/apex-grand-prix` was **empty**: no commits, no branches, no files. `PLAN.md` was the first commit. Now:
+- `main` holds the released game and deploys to GitHub Pages: `https://ahmedps520-svg.github.io/apex-grand-prix/`.
+- Each round is built on `claude/eloquent-hypatia-2dn5u6` and merged into `main` through one pull request.
 
 ---
 
 ## 1. How we work
 
-**The round loop**
-1. I start each round by applying your feedback from the last one: bugs first, then handling feel, then priorities.
+**The round loop** (agreed after Round 0)
+1. **Start of round:** I post a short plan for the round (what I'll build and the acceptance checks), then build it without waiting. I apply your feedback from the last round first: bugs, then handling feel, then priorities.
 2. I build only that round's scope and keep everything from earlier rounds working.
-3. I run the automated checks, deploy the build and update this plan.
-4. You get a short round report: what changed, a numbered test checklist for PC and iPad, benchmark numbers and known issues.
-5. You test and reply. The next round starts only after you say go. If a round turns out bigger than expected, I split it instead of cutting corners.
+3. I open **one pull request per round** into `main`. CI runs the automated checks on it. Once they pass, I merge it myself, and `main` deploys to GitHub Pages automatically.
+4. **End of round:** I post what works, what's broken or rough, the deployed link and the test checklist.
+5. You test and reply with bugs before the next round. If a round turns out bigger than expected, I split it instead of cutting corners.
 
 **Definition of done (every round)**
 - All of the round's acceptance checks pass. Automated checks run in CI; you do the manual ones.
@@ -656,7 +658,7 @@ Dynamic resolution uses the GPU's own frame timings when the browser provides th
   - Pedals and buttons.
   - A layout editor for size, position and transparency.
 - iPad: the HUD avoids the rounded corners and home indicator. A "rotate to landscape" overlay, a guide to installing the PWA, a polished update prompt, automatic graphics preset on first launch and a 30 fps battery-saver mode.
-- Steering wheel setup wizard: steering, throttle, brake and clutch axes, combined or separate pedals, rotation angle and soft lock, linearity and dead zones. Saved profiles per wheel.
+- Steering wheel setup wizard (tested against a Logitech G29/G923-class wheel): steering, throttle, brake and clutch axes, combined or separate pedals, rotation angle and soft lock, linearity and dead zones. Saved profiles per wheel.
 - Experimental WebHID force feedback for one wheel family, only if you own one.
 - A check that every action can be rebound.
 
@@ -672,7 +674,7 @@ Dynamic resolution uses the GPU's own frame timings when the browser provides th
 All modes, weather and AI work on all three. Checks are the same as Round 12.
 
 ### Round 22: Audio II, HUD customisation and accessibility
-- Pit radio calls out gaps, flags and strategy, with subtitles; the voice depends on your answer to question 5. Crowd reactions, better impact and scrape sounds, and menu music.
+- Pit radio calls out gaps, flags and strategy as text messages with a synthesised radio beep (decision 5). Crowd reactions, better impact and scrape sounds, and menu music generated in code.
 - HUD editor: move, resize and hide elements, with presets.
 - Accessibility:
   - Colour-blind modes for flags, sectors, UI and the racing line, using shapes and patterns as well as colour.
@@ -725,18 +727,44 @@ All modes, weather and AI work on all three. Checks are the same as Round 12.
 
 ---
 
-## 9. Open questions for you
+## 9. Decisions (your answers after Round 0)
 
-1. **Test devices.** Which iPad model and iPadOS version do you have? Which controllers will you use (Xbox or PlayStation, and which generation)? What's your PC's GPU and your monitor's refresh rate? Do you own a steering wheel, and if so which model?
-2. **Workflow and deployment.** May I create `main` from this commit and open one pull request per round? Pages would then deploy from `main` after you merge. You'd switch Pages on once: Settings → Pages → Source: GitHub Actions. The game would then be at `https://ahmedps520-svg.github.io/apex-grand-prix/`. The alternative is deploying straight from my working branch.
-3. **Handling reference.** Which game should the default feel be closest to: Gran Turismo 7, F1 25, Assetto Corsa or Forza Motorsport? My default: simulation physics with assists on.
-4. **Art direction.** Are you happy with cars and tracks generated in code, plus CC0 textures and skies, for a slightly stylised realistic look? Or do you plan to provide car models (glTF)?
-5. **Audio.** Are synthesised engine sounds OK? For music: none, generated or CC0 tracks? For the pit radio voice: text with radio beeps, the browser's built-in voice (robotic, and can't be given a radio effect), or pre-recorded clips?
-6. **Online.** Is local-only OK: no online leaderboards and no online multiplayer?
-7. **iPad without a controller.** Will you always test the iPad with a controller? If not, I'll move basic touch controls to Round 3.
-8. **Roster and round count.** Is it OK to reach 5 cars per class through variants of each class's base design? Are 24 rounds OK, or would you prefer fewer, bigger rounds?
-9. **Language and units.** English-only UI, with all text kept in one place for later translation? Metric units by default?
+You agreed with all the push-backs in §2: no real-time ray tracing, path tracing only in photo mode, no rumble on iPad, wheel force feedback as a stretch goal, stylised art generated in code.
+
+1. **Test devices.** A recent iPad on the latest iPadOS, played with a **PlayStation DualSense** on both PC and iPad. A **steering wheel on PC** (Logitech G29/G923 class), so Round 20 includes an axis and pedal calibration wizard for it. The PC has a 144 Hz+ monitor; the GPU is unknown, so the game auto-detects and scales quality.
+2. **Workflow.** `main` created. One PR per round; I merge it myself once its checks pass, so `main` always deploys. You switch GitHub Pages to "GitHub Actions".
+3. **Handling reference.** F1 25 style: realistic, but fun and controllable on a DualSense.
+4. **Art.** Cars and tracks generated in code, plus CC0 textures.
+5. **Audio.** Engine sounds, music and radio all generated in code. The radio is text messages with a synthesised beep.
+6. **Online.** Local-only.
+7. **Touch.** You test the iPad with the DualSense, but touch controls must still exist before the end (Round 20).
+8. **Roster and rounds.** Variants are OK. 24 rounds, kept small and solid.
+9. **Language and units.** English only. Metric by default, with an imperial toggle.
 
 ---
 
 *Not planned unless you ask for it: online multiplayer, VR, layouts for phones, Android-specific work, licensed real-world content.*
+
+---
+
+## 10. Progress log
+
+### Round 1: Foundations
+- **Built:**
+  - Vite + TypeScript + three.js r186 project, with lint, formatting, unit and browser tests.
+  - GitHub Actions: CI on every PR, and a GitHub Pages deploy whenever `main` changes.
+  - An installable PWA with offline play and an update prompt.
+  - WebGPU rendering with automatic WebGL2 fallback.
+  - The 400 Hz physics worker, with smooth blending between steps on the main thread.
+  - The test car: rigid body, raycast suspension, Magic Formula tyres, engine with auto gearbox, ABS and traction control.
+  - The proving ground, with a painted loop and knock-over cones.
+  - A chase camera, keyboard and DualSense/Xbox controls, HUD, performance overlay and help card.
+- **Measured (Node physics bench):**
+  - 0–100 km/h in 3.15 s; top speed about 290 km/h; 200→0 km/h in 87 m.
+  - 1.4–1.6 g steady cornering; stable at the limit.
+  - About 6 µs per physics step.
+- **Learned:**
+  - three.js r186 always sets a texture-view `swizzle` option. Some Chromium builds implement an older draft of that option and throw, which gives a black screen. A small build-time patch (`tools/vite-plugin-three-compat.ts`) removes it, and the build fails if the patch ever stops applying.
+  - Headless Chromium's software WebGPU loses its device right after start-up, even on a bare three.js page. That's a quirk of the test environment, but it showed the game needs to handle device loss. It now falls back to WebGL2 automatically if WebGPU dies in the first 15 s, and otherwise shows a Reload button.
+  - ABS and traction control must be slip *controllers* that model the wheel's effective inertia. Simple torque limits either lock the wheels or strangle launches.
+  - The service worker must ignore `Vary` headers when matching cached files, otherwise offline play fails.

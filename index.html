@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>APEX GRAND PRIX</title>
+    <meta name="description" content="APEX GRAND PRIX — a browser racing game." />
+    <meta name="theme-color" content="#0b0d12" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Apex GP" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="ui"></div>
+    <div id="loading">
+      <div class="loading-card">
+        <div class="logo">APEX <span>GRAND PRIX</span></div>
+        <div class="loading-bar"><span></span></div>
+        <p id="loading-text">Loading…</p>
+      </div>
+    </div>
+    <noscript>APEX GRAND PRIX needs JavaScript.</noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
