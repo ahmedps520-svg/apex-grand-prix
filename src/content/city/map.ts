@@ -170,7 +170,8 @@ export class CityMap {
     this.buildLots(rand);
     this.spawns = {
       downtown: { x: 5.4, z: 380, yaw: 0 },
-      highway: { x: -100, z: -RING_HALF - 7, yaw: yawFor(1, 0), y: DECK_HEIGHT },
+      // The inner (clockwise) carriageway of the north side, heading east.
+      highway: { x: -100, z: -RING_HALF + 6.65, yaw: yawFor(1, 0), y: DECK_HEIGHT },
       suburbs: { x: -830, z: -2.2, yaw: yawFor(-1, 0) },
       port: { x: 830, z: 5.4, yaw: yawFor(1, 0) },
       mountain: { x: 2.2, z: -740, yaw: 0 },
@@ -393,6 +394,8 @@ export class CityMap {
         });
       }
     }
+    // Where the central avenue becomes the mountain road, and the circuit's access road.
+    this.junctions.push({ x: 0, z: -720, control: 'none' }, { x: 0, z: 780, control: 'none' });
   }
 
   /** The elevated orbital: a clockwise rounded rectangle, with a diamond interchange per side. */
@@ -439,9 +442,9 @@ export class CityMap {
       elevated: true,
     });
 
-    // Interchanges: (u along the clockwise deck, n outward). The outer carriageway runs
-    // clockwise; each ramp leaves or joins its carriageway and meets the crossing avenue at a
-    // T-junction 60 m out from the deck's centre line.
+    // Interchanges: (u along the clockwise deck, n outward). Each ramp leaves or joins its
+    // carriageway and meets the crossing avenue at a T-junction 60 m out from the deck's
+    // centre line.
     const frames: Array<{
       ox: number;
       oz: number;
@@ -491,12 +494,13 @@ export class CityMap {
           control: 'yield',
         });
       };
-      // Outer carriageway (clockwise, +u): off-ramp before the crossing, on-ramp after it.
-      ramp(-1, 1, true, 'Orbital exit');
-      ramp(1, 1, false, 'Orbital entry');
-      // Inner carriageway (anticlockwise, −u).
-      ramp(1, -1, true, 'Orbital exit');
-      ramp(-1, -1, false, 'Orbital entry');
+      // Right-hand traffic keeps to the inside of a clockwise ring: the inner carriageway runs
+      // clockwise (+u) with its off-ramp before the crossing and its on-ramp after it; the
+      // outer carriageway runs anticlockwise (−u).
+      ramp(-1, -1, true, 'Orbital exit');
+      ramp(1, -1, false, 'Orbital entry');
+      ramp(1, 1, true, 'Orbital exit');
+      ramp(-1, 1, false, 'Orbital entry');
     }
   }
 

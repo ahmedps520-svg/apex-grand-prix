@@ -33,6 +33,7 @@ import {
   WATER_Y,
   districtAt,
 } from '../content/city/terrain';
+import { signalState } from '../content/city/lanes';
 import { DEFAULT_CONDITIONS, type Conditions } from '../content/conditions';
 import { mulberry32 } from '../shared/math';
 import type { TrackTheme } from '../sim/track/Track';
@@ -148,6 +149,16 @@ export class CityScene {
   };
   private current: Conditions;
   private look: SceneLook;
+  /** Signal lamps (red, amber, green) at every signalled junction, lit by the sim time. */
+  private readonly signalLamps: THREE.InstancedMesh[] = [];
+  private readonly signalHeads: Array<{
+    x: number;
+    y: number;
+    z: number;
+    axis: 0 | 1;
+    node: { x: number; z: number };
+  }> = [];
+  private simTime = 0;
   private renderer: THREE.WebGPURenderer | null = null;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envTarget: THREE.RenderTarget | null = null;
@@ -185,6 +196,7 @@ export class CityScene {
     this.geo = this.buildGeometries();
     this.buildSkyline();
     this.buildWater();
+    this.buildSignals();
     this.scene.add(this.rain.mesh);
     this.disposables.push(this.atmosphere, this.rain);
     this.applyLook();
@@ -215,9 +227,15 @@ export class CityScene {
     this.sky.position.set(target.x, 0, target.z);
   }
 
-  /** Per frame: streams chunks around the followed point and moves the rain. */
+  /** The simulation's clock, which the signals run on (the same one the traffic obeys). */
+  setTime(time: number): void {
+    this.simTime = time;
+  }
+
+  /** Per frame: streams chunks around the followed point, lights the signals, moves the rain. */
   update(dt: number, camera: THREE.Camera): void {
     this.stream();
+    this.updateSignals();
     this.rain.update(dt, camera);
   }
 
@@ -425,6 +443,63 @@ export class CityScene {
     );
     const mesh = this.instances(this.geo.box, this.mat.building, lots);
     if (mesh) this.scene.add(mesh);
+  }
+
+  /**
+   * A lamp head on each of a signalled junction's four poles: the far right-hand corner of an
+   * approach shows that approach's signal (the corners on one diagonal serve the x axis, the
+   * other diagonal the z axis). The lit lamp is drawn, the others sit dark in the head.
+   */
+  private buildSignals(): void {
+    const junctions = this.map.junctions.filter((j) => j.control === 'signal');
+    const geometry = new THREE.BoxGeometry(0.24, 0.24, 0.14);
+    const colours = [0xff2a1a, 0xffb020, 0x2bff5a];
+    for (const colour of colours) {
+      const material = new THREE.MeshStandardMaterial({
+        color: colour,
+        emissive: colour,
+        emissiveIntensity: 2.5,
+      });
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(junctions.length * 4, 1));
+      mesh.frustumCulled = false;
+      this.signalLamps.push(mesh);
+      this.scene.add(mesh);
+    }
+    for (const j of junctions) {
+      const y = this.map.groundHeight(j.x, j.z);
+      for (const [dx, dz] of [
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+        [1, -1],
+      ] as const) {
+        this.signalHeads.push({
+          x: j.x + dx * 10.5 - dx * 0.17,
+          z: j.z + dz * 10.5 - dz * 0.17,
+          y: y + 5,
+          axis: dx * dz > 0 ? 0 : 1,
+          node: j,
+        });
+      }
+    }
+    this.updateSignals();
+  }
+
+  private updateSignals(): void {
+    const m = new THREE.Matrix4();
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    const offsets = [0.34, 0, -0.34];
+    for (let i = 0; i < this.signalHeads.length; i++) {
+      const head = this.signalHeads[i]!;
+      const state = signalState(head.node, head.axis, this.simTime);
+      const lit = state === 'red' ? 0 : state === 'amber' ? 1 : 2;
+      for (let c = 0; c < 3; c++) {
+        const mesh = this.signalLamps[c]!;
+        if (c === lit) mesh.setMatrixAt(i, m.makeTranslation(head.x, head.y + offsets[c]!, head.z));
+        else mesh.setMatrixAt(i, hidden);
+      }
+    }
+    for (const mesh of this.signalLamps) mesh.instanceMatrix.needsUpdate = true;
   }
 
   private buildWater(): void {
@@ -672,7 +747,8 @@ export class CityScene {
       }
     };
 
-    if (kind === 'street' || kind === 'avenue') {
+    // Pavements stop at the junction boxes (the piece straddling a junction has none).
+    if ((kind === 'street' || kind === 'avenue') && !this.inJunction(p)) {
       strip(walk, -hw - SIDEWALK, -hw, WALK_Y, 0, 1);
       strip(walk, hw, hw + SIDEWALK, WALK_Y, 0, 1);
     }
@@ -719,6 +795,16 @@ export class CityScene {
     } else if (kind !== 'circuit' && !p.road.oneWay) {
       dashes(yellow, 0);
     }
+  }
+
+  /** Whether a piece's middle lies inside a junction box. */
+  private inJunction(p: RoadPiece): boolean {
+    const mx = (p.ax + p.bx) / 2;
+    const mz = (p.az + p.bz) / 2;
+    for (const j of this.map.junctions) {
+      if (Math.abs(j.x - mx) < 13 && Math.abs(j.z - mz) < 13) return true;
+    }
+    return false;
   }
 
   /** The slab under a deck: its underside and the two side faces. */
@@ -797,13 +883,16 @@ export class CityScene {
           rotation.setFromAxisAngle(up, yaw);
           lamps.push(new THREE.Matrix4().compose(position, rotation, one));
           position.set(x + -p.tz * -side * 1.4, y + 7.6, z + p.tx * -side * 1.4);
-          glows.push(
-            new THREE.Matrix4().compose(
-              position,
-              new THREE.Quaternion(),
-              new THREE.Vector3(3, 3, 3),
-            ),
-          );
+          // Two crossed upright quads per lamp, so the glow shows from every direction.
+          for (const turn of [0, Math.PI / 2]) {
+            glows.push(
+              new THREE.Matrix4().compose(
+                position,
+                new THREE.Quaternion().setFromAxisAngle(up, yaw + turn),
+                new THREE.Vector3(3, 3, 3),
+              ),
+            );
+          }
         }
         s += 30;
       }
@@ -818,9 +907,6 @@ export class CityScene {
         glows.length,
       );
       glows.forEach((m, i) => glow.setMatrixAt(i, m));
-      // Billboards are overkill: the glow is a flat quad facing up, which reads as a pool of
-      // light on the lamp from most angles.
-      glow.geometry.rotateX(-Math.PI / 2);
       glow.renderOrder = 3;
       group.add(glow);
     }
@@ -900,7 +986,8 @@ export class CityScene {
       const x = x0 + rand() * CHUNK;
       const z = z0 + rand() * CHUNK;
       if (districtAt(x, z) === 'water' || this.map.paved(x, z)) continue;
-      if (this.map.project(x, z, { maxDist: 14 })) continue;
+      const near = this.map.project(x, z, { maxDist: 30 });
+      if (near && near.dist < near.piece.halfWidth + 10) continue;
       if (districtAt(x, z) === 'downtown' && Math.abs(x) < 450 && Math.abs(z) < 450) continue;
       put(x, z, district === 'hills' ? rand() < 0.8 : rand() < 0.3, 0.7 + rand() * 0.9);
     }

@@ -20,6 +20,7 @@ import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap } from '../ui/CityMinimap';
 import { cityMap } from '../content/city/map';
+import { trafficModel, trafficPaint, trafficSlotsFor } from '../content/city/fleet';
 import { MAP_MAX_X, MAP_MAX_Z, MAP_MIN_X, MAP_MIN_Z } from '../content/city/terrain';
 import {
   PhotoCamera,
@@ -593,8 +594,18 @@ export class Game {
   private configFor(setup: SessionSetup, attract = false): SessionConfig {
     const seed = (Math.random() * 1e9) | 0;
     const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
+    // Free roam: traffic slots for this device, each with its own everyday car.
+    const detail =
+      this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
+    const traffic = setup.mode === 'roam' && !attract ? trafficSlotsFor(detail.chunks) : 0;
     return {
-      fieldCars: setup.mode === 'race' ? this.pickField(setup, count, seed) : undefined,
+      fieldCars:
+        setup.mode === 'race'
+          ? this.pickField(setup, count, seed)
+          : traffic > 0
+            ? [setup.carId, ...Array.from({ length: traffic }, (_, i) => trafficModel(i).id)]
+            : undefined,
+      traffic: traffic || undefined,
       mode: setup.mode,
       trackId:
         setup.mode === 'free' || setup.mode === 'roam' ? '' : setup.trackId || TRACKS[0]?.id || '',
@@ -639,7 +650,14 @@ export class Game {
     this.attract = attract && this.tv !== null;
     const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
     this.liverySeed = season?.liverySeed ?? config.seed;
-    const count = config.mode === 'race' ? config.opponents + 1 : 1;
+    const count =
+      config.mode === 'race'
+        ? config.opponents + 1
+        : config.mode === 'roam'
+          ? 1 + (config.traffic ?? 0)
+          : 1;
+    // A change of world means a change of paint scheme (liveries or plain traffic): rebuild.
+    if (changed) this.buildCars([]);
     this.buildCars(
       Array.from({ length: count }, (_, i) => carById(config.fieldCars?.[i] ?? config.carId)),
     );
@@ -792,8 +810,8 @@ export class Game {
 
   /** One view per car; a view is rebuilt only when its car model changes. */
   private buildCars(models: readonly CarModel[]): void {
-    const player = models[0]!;
-    if (player.id !== this.carModel.id) {
+    const player = models[0];
+    if (player && player.id !== this.carModel.id) {
       this.carModel = player;
       this.rumble.limiterRpm = player.spec.engine.limiterRpm;
       const upshift = player.spec.gearbox.upshiftRpm;
@@ -810,7 +828,11 @@ export class Game {
     for (let i = 0; i < models.length; i++) {
       const model = models[i]!;
       if (this.carModels[i]?.id === model.id) continue;
-      const view = new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
+      // Traffic wears plain paint; everyone else a livery.
+      const traffic = this.session?.mode === 'roam' && i > 0;
+      const view = traffic
+        ? new CarView(model.spec, trafficPaint(i - 1), model.style)
+        : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
       const old = this.cars[i];
       if (old) {
         old.root.removeFromParent();
@@ -839,10 +861,16 @@ export class Game {
 
   /** Applies every car's livery, and colours the minimap dots to match. */
   private repaint(): void {
+    const roam = this.session?.mode === 'roam';
     for (let i = 0; i < this.cars.length; i++) {
+      const dot = this.minimapCars[i];
+      if (roam && i > 0) {
+        // Traffic keeps its plain paint; it shows as pale dots on the map.
+        if (dot) dot.color = '#d8dce2';
+        continue;
+      }
       const livery = this.liveryFor(i);
       this.cars[i]!.setLivery(livery);
-      const dot = this.minimapCars[i];
       if (dot) dot.color = cssColor(livery.primary);
     }
   }
@@ -1020,6 +1048,7 @@ export class Game {
   private updateWeather(dt: number): void {
     const scene = this.scenery;
     if (scene instanceof CityScene) {
+      scene.setTime(this.sim.latest?.simTime ?? 0);
       scene.update(dt, this.camera.camera);
       return;
     }
