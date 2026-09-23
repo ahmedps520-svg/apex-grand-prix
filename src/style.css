@@ -1454,6 +1454,8 @@ body.fatal #loading-text {
   pointer-events: none;
   transition: opacity 0.45s ease;
   z-index: 8;
+  /* Its own layer, so the fade never re-rasterises the HUD mid-transition. */
+  will-change: opacity;
 }
 
 .fade.on {
