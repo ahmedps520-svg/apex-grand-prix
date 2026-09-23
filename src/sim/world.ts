@@ -3,6 +3,7 @@ import { TRACKS, trackById } from '../content/tracks';
 import { mulberry32 } from '../shared/math';
 import {
   CAR_STRIDE,
+  SOFT_FLOATS,
   defaultAids,
   neutralInput,
   type Difficulty,
@@ -97,6 +98,7 @@ export class World {
       const world = new World(1, surface, surface.map.spawns[config.roamStart ?? 'downtown'], spec);
       world.setAids(0, config.aids);
       world.cars[0]!.damageScale = config.damage ?? 0;
+      world.cars[0]!.enableSoftBody();
       const time = config.conditions?.time;
       const police = config.police ?? 0;
       if ((config.traffic ?? 0) + police > 0) {
@@ -264,5 +266,10 @@ export class World {
   writeSnapshot(out: Float32Array): void {
     for (let i = 0; i < this.cars.length; i++) this.cars[i]!.writeSnapshot(out, i * CAR_STRIDE);
     this.traffic?.writeSnapshot(out, this.cars.length);
+    // The player's soft body, after every car (zeros when there is none).
+    const base = this.snapshotCount * CAR_STRIDE;
+    const soft = this.cars[0]?.soft;
+    if (soft) soft.writeSnapshot(out, base);
+    else out.fill(0, base, base + SOFT_FLOATS);
   }
 }

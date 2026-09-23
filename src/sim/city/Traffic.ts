@@ -88,6 +88,9 @@ export interface Vehicle {
   /** Sideways shove after a crash, decaying. */
   shoveX: number;
   shoveZ: number;
+  /** The simple damage: how dented each end is, 0 … 1. */
+  dentFront: number;
+  dentRear: number;
   /** This driver's speed relative to the limit and following gap. */
   pace: number;
   halfWidth: number;
@@ -159,6 +162,8 @@ export class Traffic {
         waited: 0,
         shoveX: 0,
         shoveZ: 0,
+        dentFront: 0,
+        dentRear: 0,
         pace: 0.88 + this.rand() * 0.17,
         halfWidth: spec.body.halfWidth,
         front: spec.body.front,
@@ -260,6 +265,8 @@ export class Traffic {
       out[base + C.STEER] = car.steer;
       out[base + C.STEER_ANGLE] = car.steer * 0.5;
       out[base + C.STEER_AUTHORITY] = 0.5;
+      out[base + C.DENT_FRONT] = car.dentFront;
+      out[base + C.DENT_REAR] = car.dentRear;
       out[base + C.FLAGS] =
         (this.lightsOn && car.active ? FLAG_HEADLIGHTS : 0) |
         (car.siren && car.active ? FLAG_SIREN : 0) |
@@ -553,6 +560,8 @@ export class Traffic {
       car.waited = 0;
       car.shoveX = 0;
       car.shoveZ = 0;
+      car.dentFront = 0;
+      car.dentRear = 0;
       car.yaw = Math.atan2(-point.tx, -point.tz);
       car.heading = car.yaw;
       car.steer = 0;
@@ -670,6 +679,11 @@ export class Traffic {
       car.shoveZ -= hit.nz * hit.depth * 0.5;
       car.v = Math.max(car.v - Math.abs(vn) * 0.5, 0);
       car.a = -HARD_BRAKE;
+      // The simple damage: a dent at whichever end was hit, by the closing speed.
+      const along = (hit.x - car.x) * fx + (hit.z - car.z) * fz;
+      const dent = Math.min(Math.abs(vn) / 10, 0.6);
+      if (along >= 0) car.dentFront = Math.min(car.dentFront + dent, 1);
+      else car.dentRear = Math.min(car.dentRear + dent, 1);
       // A unit ramming the player in a pursuit is its own doing: no hazards, no offence.
       if (car.police && car.mode === 'free') continue;
       if (Math.abs(vn) > 1.5 && car.hazards <= 0) this.playerHits++;

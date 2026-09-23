@@ -138,6 +138,8 @@ export type SimCommand =
   | { kind: 'teleport'; car: number; to: SpawnPoint }
   | { kind: 'setAids'; car: number; aids: DriverAids }
   | { kind: 'restart' }
+  /** Mends the car's damage (free roam: the quick repair, with a reset). */
+  | { kind: 'repair'; car: number }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 
@@ -261,7 +263,10 @@ export const C = {
   /** ERS battery (0 … 1, or -1 for cars without one) and 1 while boosting. */
   ERS: 37,
   ERS_BOOST: 38,
-  WHEELS: 39,
+  /** Traffic's simple damage: how dented each end is, 0 … 1 (the player's car has a lattice). */
+  DENT_FRONT: 39,
+  DENT_REAR: 40,
+  WHEELS: 41,
 } as const;
 export const CAR_STRIDE = C.WHEELS + WHEEL_COUNT * WHEEL_STRIDE;
 
@@ -284,7 +289,21 @@ export const FLAG_SIREN = 2048;
 export const aidLevelNumber = (level: AidLevel): number =>
   level === 'off' ? 0 : level === 'low' ? 1 : 2;
 
-export const snapshotFloats = (carCount: number): number => carCount * CAR_STRIDE;
+/**
+ * The player's soft body rides after the cars: the lattice's node displacements (x, y, z each,
+ * body frame, from rest) and the flags of the panels that have come off. Zero when the session
+ * has no soft body.
+ */
+export const SOFT_NODES = 30;
+export const SOFT_FLOATS = SOFT_NODES * 3 + 1;
+export const PART_HOOD = 1;
+export const PART_BUMPER_FRONT = 2;
+export const PART_BUMPER_REAR = 4;
+export const PART_DOOR_LEFT = 8;
+export const PART_DOOR_RIGHT = 16;
+export const PART_WING = 32;
+
+export const snapshotFloats = (carCount: number): number => carCount * CAR_STRIDE + SOFT_FLOATS;
 export const snapshotBytes = (carCount: number): number =>
   snapshotFloats(carCount) * Float32Array.BYTES_PER_ELEMENT;
 
