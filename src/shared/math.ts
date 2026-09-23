@@ -150,6 +150,43 @@ export function quatFromYaw(out: Quat, angle: number): Quat {
   return out;
 }
 
+/** out = a ⊗ b (rotate by b first, then by a). `out` may alias either input. */
+export function mulQ(out: Quat, a: Quat, b: Quat): Quat {
+  const x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+  const y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+  const z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+  const w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+  out.x = x;
+  out.y = y;
+  out.z = z;
+  out.w = w;
+  return out;
+}
+
+/** Shortest rotation taking unit vector `from` onto unit vector `to`. */
+export function quatFromUnitVectors(out: Quat, from: Vec3, to: Vec3): Quat {
+  const r = dotV(from, to) + 1;
+  if (r < 1e-8) {
+    // Opposite vectors: turn half a revolution about any perpendicular axis.
+    if (Math.abs(from.x) > Math.abs(from.z)) {
+      out.x = -from.y;
+      out.y = from.x;
+      out.z = 0;
+    } else {
+      out.x = 0;
+      out.y = -from.z;
+      out.z = from.y;
+    }
+    out.w = 0;
+    return normalizeQ(out);
+  }
+  out.x = from.y * to.z - from.z * to.y;
+  out.y = from.z * to.x - from.x * to.z;
+  out.z = from.x * to.y - from.y * to.x;
+  out.w = r;
+  return normalizeQ(out);
+}
+
 /**
  * Integrates orientation q by world-space angular velocity w over dt:
  * dq/dt = ½ (w, 0) ⊗ q. Renormalises afterwards.

@@ -31,7 +31,7 @@ for (const variant of variants) {
 
     // Hide the help card and performance overlay so the check looks at the 3D view.
     await page.keyboard.press('KeyH');
-    await page.keyboard.press('F3');
+    await page.keyboard.press('Backquote');
     await page.waitForTimeout(1500);
     const stats = imageStats(decodePng(await page.screenshot()));
     expect(stats.luminanceStdDev, 'the frame should not be blank').toBeGreaterThan(12);

@@ -1,4 +1,5 @@
 import type { PadFamily } from '../input/InputManager';
+import { VERSION_TEXT } from '../app/version';
 import { el } from './dom';
 
 interface Row {
@@ -7,32 +8,46 @@ interface Row {
   pad: Record<PadFamily, string>;
 }
 
+const same = (label: string): Record<PadFamily, string> => ({
+  playstation: label,
+  xbox: label,
+  generic: label,
+});
+
 const ROWS: Row[] = [
   { action: 'Throttle', keys: 'W / ↑', pad: { playstation: 'R2', xbox: 'RT', generic: 'RT' } },
   {
-    action: 'Brake / reverse',
+    action: 'Brake (reverse in auto)',
     keys: 'S / ↓',
     pad: { playstation: 'L2', xbox: 'LT', generic: 'LT' },
   },
+  { action: 'Steer', keys: 'A D / ← →', pad: same('Left stick') },
   {
-    action: 'Steer',
-    keys: 'A D / ← →',
-    pad: { playstation: 'Left stick', xbox: 'Left stick', generic: 'Left stick' },
+    action: 'Shift up / down',
+    keys: 'E / Q',
+    pad: { playstation: 'R1 / L1', xbox: 'RB / LB', generic: 'RB / LB' },
   },
   { action: 'Handbrake', keys: 'Space', pad: { playstation: '✕', xbox: 'A', generic: 'A' } },
   { action: 'Camera', keys: 'C', pad: { playstation: '○', xbox: 'B', generic: 'B' } },
   { action: 'Reset car', keys: 'R', pad: { playstation: '△', xbox: 'Y', generic: 'Y' } },
   {
-    action: 'Performance overlay',
-    keys: 'F3 / `',
-    pad: { playstation: 'Create', xbox: 'View', generic: 'Select' },
+    action: 'Quick menu (aids, gears, curves…)',
+    keys: 'Tab, then [ ]',
+    pad: same('D-pad'),
   },
   {
-    action: 'Resolution scale',
-    keys: '[ / ]',
-    pad: { playstation: 'D-pad ↑ ↓', xbox: 'D-pad ↑ ↓', generic: 'D-pad ↑ ↓' },
+    action: 'Telemetry',
+    keys: 'F3',
+    pad: { playstation: 'Touchpad / L3+R3', xbox: 'L3+R3', generic: 'L3+R3' },
   },
-  { action: 'km/h ↔ mph', keys: 'U', pad: { playstation: '—', xbox: '—', generic: '—' } },
+  { action: 'Loop / drag strip / skidpad', keys: '1 / 2 / 3', pad: same('Quick menu') },
+  { action: 'Steering wheel setup', keys: 'K', pad: same('—') },
+  {
+    action: 'Performance overlay',
+    keys: '`',
+    pad: { playstation: 'Create', xbox: 'View', generic: 'Select' },
+  },
+  { action: 'Sound on / off · km/h ↔ mph', keys: 'M · U', pad: same('Quick menu · —') },
   {
     action: 'Show / hide this help',
     keys: 'H',
@@ -51,9 +66,7 @@ export class HelpPanel {
   constructor(parent: HTMLElement) {
     const card = el('div', 'help-card');
     card.appendChild(el('h1', 'help-title', 'APEX GRAND PRIX'));
-    card.appendChild(
-      el('p', 'help-sub', 'Round 1 test build — drive the test car on the proving ground'),
-    );
+    card.appendChild(el('p', 'help-sub', `GT car on the proving ground · ${VERSION_TEXT}`));
     const table = el('table', 'help-table');
     const head = el('tr');
     head.append(el('th', undefined, ''), el('th', undefined, 'Keyboard'), this.padHeader);

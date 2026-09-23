@@ -17,6 +17,17 @@ export interface TyreSpec {
   eY: number;
   /** Fraction of friction lost per +100 % load above the reference load. */
   loadSensitivity: number;
+  /**
+   * Distance the tyre rolls to build up its sideways force (carcass relaxation length). Gives
+   * realistic, slightly delayed responses and lets a parked tyre act like a spring.
+   */
+  relaxationLength: number;
+  /** Camber thrust: equivalent slip-angle shift per radian of lean. */
+  camberThrust: number;
+  /** Grip lost per radian² away from the ideal camber when cornering. */
+  camberGripLoss: number;
+  /** Ideal lean into the corner for maximum cornering grip, radians (positive). */
+  idealCamber: number;
 }
 
 export interface AxleSpec {
@@ -43,7 +54,13 @@ export interface AxleSpec {
   antiRollRate: number;
   /** Height above the ground where tyre forces act on the body (roll-centre approximation). */
   rollCentreHeight: number;
-  /** Maximum steering angle at the wheel (0 = not steered). */
+  /** Static camber, radians (negative = top of the wheel leaning inwards). */
+  camber: number;
+  /** Camber change per metre of bump travel from static (negative = more negative camber). */
+  camberGain: number;
+  /** Static toe per wheel, radians (positive = toe-in). */
+  toe: number;
+  /** Maximum steering angle at the road wheels (0 = not steered). */
   maxSteer: number;
   /** 0 = parallel steering … 1 = full Ackermann. */
   ackermann: number;
@@ -75,8 +92,20 @@ export interface GearboxSpec {
   efficiency: number;
   /** Seconds without drive while shifting. */
   shiftTime: number;
+  /** Automatic mode: shift up above / down below these engine speeds. */
   upshiftRpm: number;
   downshiftRpm: number;
+  /** Automatic mode while braking: downshift early so the right gear is ready for the exit. */
+  brakingDownshiftRpm: number;
+}
+
+/** Clutch-pack limited-slip differential. */
+export interface DiffSpec {
+  /** Locking torque that is always there, N·m. */
+  preload: number;
+  /** Extra locking torque as a fraction of the torque going through the diff, on/off power. */
+  powerLock: number;
+  coastLock: number;
 }
 
 export interface AeroSpec {
@@ -104,25 +133,46 @@ export interface CarSpec {
   inertia: { pitch: number; yaw: number; roll: number };
   /** Height of the centre of gravity above the ground at static ride height. */
   cogHeight: number;
+  /** Steering-wheel angle per road-wheel angle (a wheel's 1:1 mapping uses this). */
+  steeringRatio: number;
   front: AxleSpec;
   rear: AxleSpec;
   engine: EngineSpec;
   gearbox: GearboxSpec;
+  diff: DiffSpec;
   aero: AeroSpec;
   body: BodySpec;
-  /** Viscous coupling between the driven wheels, N·m per rad/s of speed difference. */
-  diffViscous: number;
 }
 
+const deg = (d: number): number => (d * Math.PI) / 180;
+
+const SLICK: TyreSpec = {
+  muX: 1.65,
+  muY: 1.6,
+  bX: 20,
+  cX: 1.45,
+  eX: 0.1,
+  bY: 17,
+  cY: 1.35,
+  eY: 0.15,
+  loadSensitivity: 0.12,
+  relaxationLength: 0.32,
+  camberThrust: 0.12,
+  camberGripLoss: 12,
+  idealCamber: deg(1.5),
+};
+
 /**
- * Round 1 test car: a GT-style mule used to prove the architecture. The full vehicle model and
- * proper tuning arrive in Round 2.
+ * Test car for Rounds 1–2: a GT3-style mule used to build and tune the vehicle model. Proper
+ * cars per class arrive from Round 6.
  */
 export const TEST_MULE: CarSpec = {
   name: 'Test Mule GT',
   mass: 1300,
   inertia: { pitch: 2100, yaw: 2300, roll: 560 },
   cogHeight: 0.46,
+  // 540° lock to lock at the steering wheel for 26.5° at the road wheels.
+  steeringRatio: 10.2,
   front: {
     offset: 1.45,
     halfTrack: 0.83,
@@ -138,22 +188,15 @@ export const TEST_MULE: CarSpec = {
     bumpStopRange: 0.015,
     antiRollRate: 45_000,
     rollCentreHeight: 0.06,
-    maxSteer: 0.5,
+    camber: deg(-3),
+    camberGain: deg(-60),
+    toe: deg(-0.05),
+    maxSteer: deg(26.5),
     ackermann: 0.5,
     brakeTorque: 2_700,
     handbrakeTorque: 0,
     driven: false,
-    tyre: {
-      muX: 1.65,
-      muY: 1.6,
-      bX: 20,
-      cX: 1.45,
-      eX: 0.1,
-      bY: 17,
-      cY: 1.35,
-      eY: 0.15,
-      loadSensitivity: 0.12,
-    },
+    tyre: SLICK,
   },
   rear: {
     offset: -1.25,
@@ -170,35 +213,28 @@ export const TEST_MULE: CarSpec = {
     bumpStopRange: 0.015,
     antiRollRate: 30_000,
     rollCentreHeight: 0.1,
+    camber: deg(-2),
+    camberGain: deg(-40),
+    toe: deg(0.15),
     maxSteer: 0,
     ackermann: 0,
     brakeTorque: 1_800,
     handbrakeTorque: 3_500,
     driven: true,
-    tyre: {
-      muX: 1.65,
-      muY: 1.62,
-      bX: 20,
-      cX: 1.45,
-      eX: 0.1,
-      bY: 17,
-      cY: 1.35,
-      eY: 0.15,
-      loadSensitivity: 0.12,
-    },
+    tyre: { ...SLICK, muY: 1.62 },
   },
   engine: {
     torqueCurve: [
-      [800, 330],
-      [1500, 380],
-      [2500, 450],
-      [3500, 520],
-      [4500, 575],
-      [5500, 605],
-      [6500, 590],
-      [7300, 555],
-      [7800, 520],
-      [8200, 480],
+      [800, 300],
+      [1500, 350],
+      [2500, 415],
+      [3500, 480],
+      [4500, 530],
+      [5500, 555],
+      [6500, 545],
+      [7300, 515],
+      [7800, 485],
+      [8200, 450],
     ],
     idleRpm: 900,
     limiterRpm: 8000,
@@ -211,11 +247,12 @@ export const TEST_MULE: CarSpec = {
     reverseRatio: 2.9,
     finalDrive: 3.2,
     efficiency: 0.9,
-    shiftTime: 0.07,
+    shiftTime: 0.06,
     upshiftRpm: 7750,
     downshiftRpm: 3900,
+    brakingDownshiftRpm: 5600,
   },
+  diff: { preload: 60, powerLock: 0.35, coastLock: 0.2 },
   aero: { dragArea: 1.0, downforceArea: 3.0, frontShare: 0.42 },
   body: { halfWidth: 0.98, front: 2.3, rear: 2.25, floor: -0.37, roof: 0.74 },
-  diffViscous: 60,
 };

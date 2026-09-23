@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createCarRenderState, interpolateCar } from '../../src/render/interpolate';
 import { lerpAngle, quat, quatFromYaw, slerpQ } from '../../src/shared/math';
-import { C, CAR_STRIDE, W } from '../../src/shared/protocol';
+import { C, CAR_STRIDE, W, WHEEL_STRIDE } from '../../src/shared/protocol';
 
 function snapshot(): Float32Array {
   const buf = new Float32Array(CAR_STRIDE);
@@ -57,6 +57,25 @@ describe('interpolateCar', () => {
     // Halfway between 6.2 and 0.1 (+2π) is ~6.4, i.e. just past a full turn, not ~3.15.
     expect(spin).toBeCloseTo(6.2 + (0.1 + 2 * Math.PI - 6.2) / 2, 5);
     expect(out.wheels[0]!.length).toBeCloseTo(0.11, 6);
+  });
+});
+
+describe('telemetry fields', () => {
+  it('copies the Round 2 telemetry values through unchanged', () => {
+    const buf = snapshot();
+    buf[C.ACCEL_LAT] = -12.5;
+    buf[C.STEER_AUTHORITY] = 0.2;
+    buf[C.GEARBOX_MANUAL] = 1;
+    buf[C.TC_LEVEL] = 1;
+    buf[C.WHEELS + 3 * WHEEL_STRIDE + W.SLIP_ANGLE] = -0.1;
+    buf[C.WHEELS + 3 * WHEEL_STRIDE + W.SURFACE] = 1;
+    const out = interpolateCar(buf, 0, 0.3, createCarRenderState());
+    expect(out.accelLat).toBeCloseTo(-12.5);
+    expect(out.steerAuthority).toBeCloseTo(0.2);
+    expect(out.manualGearbox).toBe(true);
+    expect(out.tcLevel).toBe(1);
+    expect(out.wheels[3]!.slipAngle).toBeCloseTo(-0.1);
+    expect(out.wheels[3]!.surface).toBe(1);
   });
 });
 

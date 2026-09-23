@@ -24,6 +24,7 @@ export default defineConfig({
   base: './',
   define: {
     __APP_VERSION__: JSON.stringify(`${pkg.version}+${gitSha()}`),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
   resolve: {
     // three.js addons import bare 'three'; point it at the WebGPU build so the classic

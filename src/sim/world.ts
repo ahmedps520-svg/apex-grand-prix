@@ -1,7 +1,13 @@
-import { SPAWN } from '../content/testGround';
-import { CAR_STRIDE, neutralInput, type DriverInput } from '../shared/protocol';
+import { SPAWN, SPAWNS } from '../content/testGround';
+import {
+  CAR_STRIDE,
+  neutralInput,
+  type DriverAids,
+  type DriverInput,
+  type SpawnPoint,
+} from '../shared/protocol';
 import { TestGround, type Surface } from './track/surface';
-import { Car } from './vehicle/car';
+import { Car, type Spawn } from './vehicle/car';
 import { TEST_MULE } from './vehicle/spec';
 
 /** Everything that is simulated: the ground and the cars. Pure logic, no DOM or rendering. */
@@ -10,17 +16,28 @@ export class World {
   readonly cars: Car[];
   /** Messages for the main thread (e.g. a car was reset after invalid numbers). */
   readonly warnings: string[] = [];
+  private readonly neutral = neutralInput();
 
-  constructor(playerCount = 1, surface: Surface = new TestGround()) {
+  constructor(playerCount = 1, surface: Surface = new TestGround(), spawn: Spawn = SPAWN) {
     this.surface = surface;
     this.cars = [];
     for (let i = 0; i < Math.max(playerCount, 1); i++) {
-      this.cars.push(new Car(TEST_MULE, { x: SPAWN.x + i * 6, z: SPAWN.z, yaw: SPAWN.yaw }));
+      const at = { x: spawn.x + i * 6, z: spawn.z, yaw: spawn.yaw };
+      this.cars.push(new Car(TEST_MULE, at, surface));
     }
   }
 
   setInputs(inputs: readonly DriverInput[]): void {
-    for (let i = 0; i < this.cars.length; i++) this.cars[i]!.input = inputs[i] ?? neutralInput();
+    for (let i = 0; i < this.cars.length; i++) this.cars[i]!.setInput(inputs[i] ?? this.neutral);
+  }
+
+  setAids(car: number, aids: DriverAids): void {
+    this.cars[car]?.setAids(aids);
+  }
+
+  teleport(car: number, to: SpawnPoint): void {
+    const spawn = SPAWNS[to];
+    this.cars[car]?.teleport({ x: spawn.x + car * 6, z: spawn.z, yaw: spawn.yaw });
   }
 
   storePrevious(): void {
