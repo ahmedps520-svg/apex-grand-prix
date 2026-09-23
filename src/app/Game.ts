@@ -239,7 +239,7 @@ export class Game {
     const input = this.input;
     this.perf.update({
       version: __APP_VERSION__,
-      backend: this.host.backend,
+      backend: this.host.description,
       fps: this.statFrames / this.statTime,
       frameMs: (this.statTime / this.statFrames) * 1000,
       worstMs: this.statWorst * 1000,

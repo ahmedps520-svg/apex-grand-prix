@@ -32,11 +32,21 @@ export class RendererHost {
     container.appendChild(this.renderer.domElement);
   }
 
+  /**
+   * True when three.js runs WebGPU in "compatibility" mode. It decides this from the device's
+   * feature list; in that mode it also turns MSAA off, so we surface it in the overlay.
+   */
+  compatibilityMode = false;
+
   async init(): Promise<void> {
     await this.renderer.init();
-    const backend = (this.renderer as unknown as { backend: { isWebGPUBackend?: boolean } })
-      .backend;
+    const backend = (
+      this.renderer as unknown as {
+        backend: { isWebGPUBackend?: boolean; compatibilityMode?: boolean | null };
+      }
+    ).backend;
     this.backend = backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+    this.compatibilityMode = backend.compatibilityMode === true;
     const onResize = () => this.resize();
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
@@ -50,6 +60,13 @@ export class RendererHost {
 
   get scale(): number {
     return this.resolutionScale;
+  }
+
+  /** Short description of the backend and anti-aliasing actually in use, for the overlay. */
+  get description(): string {
+    const samples = this.renderer.samples;
+    const aa = samples > 0 ? `MSAA ${samples}×` : 'MSAA off';
+    return `${this.backend}${this.compatibilityMode ? ' (compatibility)' : ''} · ${aa}`;
   }
 
   setResolutionScale(scale: number): void {
