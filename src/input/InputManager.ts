@@ -1,6 +1,9 @@
 import type { PadSettings } from '../app/settings';
 import { neutralInput, type DriverInput } from '../shared/protocol';
+import type { UiEvent } from '../ui/menu/focus';
+import { defaultBindings, type Bindings, type KeyAction, type PadAction } from './bindings';
 import { shapePedal, shapeSteer } from './curves';
+import type { TouchControls } from './TouchControls';
 import {
   buttonDown,
   looksLikeWheel,
@@ -10,12 +13,13 @@ import {
   type WheelProfile,
 } from './wheel';
 
-/** One-shot actions (edge-triggered) besides driving. */
+/** One-shot actions (edge-triggered) while driving. */
 export type Action =
   | 'reset'
   | 'camera'
   | 'overlay'
   | 'telemetry'
+  | 'pause'
   | 'help'
   | 'units'
   | 'mute'
@@ -28,36 +32,33 @@ export type Action =
   | 'teleportSkidpad'
   | 'wheelSetup';
 
-export type DeviceKind = 'keyboard' | 'gamepad' | 'wheel' | 'none';
+export type DeviceKind = 'keyboard' | 'gamepad' | 'wheel' | 'touch' | 'none';
 export type PadFamily = 'playstation' | 'xbox' | 'generic';
+
+/** A menu event and where it came from (some screens treat controller buttons specially). */
+export interface UiInput {
+  event: UiEvent;
+  source: 'pad' | 'key' | 'wheel';
+}
 
 // Standard Gamepad mapping indices (https://w3c.github.io/gamepad/#remapping).
 const PAD = {
   SOUTH: 0, // Cross / A
   EAST: 1, // Circle / B
-  WEST: 2, // Square / X
-  NORTH: 3, // Triangle / Y
   L1: 4,
   R1: 5,
   L2: 6,
   R2: 7,
-  SELECT: 8, // Create / Share / View
-  START: 9, // Options / Menu
   L3: 10,
   R3: 11,
   DPAD_UP: 12,
   DPAD_DOWN: 13,
   DPAD_LEFT: 14,
   DPAD_RIGHT: 15,
-  /** DualSense / DualShock 4 touchpad click (Chrome exposes it after the standard buttons). */
-  TOUCHPAD: 17,
 } as const;
 
-const KEY_ACTIONS: Record<string, Action> = {
-  KeyR: 'reset',
-  KeyC: 'camera',
-  F3: 'telemetry',
-  Backquote: 'overlay',
+/** Keys with fixed roles (the rebindable ones come from the bindings). */
+const FIXED_KEY_ACTIONS: Record<string, Action> = {
   KeyH: 'help',
   KeyU: 'units',
   KeyM: 'mute',
@@ -71,16 +72,21 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyK: 'wheelSetup',
 };
 
-const PAD_ACTIONS: Array<[number, Action]> = [
-  [PAD.NORTH, 'reset'],
-  [PAD.EAST, 'camera'],
-  [PAD.SELECT, 'overlay'],
-  [PAD.START, 'help'],
-  [PAD.TOUCHPAD, 'telemetry'],
-  [PAD.DPAD_UP, 'menuUp'],
-  [PAD.DPAD_DOWN, 'menuDown'],
-  [PAD.DPAD_LEFT, 'menuPrev'],
-  [PAD.DPAD_RIGHT, 'menuNext'],
+/** Rebindable pad buttons → actions (driving controls are handled separately). */
+const PAD_BUTTON_ACTIONS: ReadonlyArray<[PadAction, Action]> = [
+  ['reset', 'reset'],
+  ['camera', 'camera'],
+  ['overlay', 'overlay'],
+  ['telemetry', 'telemetry'],
+  ['pause', 'pause'],
+];
+
+const KEY_BUTTON_ACTIONS: ReadonlyArray<[KeyAction, Action]> = [
+  ['reset', 'reset'],
+  ['camera', 'camera'],
+  ['overlay', 'overlay'],
+  ['telemetry', 'telemetry'],
+  ['pause', 'pause'],
 ];
 
 const WHEEL_BUTTON_ACTIONS: Array<[WheelAction, Action]> = [
@@ -93,38 +99,74 @@ const WHEEL_BUTTON_ACTIONS: Array<[WheelAction, Action]> = [
   ['menuDown', 'menuDown'],
 ];
 
+/** The wheel's quick-menu buttons also move through menus. */
+const WHEEL_MENU_EVENTS: Partial<Record<WheelAction, UiEvent>> = {
+  menuUp: 'up',
+  menuDown: 'down',
+  menuPrev: 'left',
+  menuNext: 'right',
+};
+
+const MENU_KEYS: Record<string, UiEvent> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Enter: 'confirm',
+  NumpadEnter: 'confirm',
+  Space: 'confirm',
+  Escape: 'back',
+  Backspace: 'back',
+  KeyQ: 'tabPrev',
+  KeyE: 'tabNext',
+  PageUp: 'fastUp',
+  PageDown: 'fastDown',
+};
+/** Menu keys that repeat while held (the rest fire once per press). */
+const REPEATING = new Set<UiEvent>(['up', 'down', 'left', 'right', 'fastUp', 'fastDown']);
+
 /** Keys the game uses, so the browser doesn't also scroll, tab or click with them. */
-const CAPTURED_KEYS = new Set([
+const ALWAYS_CAPTURED = new Set([
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',
   'ArrowRight',
   'Space',
   'Tab',
-  'KeyW',
-  'KeyA',
-  'KeyS',
-  'KeyD',
-  'KeyE',
-  'KeyQ',
-  ...Object.keys(KEY_ACTIONS),
+  'Backspace',
+  'PageUp',
+  'PageDown',
+  ...Object.keys(FIXED_KEY_ACTIONS),
 ]);
 
 /** A gamepad counts as used when something moves at least this much. */
 const ACTIVITY = 0.15;
+/** Holding a direction in a menu repeats it after this delay, at this interval (seconds). */
+const REPEAT_DELAY = 0.38;
+const REPEAT_INTERVAL = 0.085;
+/** The stick counts as pushed past this (with a little hysteresis). */
+const STICK_ON = 0.55;
+const STICK_OFF = 0.4;
+
+type Capture = { kind: 'pad' | 'key'; done: (value: number | string | null) => void };
 
 /**
  * Samples keyboard, gamepads and wheels once per frame on the main thread (the Gamepad API isn't
- * available in workers) and produces the driver input sent to the simulation.
+ * available in workers). Produces the driver input sent to the simulation, one-shot driving
+ * actions, and menu events with auto-repeat.
  */
 export class InputManager {
   readonly driver: DriverInput = neutralInput();
   /** This frame's one-shot actions, in order (a key tapped twice in one frame counts twice). */
   readonly actions: Action[] = [];
+  /** This frame's menu events. */
+  readonly ui: UiInput[] = [];
   lastDevice: DeviceKind = 'none';
   padName = '';
   padFamily: PadFamily = 'generic';
   padConnected = false;
+  /** The standard gamepad used most recently (for the controller tester and rumble). */
+  activePad: Gamepad | null = null;
   /** A connected steering wheel (recognised by name or by a saved profile). */
   wheelPad: Gamepad | null = null;
   wheelProfile: WheelProfile | null = null;
@@ -133,12 +175,16 @@ export class InputManager {
 
   /** Set by the game from the saved settings. */
   padSettings: PadSettings | null = null;
+  bindings: Bindings = defaultBindings();
   wheelProfiles: Record<string, WheelProfile> = {};
   /** While the wheel setup runs, the wheel is read by the wizard instead of driving. */
   wheelCaptured = false;
+  /** On-screen controls (touch screens), read while they are shown. */
+  touch: TouchControls | null = null;
 
   private readonly keys = new Set<string>();
   private readonly pendingKeyActions: Action[] = [];
+  private readonly pendingUi: UiInput[] = [];
   private pendingShiftUp = 0;
   private pendingShiftDown = 0;
   private readonly prevButtons = new Map<number, boolean[]>();
@@ -146,6 +192,11 @@ export class InputManager {
   private readonly lastWheelState = { steer: 0, throttle: 0, brake: 0 };
   private readonly wheelOut = wheelReading();
   private readonly listeners: Array<[EventTarget, string, EventListener]> = [];
+  /** Menu direction repeat state: when each held direction started and last fired. */
+  private readonly held = new Map<UiEvent, { since: number; last: number }>();
+  private stickX = 0;
+  private stickY = 0;
+  private capture: Capture | null = null;
 
   constructor() {
     this.listen(window, 'keydown', (e) => this.onKey(e as KeyboardEvent, true));
@@ -153,13 +204,39 @@ export class InputManager {
     // Released keys aren't reported while the window is unfocused: forget them.
     this.listen(window, 'blur', () => this.keys.clear());
     this.listen(window, 'gamepadconnected', () => (this.padConnected = true));
+    this.listen(window, 'pointerdown', (e) => {
+      this.lastDevice = (e as PointerEvent).pointerType === 'touch' ? 'touch' : 'keyboard';
+    });
   }
 
-  /** Call once per frame before reading `driver` / `actions`. */
+  /**
+   * Waits for the next controller button or key (for rebinding). `done` gets the button index
+   * or key code, or null if cancelled (Esc, or `cancelCapture`).
+   */
+  startCapture(kind: 'pad' | 'key', done: (value: number | string | null) => void): void {
+    this.cancelCapture();
+    this.capture = { kind, done };
+  }
+
+  cancelCapture(): void {
+    const capture = this.capture;
+    this.capture = null;
+    capture?.done(null);
+  }
+
+  get capturing(): boolean {
+    return this.capture !== null;
+  }
+
+  /** Call once per frame before reading `driver`, `actions` and `ui`. */
   update(): void {
+    const now = performance.now() / 1000;
     this.actions.length = 0;
     this.actions.push(...this.pendingKeyActions);
     this.pendingKeyActions.length = 0;
+    this.ui.length = 0;
+    this.ui.push(...this.pendingUi);
+    this.pendingUi.length = 0;
     const d = this.driver;
     d.shiftUp = this.pendingShiftUp;
     d.shiftDown = this.pendingShiftDown;
@@ -167,19 +244,24 @@ export class InputManager {
     this.pendingShiftDown = 0;
 
     const k = this.keys;
-    const kbSteer =
-      (k.has('ArrowRight') || k.has('KeyD') ? 1 : 0) -
-      (k.has('ArrowLeft') || k.has('KeyA') ? 1 : 0);
-    let throttle = k.has('ArrowUp') || k.has('KeyW') ? 1 : 0;
-    let brake = k.has('ArrowDown') || k.has('KeyS') ? 1 : 0;
-    let handbrake = k.has('Space') ? 1 : 0;
+    const keysDown = (codes: readonly string[]) => codes.some((c) => k.has(c));
+    const kb = this.bindings.keys;
+    const kbSteer = (keysDown(kb.steerRight) ? 1 : 0) - (keysDown(kb.steerLeft) ? 1 : 0);
+    let throttle = keysDown(kb.throttle) ? 1 : 0;
+    let brake = keysDown(kb.brake) ? 1 : 0;
+    let handbrake = keysDown(kb.handbrake) ? 1 : 0;
     let clutch = 0;
 
     let padSteer = 0;
     const pad = this.readPads();
     if (pad) {
       const s = this.padSettings;
-      padSteer = shapeSteer(pad.axes[0] ?? 0, s?.steerDeadzone ?? 0.06, s?.steerLinearity ?? 0.35);
+      padSteer = shapeSteer(
+        pad.axes[0] ?? 0,
+        s?.steerDeadzone ?? 0.06,
+        s?.steerLinearity ?? 0.35,
+        s?.steerSaturation ?? 1,
+      );
       const padThrottle = shapePedal(pad.buttons[PAD.R2]?.value ?? 0, {
         curve: s?.throttleCurve ?? 'linear',
         deadzone: s?.throttleDeadzone ?? 0.03,
@@ -192,26 +274,44 @@ export class InputManager {
       });
       throttle = Math.max(throttle, padThrottle);
       brake = Math.max(brake, padBrake);
-      if (pad.buttons[PAD.SOUTH]?.pressed) handbrake = 1;
+      const b = this.bindings.pad;
       const prev = this.prevButtons.get(pad.index) ?? [];
-      const now = pad.buttons.map((b) => b.pressed);
-      const pressed = (i: number) => now[i] === true && prev[i] !== true;
-      for (const [button, action] of PAD_ACTIONS) if (pressed(button)) this.actions.push(action);
-      if (pressed(PAD.R1)) d.shiftUp++;
-      if (pressed(PAD.L1)) d.shiftDown++;
-      // L3 + R3 together also toggle the telemetry (for pads without a touchpad).
-      if ((pressed(PAD.L3) && now[PAD.R3]) || (pressed(PAD.R3) && now[PAD.L3])) {
-        this.actions.push('telemetry');
+      const now2 = pad.buttons.map((btn) => btn.pressed);
+      const pressed = (i: number) => now2[i] === true && prev[i] !== true;
+      this.prevButtons.set(pad.index, now2);
+
+      const captured = this.capture?.kind === 'pad' ? now2.findIndex((v, i) => v && !prev[i]) : -1;
+      if (captured >= 0) {
+        const capture = this.capture!;
+        this.capture = null;
+        capture.done(captured);
+      } else if (!this.capture) {
+        if (now2[b.handbrake]) handbrake = 1;
+        for (const [binding, action] of PAD_BUTTON_ACTIONS) {
+          if (pressed(b[binding])) this.actions.push(action);
+        }
+        if (pressed(PAD.DPAD_UP)) this.actions.push('menuUp');
+        if (pressed(PAD.DPAD_DOWN)) this.actions.push('menuDown');
+        if (pressed(PAD.DPAD_LEFT)) this.actions.push('menuPrev');
+        if (pressed(PAD.DPAD_RIGHT)) this.actions.push('menuNext');
+        if (pressed(b.shiftUp)) d.shiftUp++;
+        if (pressed(b.shiftDown)) d.shiftDown++;
+        // L3 + R3 together also toggle the telemetry (for pads without a touchpad).
+        if ((pressed(PAD.L3) && now2[PAD.R3]) || (pressed(PAD.R3) && now2[PAD.L3])) {
+          this.actions.push('telemetry');
+        }
+        this.padMenuEvents(pad, pressed, now2, now);
       }
-      this.prevButtons.set(pad.index, now);
       if (
         Math.abs(padSteer) > ACTIVITY ||
         padThrottle > ACTIVITY ||
         padBrake > ACTIVITY ||
-        now.some(Boolean)
+        now2.some(Boolean)
       ) {
         this.lastDevice = 'gamepad';
       }
+    } else {
+      this.held.clear();
     }
 
     let wheelAngle = 0;
@@ -235,15 +335,39 @@ export class InputManager {
       last.throttle = r.throttle;
       last.brake = r.brake;
       for (const [binding, action] of WHEEL_BUTTON_ACTIONS) {
-        if (this.wheelPressed(binding, wheel, profile)) this.actions.push(action);
+        if (!this.wheelPressed(binding, wheel, profile)) continue;
+        this.actions.push(action);
+        const menu = WHEEL_MENU_EVENTS[binding];
+        if (menu) this.ui.push({ event: menu, source: 'wheel' });
       }
       if (this.wheelPressed('shiftUp', wheel, profile)) d.shiftUp++;
       if (this.wheelPressed('shiftDown', wheel, profile)) d.shiftDown++;
       if (buttonDown(profile.buttons.handbrake, wheel)) handbrake = 1;
     }
 
+    let touchSteer = 0;
+    const touch = this.touch;
+    if (touch?.visible) {
+      touch.update();
+      const presses = touch.take();
+      d.shiftUp += presses.shiftUp;
+      d.shiftDown += presses.shiftDown;
+      if (presses.pause) this.actions.push('pause');
+      throttle = Math.max(throttle, touch.throttle);
+      brake = Math.max(brake, touch.brake);
+      handbrake = Math.max(handbrake, touch.handbrake);
+      if (touch.steering) {
+        touchSteer = touch.steer;
+        this.lastDevice = 'touch';
+      }
+    }
+
     // Steering comes from whichever device was used last; the keys steer when nothing else does.
-    if (this.lastDevice === 'wheel' && wheel && profile && !this.wheelCaptured) {
+    if (this.lastDevice === 'touch') {
+      d.steerMode = 'pad';
+      d.steer = touchSteer;
+      this.raw.steer = touchSteer;
+    } else if (this.lastDevice === 'wheel' && wheel && profile && !this.wheelCaptured) {
       d.steerMode = 'wheel';
       d.wheelAngle = wheelAngle;
       d.steer = 0;
@@ -269,6 +393,46 @@ export class InputManager {
     for (const [target, type, fn] of this.listeners) target.removeEventListener(type, fn);
   }
 
+  /** Menu events from a standard pad: buttons once per press, directions with auto-repeat. */
+  private padMenuEvents(
+    pad: Gamepad,
+    pressed: (i: number) => boolean,
+    down: boolean[],
+    now: number,
+  ): void {
+    const push = (event: UiEvent) => this.ui.push({ event, source: 'pad' });
+    if (pressed(PAD.SOUTH)) push('confirm');
+    if (pressed(PAD.EAST)) push('back');
+    if (pressed(PAD.L1)) push('tabPrev');
+    if (pressed(PAD.R1)) push('tabNext');
+    if (pressed(this.bindings.pad.pause)) push('pause');
+
+    const x = pad.axes[0] ?? 0;
+    const y = pad.axes[1] ?? 0;
+    this.stickX = Math.abs(x) > (this.stickX !== 0 ? STICK_OFF : STICK_ON) ? Math.sign(x) : 0;
+    this.stickY = Math.abs(y) > (this.stickY !== 0 ? STICK_OFF : STICK_ON) ? Math.sign(y) : 0;
+    const directions: Array<[UiEvent, boolean]> = [
+      ['up', down[PAD.DPAD_UP] === true || this.stickY < 0],
+      ['down', down[PAD.DPAD_DOWN] === true || this.stickY > 0],
+      ['left', down[PAD.DPAD_LEFT] === true || this.stickX < 0],
+      ['right', down[PAD.DPAD_RIGHT] === true || this.stickX > 0],
+      ['fastUp', (pad.buttons[PAD.R2]?.value ?? 0) > 0.6],
+      ['fastDown', (pad.buttons[PAD.L2]?.value ?? 0) > 0.6],
+    ];
+    for (const [event, isDown] of directions) {
+      const state = this.held.get(event);
+      if (!isDown) {
+        this.held.delete(event);
+      } else if (!state) {
+        this.held.set(event, { since: now, last: now });
+        push(event);
+      } else if (now - state.since > REPEAT_DELAY && now - state.last > REPEAT_INTERVAL) {
+        state.last = now;
+        push(event);
+      }
+    }
+  }
+
   /**
    * Finds the wheel (if any) and the most recently used standard gamepad. Wheels are never used
    * as pads: without a profile their axes mean nothing.
@@ -288,6 +452,7 @@ export class InputManager {
     }
     this.wheelPad = wheel;
     this.wheelProfile = wheel ? (this.wheelProfiles[wheel.id] ?? null) : null;
+    this.activePad = best;
     this.padConnected = best !== null;
     if (best) {
       this.padName = cleanPadName(best.id);
@@ -309,21 +474,55 @@ export class InputManager {
     const target = event.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
     if (target?.closest?.('.wheel-setup')) return;
-    if (CAPTURED_KEYS.has(event.code)) event.preventDefault();
+
+    const capture = this.capture;
+    if (capture?.kind === 'key' && down) {
+      event.preventDefault();
+      if (event.repeat) return;
+      this.capture = null;
+      capture.done(event.code === 'Escape' ? null : event.code);
+      return;
+    }
+
+    const bound = this.boundKeyActions(event.code);
+    if (ALWAYS_CAPTURED.has(event.code) || MENU_KEYS[event.code] || this.isBoundKey(event.code)) {
+      event.preventDefault();
+    }
     if (down) {
+      const menu = MENU_KEYS[event.code];
+      if (menu && (!event.repeat || REPEATING.has(menu))) {
+        this.pendingUi.push({ event: menu, source: 'key' });
+      }
       if (!event.repeat) {
-        const action = KEY_ACTIONS[event.code];
-        if (action) this.pendingKeyActions.push(action);
-        if (event.code === 'Tab')
+        const fixed = FIXED_KEY_ACTIONS[event.code];
+        if (fixed) this.pendingKeyActions.push(fixed);
+        this.pendingKeyActions.push(...bound);
+        if (event.code === 'Tab') {
           this.pendingKeyActions.push(event.shiftKey ? 'menuPrev' : 'menuNext');
-        if (event.code === 'KeyE') this.pendingShiftUp++;
-        if (event.code === 'KeyQ') this.pendingShiftDown++;
+        }
+        if (this.bindings.keys.shiftUp.includes(event.code)) this.pendingShiftUp++;
+        if (this.bindings.keys.shiftDown.includes(event.code)) this.pendingShiftDown++;
       }
       this.keys.add(event.code);
       this.lastDevice = 'keyboard';
     } else {
       this.keys.delete(event.code);
     }
+  }
+
+  /** One-shot actions bound to this key. */
+  private boundKeyActions(code: string): Action[] {
+    const keys = this.bindings.keys;
+    const out: Action[] = [];
+    for (const [binding, action] of KEY_BUTTON_ACTIONS) {
+      if (keys[binding].includes(code)) out.push(action);
+    }
+    return out;
+  }
+
+  /** True if the key is bound to anything, so the browser shouldn't also act on it. */
+  private isBoundKey(code: string): boolean {
+    return Object.values(this.bindings.keys).some((codes) => codes.includes(code));
   }
 
   private listen(target: EventTarget, type: string, fn: EventListener): void {

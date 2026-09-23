@@ -22,16 +22,13 @@ const variants = [
 for (const variant of variants) {
   test(`boots, renders and drives (${variant.name})`, async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(`/${variant.query}`);
+    await page.goto(`/${variant.query ? `${variant.query}&drive` : '?drive'}`);
     await waitUntilReady(page);
 
     const backend = await page.evaluate(() => window.__apex!.backend);
     expect(['WebGPU', 'WebGL2']).toContain(backend);
     if (variant.query) expect(backend).toBe('WebGL2');
 
-    // Hide the help card and performance overlay so the check looks at the 3D view.
-    await page.keyboard.press('KeyH');
-    await page.keyboard.press('Backquote');
     await page.waitForTimeout(1500);
     const stats = imageStats(decodePng(await page.screenshot()));
     expect(stats.luminanceStdDev, 'the frame should not be blank').toBeGreaterThan(12);
@@ -51,7 +48,7 @@ for (const variant of variants) {
 
 test('keyboard reset puts the car back on the start line', async ({ page }) => {
   const errors = collectErrors(page);
-  await page.goto('/?renderer=webgl');
+  await page.goto('/?renderer=webgl&drive');
   await waitUntilReady(page);
   await page.keyboard.down('KeyW');
   await expect

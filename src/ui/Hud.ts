@@ -37,7 +37,7 @@ export class Hud {
 
   constructor(
     parent: HTMLElement,
-    private readonly engine: HudEngine,
+    private engine: HudEngine,
   ) {
     for (let i = 0; i < SHIFT_LIGHTS; i++) {
       const light = el('span');
@@ -64,6 +64,11 @@ export class Hud {
     parent.appendChild(this.root);
   }
 
+  /** Shift-light thresholds for the car being driven. */
+  setEngine(engine: HudEngine): void {
+    this.engine = engine;
+  }
+
   setUnits(units: Units): void {
     this.units = units;
     setText(this.unit, units === 'metric' ? 'km/h' : 'mph');
@@ -77,7 +82,8 @@ export class Hud {
     setText(this.mode, car.manualGearbox ? 'MAN' : 'AUTO');
     this.gear.classList.toggle('denied', (car.flags & FLAG_SHIFT_DENIED) !== 0);
 
-    const lit = Math.round((Math.min(car.rpm, RPM_MAX) / RPM_MAX) * SEGMENTS);
+    const rpmMax = Math.max(this.engine.upshiftRpm * 1.1, RPM_MAX * 0.5);
+    const lit = Math.round((Math.min(car.rpm, rpmMax) / rpmMax) * SEGMENTS);
     if (lit !== this.litSegments) {
       this.segments.forEach((s, i) => s.classList.toggle('on', i < lit));
       this.litSegments = lit;

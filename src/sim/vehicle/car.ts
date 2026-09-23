@@ -65,6 +65,10 @@ const HOLD_MIN_TORQUE = 150;
 const BODY_STIFFNESS = 250_000;
 const BODY_DAMPING = 12_000;
 const BODY_FRICTION = 0.55;
+/** Body-to-barrier contact: stiff and well damped, with scraping friction. */
+const WALL_STIFFNESS = 900_000;
+const WALL_DAMPING = 60_000;
+const WALL_FRICTION = 0.35;
 /** Wheel steering is smoothed only enough to hide the display-rate input steps. */
 const WHEEL_INPUT_SMOOTHING = 0.008;
 /** Manual gearbox: a downshift is refused if it would put the engine this far past the limiter. */
@@ -220,6 +224,12 @@ export class Car {
   private forwardHold = 0;
   private spawn: Spawn;
   private readonly bodyPoints: Vec3[];
+  /** Body corners at bumper height, for barrier contacts. */
+  private readonly wallPoints: Vec3[];
+  /** Largest contact force from barriers or other cars during the last step (for effects). */
+  impactForce = 0;
+  /** On the grid before the start: the handbrake is held on whatever the driver does. */
+  holdForStart = false;
   private readonly wheelbase: number;
   private readonly frontAlphaPeak: number;
 
@@ -259,6 +269,12 @@ export class Car {
     for (const x of [-b.halfWidth, b.halfWidth]) {
       for (const y of [b.floor, b.roof]) {
         for (const z of [-b.front, 0, b.rear]) this.bodyPoints.push(vec3(x, y, z));
+      }
+    }
+    this.wallPoints = [];
+    for (const x of [-b.halfWidth, b.halfWidth]) {
+      for (const z of [-b.front, -b.front * 0.4, b.rear * 0.4, b.rear]) {
+        this.wallPoints.push(vec3(x, 0, z));
       }
     }
     this.engineRpm = spec.engine.idleRpm;
@@ -383,6 +399,7 @@ export class Car {
     this.updateControls(dt);
     this.absActive = false;
     this.tcActive = false;
+    this.impactForce = 0;
     setV(this.force, 0, -this.spec.mass * GRAVITY, 0);
     setV(this.torque, 0, 0, 0);
 
@@ -428,7 +445,8 @@ export class Car {
     const brakeCmd = swap ? input.throttle : input.brake;
     this.throttle = approach(this.throttle, clamp(throttleCmd, 0, 1), 10 * dt);
     this.brake = approach(this.brake, clamp(brakeCmd, 0, 1), 12 * dt);
-    this.handbrake = approach(this.handbrake, clamp(input.handbrake, 0, 1), 12 * dt);
+    const handbrakeCmd = this.holdForStart ? 1 : input.handbrake;
+    this.handbrake = approach(this.handbrake, clamp(handbrakeCmd, 0, 1), 12 * dt);
     this.clutchEngagement = 1 - clamp(input.clutch, 0, 1);
 
     this.roadAngle = input.steerMode === 'wheel' ? this.steerWheel(dt) : this.steerPad(dt, speed);
@@ -861,6 +879,7 @@ export class Car {
   }
 
   private bodyContacts(surface: Surface): void {
+    if (surface.wallContact) this.wallContacts(surface);
     for (const p of this.bodyPoints) {
       const arm = rotateV(this.t0, this.rot, p);
       const wx = this.pos.x + arm.x;
@@ -882,6 +901,59 @@ export class Car {
       addScaledV(this.torque, this.torque, vScratch, 1);
       addScaledV(this.force, this.force, f, 1);
     }
+  }
+
+  /** Barriers push the body's corners back onto the track, with scraping friction. */
+  private wallContacts(surface: Surface): void {
+    const normal = wallNormal;
+    for (const p of this.wallPoints) {
+      const arm = rotateV(this.t0, this.rot, p);
+      const wx = this.pos.x + arm.x;
+      const wz = this.pos.z + arm.z;
+      const depth = surface.wallContact!(wx, wz, normal);
+      if (depth <= 0) continue;
+      const vp = crossV(this.t1, this.angVel, arm);
+      addScaledV(vp, vp, this.vel, 1);
+      const vn = vp.x * normal.nx + vp.z * normal.nz;
+      const push = Math.max(WALL_STIFFNESS * depth - WALL_DAMPING * vn, 0);
+      // Sliding along the wall: friction against the tangential velocity.
+      const tx = vp.x - vn * normal.nx;
+      const tz = vp.z - vn * normal.nz;
+      const tSpeed = Math.hypot(tx, tz);
+      const friction = tSpeed > 1e-4 ? Math.min(WALL_FRICTION * push, tSpeed * 20_000) / tSpeed : 0;
+      const f = setV(
+        this.t2,
+        normal.nx * push - tx * friction,
+        0,
+        normal.nz * push - tz * friction,
+      );
+      this.impactForce = Math.max(this.impactForce, push);
+      crossV(vScratch, arm, f);
+      addScaledV(this.torque, this.torque, vScratch, 1);
+      addScaledV(this.force, this.force, f, 1);
+    }
+  }
+
+  /**
+   * Applies an instantaneous impulse (N·s) at a world-space point, e.g. from a collision with
+   * another car.
+   */
+  applyImpulse(point: Vec3, impulse: Vec3): void {
+    addScaledV(this.vel, this.vel, impulse, 1 / this.spec.mass);
+    // Angular impulse in the body frame, divided by the principal inertias.
+    const arm = subV(vScratch3, point, this.pos);
+    const torque = crossV(vScratch2, arm, impulse);
+    const local = invRotateV(vScratch2, this.rot, torque);
+    const I = this.spec.inertia;
+    local.x /= I.pitch;
+    local.y /= I.yaw;
+    local.z /= I.roll;
+    const world = rotateV(vScratch2, this.rot, local);
+    addScaledV(this.angVel, this.angVel, world, 1);
+    this.impactForce = Math.max(
+      this.impactForce,
+      Math.hypot(impulse.x, impulse.y, impulse.z) * 400,
+    );
   }
 
   /** Acceleration the driver feels (everything but gravity), in the car's frame, smoothed. */
@@ -1070,6 +1142,7 @@ export class Car {
 const vScratch = vec3();
 const vScratch2 = vec3();
 const vScratch3 = vec3();
+const wallNormal = { nx: 0, nz: 0 };
 
 function wrapAngle(a: number): number {
   a %= TWO_PI;

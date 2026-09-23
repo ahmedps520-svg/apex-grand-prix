@@ -4,11 +4,19 @@ A browser racing game built with TypeScript, Vite and three.js. It renders with 
 
 **Play:** https://ahmedps520-svg.github.io/apex-grand-prix/
 
-The game is built in small rounds. [PLAN.md](PLAN.md) has the architecture, the roadmap and a progress log.
+[PLAN.md](PLAN.md) has the architecture, the roadmap and a progress log.
 
-## Status
+## The game
 
-**Round 2: Handling.** The GT test car with F1 25-style handling on a proving ground with a handling loop, a 1 km drag strip (with timing) and a 60 m skidpad. Manual (paddle) or automatic gears, ABS and traction control at Off / Low / High, trigger curves, a telemetry panel, steering wheel support with a setup wizard, and a code-generated engine sound. Keyboard, DualSense/Xbox controllers and steering wheels; installable on iPad (Share → Add to Home Screen) and playable offline after the first visit.
+- **Quick Race:** pick a circuit and a car, 1–11 AI opponents, laps, difficulty and grid slot. Standing start with five red lights, positions, lap and sector timing, results.
+- **Championship:** a season of 3 to 6 races with points for the top ten (25-18-15-12-10-8-6-4-2-1); the grid lines up in championship order and a season in progress is saved.
+- **Time Trial:** hot laps with sector splits against your best and the stored track record.
+- **Free Drive:** the proving ground with a handling loop, a timed 1 km drag strip and a 60 m skidpad.
+- **Circuits:** six fictional tracks, from a short club circuit to a 5 km+ high-speed layout, with kerbs, gravel or grass run-off and barriers.
+- **Cars:** 25 cars in five classes (GT, Formula, Prototype, Touring, Street), each with its own power, weight, grip and aero, in 12 paint colours.
+- **Handling:** a 400 Hz physics model with Pacejka tyres, limited-slip diff, ABS/TC Off/Low/High, manual paddles or automatic gears.
+- **Controls:** keyboard, DualSense/Xbox controllers (with rumble on Chrome/Edge) and steering wheels (setup wizard, 1:1 steering). Menus work with a controller, keyboard, mouse or touch; buttons and keys can be rebound.
+- **Installable:** add it to the home screen (iPad: Share → Add to Home Screen); it works offline after the first visit.
 
 | Action | Keyboard | Controller |
 |---|---|---|
@@ -16,23 +24,20 @@ The game is built in small rounds. [PLAN.md](PLAN.md) has the architecture, the 
 | Steer | A / D or ← / → | Left stick |
 | Shift up / down | E / Q | R1 / L1 (RB / LB) |
 | Handbrake | Space | ✕ (A) |
+| Pause menu | Esc or P | Options (Menu) |
 | Camera | C | ○ (B) |
 | Reset car | R | △ (Y) |
-| Quick menu: TC, ABS, gearbox, curves, steering, resolution, volume, location | Tab / Shift+Tab to choose, [ / ] to change | D-pad |
+| Quick menu: TC, ABS, gearbox, curves, steering, volume | Tab / Shift+Tab, then [ / ] | D-pad |
 | Telemetry panel | F3 | Touchpad click, or L3 + R3 |
-| Handling loop / drag strip / skidpad | 1 / 2 / 3 | Quick menu → Location |
-| Steering wheel setup | K | — |
 | Performance overlay | \` | Create (View) |
-| Sound on / off | M | Quick menu → Volume |
-| km/h ↔ mph | U | — |
-| Help | H | Options (Menu) |
+| Steering wheel setup | K | Settings → Wheel |
 
-Steering wheels (Logitech G29/G923 class and others) are detected when connected and set up with a wizard: turn and press each control once, pick the paddles and buttons, then adjust rotation, dead zone, linearity and pedal curves. Wheel steering is 1:1 with the car's steering wheel.
+In menus: arrows / D-pad / left stick move, Enter / ✕ select, Esc / ○ back, Q / E or L1 / R1 switch tabs.
 
 URL options:
 - `?renderer=webgl` forces WebGL2.
 - `?renderer=webgpu` retries WebGPU after an automatic fallback.
-- `?cam=orbit` shows a camera circling the car.
+- `?drive` skips the menus and starts free driving (used by the browser tests).
 
 ## Development
 

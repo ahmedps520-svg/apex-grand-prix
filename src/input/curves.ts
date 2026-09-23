@@ -49,15 +49,22 @@ export function shapePedal(value: number, shape: TriggerShape): number {
 }
 
 /**
- * Signed steering input (-1…1): an axial dead zone (rescaled so the output starts at 0), then
- * centre precision. `linearity` 0 is linear; towards 1 small movements do less while full lock
- * stays full lock: out = (1 − k)·x + k·x³.
+ * Signed steering input (-1…1): an axial dead zone (rescaled so the output starts at 0) and an
+ * outer dead zone (`saturation`: travel that already gives full lock), then centre precision.
+ * `linearity` 0 is linear; towards 1 small movements do less while full lock stays full lock:
+ * out = (1 − k)·x + k·x³.
  */
-export function shapeSteer(value: number, deadzone: number, linearity: number): number {
+export function shapeSteer(
+  value: number,
+  deadzone: number,
+  linearity: number,
+  saturation = 1,
+): number {
   if (!Number.isFinite(value)) return 0;
   const magnitude = Math.abs(value);
   if (magnitude <= deadzone) return 0;
-  const x = Math.min((magnitude - deadzone) / (1 - deadzone), 1);
+  const top = Math.max(saturation, deadzone + 0.01);
+  const x = Math.min((magnitude - deadzone) / (top - deadzone), 1);
   const k = clamp01(linearity);
   return Math.sign(value) * ((1 - k) * x + k * x * x * x);
 }

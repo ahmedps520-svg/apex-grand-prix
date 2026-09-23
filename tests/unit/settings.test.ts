@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultSettings, parseSettings } from '../../src/app/settings';
+import { SETTINGS_VERSION, defaultSettings, parseSettings } from '../../src/app/settings';
 
 describe('settings', () => {
   it('upgrades Round 1 settings (version 1), keeping what the player chose', () => {
@@ -11,7 +11,7 @@ describe('settings', () => {
       camera: 'bonnet',
     };
     const s = parseSettings(v1);
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(SETTINGS_VERSION);
     expect(s.resolutionScale).toBe(0.8);
     expect(s.units).toBe('imperial');
     expect(s.overlay).toBe(false);

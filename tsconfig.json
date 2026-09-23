@@ -18,7 +18,9 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
   "include": ["src", "tests", "tools", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }
