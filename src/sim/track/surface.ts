@@ -61,13 +61,17 @@ export interface Surface {
     maxDist: number,
     hit: RayHit,
   ): boolean;
-  heightAt(x: number, z: number): number;
+  /**
+   * Height of the surface under a point. Where surfaces stack (a road deck over an underpass),
+   * `y` says which one: the highest surface at or just above the point's own height.
+   */
+  heightAt(x: number, z: number, y?: number): number;
   surfaceAt(x: number, z: number): SurfaceId;
   /**
    * Optional barriers: how far a body point is through a wall (0 = clear) and the horizontal
-   * direction that pushes it back out.
+   * direction that pushes it back out. `y` is the point's height (walls can differ by level).
    */
-  wallContact?(x: number, z: number, out: { nx: number; nz: number }): number;
+  wallContact?(x: number, z: number, out: { nx: number; nz: number }, y?: number): number;
   /** Multiplier on every surface's grip (a wet track is below 1). */
   gripScale?: number;
 }

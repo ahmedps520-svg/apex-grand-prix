@@ -17,6 +17,8 @@ import { RaceDirector } from './race/RaceDirector';
 import { DEFAULT_LINE_OPTIONS, computeRacingLine, type RacingLineOptions } from './race/racingLine';
 import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
+import { cityMap } from '../content/city/map';
+import { CitySurface } from './city/CitySurface';
 import { Car, type Spawn } from './vehicle/car';
 import { carById, peakPower, topSpeed } from './vehicle/cars';
 import { TEST_MULE, type CarSpec } from './vehicle/spec';
@@ -73,7 +75,7 @@ export class World {
     this.surface = surface;
     this.cars = [];
     for (let i = 0; i < Math.max(playerCount, 1); i++) {
-      const at = { x: spawn.x + i * 6, z: spawn.z, yaw: spawn.yaw };
+      const at = { x: spawn.x + i * 6, z: spawn.z, yaw: spawn.yaw, y: spawn.y };
       this.cars.push(new Car(spec, at, surface));
       this.drivers.push(null);
     }
@@ -83,6 +85,14 @@ export class World {
   static forSession(config: SessionConfig): World {
     const model = carById(config.carId);
     const spec = model.spec;
+    if (config.mode === 'roam') {
+      const surface = new CitySurface(cityMap());
+      surface.gripScale = config.grip ?? 1;
+      const world = new World(1, surface, surface.map.spawns[config.roamStart ?? 'downtown'], spec);
+      world.setAids(0, config.aids);
+      world.cars[0]!.damageScale = config.damage ?? 0;
+      return world;
+    }
     if (config.mode === 'free' || !config.trackId) {
       const world = new World(1, new TestGround(), SPAWNS[config.location], spec);
       world.setAids(0, config.aids);

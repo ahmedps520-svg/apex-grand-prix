@@ -41,7 +41,7 @@ describe('conditions', () => {
       time: 'golden',
       weather: 'heavyRain',
     });
-    expect(sanitizeConditions({ time: 'night', weather: 'snow' })).toEqual(DEFAULT_CONDITIONS);
+    expect(sanitizeConditions({ time: 'midnight', weather: 'snow' })).toEqual(DEFAULT_CONDITIONS);
     expect(sanitizeConditions(null)).toEqual(DEFAULT_CONDITIONS);
   });
 });

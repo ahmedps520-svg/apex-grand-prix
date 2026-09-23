@@ -1,7 +1,17 @@
 /** Menu icons: simple 24×24 stroke drawings, coloured by CSS (`currentColor`). */
 
 export type IconName =
-  'race' | 'trophy' | 'stopwatch' | 'road' | 'brush' | 'gear' | 'pad' | 'info' | 'pulse' | 'school';
+  | 'race'
+  | 'trophy'
+  | 'stopwatch'
+  | 'road'
+  | 'city'
+  | 'brush'
+  | 'gear'
+  | 'pad'
+  | 'info'
+  | 'pulse'
+  | 'school';
 
 const PATHS: Record<IconName, string> = {
   // Chequered flag on a pole.
@@ -10,6 +20,8 @@ const PATHS: Record<IconName, string> = {
     'M8 4h8v5a4 4 0 0 1-8 0z M8 6H5a3 3 0 0 0 3 4 M16 6h3a3 3 0 0 1-3 4 M12 13v4 M8 21h8 M9 17h6',
   stopwatch: 'M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M12 13V9 M10 2h4 M12 5V2 M18.5 6.5l1.5-1.5',
   road: 'M8 21l2-18 M16 21l-2-18 M12 4v2 M12 10v3 M12 17v3',
+  // A skyline: three towers of different heights on a road.
+  city: 'M3 21h18 M5 21V11h4v10 M11 21V4h5v17 M18 21v-7h3v7 M13 8h1 M13 12h1 M13 16h1 M7 15h.01',
   brush: 'M15 4l5 5-9 9-5-5z M6 13c-2 0-3 2-3 4v3h3c2 0 4-1 4-3',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M12 2v3 M12 19v3 M2 12h3 M19 12h3 M4.9 4.9l2.1 2.1 M17 17l2.1 2.1 M4.9 19.1L7 17 M17 7l2.1-2.1',
   pad: 'M7 9h10a4 4 0 0 1 4 4v1a3 3 0 0 1-5.2 2L14 14h-4l-1.8 2A3 3 0 0 1 3 14v-1a4 4 0 0 1 4-4z M8 11v3 M6.5 12.5h3 M15.5 12h.01 M17.5 13.5h.01',

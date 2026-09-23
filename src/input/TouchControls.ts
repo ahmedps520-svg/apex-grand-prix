@@ -2,6 +2,17 @@ import './touch.css';
 
 export type TouchSteering = 'drag' | 'tilt';
 
+/** Tilt steering: degrees of roll for full lock, and the dead zone around level. */
+const TILT_LOCK = 24;
+const TILT_DEAD = 1.5;
+
+/** How the screen is turned from the device's natural orientation, 0 / 90 / 180 / 270. */
+function screenAngle(): number {
+  const legacy = (window as unknown as { orientation?: number }).orientation;
+  const angle = screen.orientation?.angle ?? legacy ?? 0;
+  return ((angle % 360) + 360) % 360;
+}
+
 /**
  * On-screen controls for touch screens: drag anywhere on the left half to steer (or tilt the
  * device), pedals and paddles on the right, and a pause button. Each control follows its own
@@ -22,6 +33,8 @@ export class TouchControls {
   private steerPointer = -1;
   private steerOrigin = 0;
   private tilt = 0;
+  /** Motion access still to be asked for, on the next tap (iOS). */
+  private tiltPending = false;
   private readonly knob = document.createElement('div');
   private readonly zone = document.createElement('div');
 
@@ -51,6 +64,16 @@ export class TouchControls {
     this.root.append(pedals, paddles, pause);
     parent.appendChild(this.root);
     window.addEventListener('deviceorientation', (e) => this.onTilt(e));
+    // iOS: motion access asked for outside a tap fails; ask again on the first tap.
+    document.addEventListener(
+      'pointerdown',
+      () => {
+        if (!this.tiltPending) return;
+        this.tiltPending = false;
+        void this.enableTilt();
+      },
+      { passive: true },
+    );
   }
 
   get visible(): boolean {
@@ -69,20 +92,25 @@ export class TouchControls {
     }
   }
 
-  /** Tilt steering needs permission on iOS; call from a tap. */
+  /**
+   * Tilt steering needs motion access on iOS, which is only granted from a tap. Restoring the
+   * setting at start-up isn't one, so the request is repeated on the first touch; false means
+   * the person refused it.
+   */
   async enableTilt(): Promise<boolean> {
-    const request = (
-      DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }
-    ).requestPermission;
-    if (request) {
-      try {
-        if ((await request()) !== 'granted') return false;
-      } catch {
-        return false;
-      }
-    }
+    const api = DeviceOrientationEvent as unknown as {
+      requestPermission?: () => Promise<string>;
+    };
     this.steeringMode = 'tilt';
-    return true;
+    if (!api.requestPermission) return true;
+    try {
+      if ((await api.requestPermission()) === 'granted') return true;
+      this.steeringMode = 'drag';
+      return false;
+    } catch {
+      this.tiltPending = true;
+      return true;
+    }
   }
 
   /** Gear and pause presses since the last call. */
@@ -134,13 +162,30 @@ export class TouchControls {
     this.knob.style.transform = `translate(${x - 36}px, ${y - 36}px)`;
   }
 
+  /**
+   * Steering is how far the screen's horizontal axis dips from level, whichever way the
+   * device is held (flat on a lap or upright), worked out from where gravity points in the
+   * device's own axes. Landscape works out which way round the device is turned from gravity
+   * too, so it is right with the home button on either side.
+   */
   private onTilt(e: DeviceOrientationEvent): void {
-    // Landscape: steering is the device's roll, which the browser reports as beta or gamma
-    // depending on which way up it is held.
-    const angle = screen.orientation?.angle ?? 0;
-    const beta = e.beta ?? 0;
-    const roll = angle === 90 ? beta : angle === 270 || angle === -90 ? -beta : (e.gamma ?? 0);
-    this.tilt = Math.max(-1, Math.min(1, roll / 28));
+    const beta = ((e.beta ?? 0) * Math.PI) / 180;
+    const gamma = ((e.gamma ?? 0) * Math.PI) / 180;
+    // Gravity in device axes (x across the screen, y up it, in portrait), unit length.
+    const gx = Math.sin(gamma) * Math.cos(beta);
+    const gy = -Math.sin(beta);
+    let across: number;
+    if (window.innerWidth > window.innerHeight && Math.abs(gx) > 0.15) {
+      // Landscape: the screen's "up" is whichever of ±x points away from gravity.
+      across = gx < 0 ? -gy : gy;
+    } else {
+      const angle = screenAngle();
+      const rad = (angle * Math.PI) / 180;
+      across = gx * Math.cos(rad) - gy * Math.sin(rad);
+    }
+    const roll = (Math.asin(Math.max(-1, Math.min(1, across))) * 180) / Math.PI;
+    const magnitude = Math.max(Math.abs(roll) - TILT_DEAD, 0) / (TILT_LOCK - TILT_DEAD);
+    this.tilt = Math.sign(roll) * Math.min(magnitude, 1);
   }
 
   private pedal(className: string, label: string, set: (v: number) => void): HTMLElement {

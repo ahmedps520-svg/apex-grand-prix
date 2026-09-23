@@ -30,7 +30,12 @@ export type KeyAction =
   | 'overlay'
   | 'pause'
   | 'drs'
-  | 'boost';
+  | 'boost'
+  | 'lights'
+  | 'indicatorLeft'
+  | 'indicatorRight'
+  | 'hazards'
+  | 'horn';
 
 export interface Bindings {
   /** Standard-mapping button index for each controller action. */
@@ -67,6 +72,11 @@ export const KEY_ACTIONS: ReadonlyArray<{ action: KeyAction; label: string }> = 
   { action: 'pause', label: 'Pause' },
   { action: 'drs', label: 'DRS' },
   { action: 'boost', label: 'ERS boost' },
+  { action: 'lights', label: 'Headlights' },
+  { action: 'indicatorLeft', label: 'Indicate left' },
+  { action: 'indicatorRight', label: 'Indicate right' },
+  { action: 'hazards', label: 'Hazard lights' },
+  { action: 'horn', label: 'Horn' },
 ];
 
 export const defaultBindings = (): Bindings => ({
@@ -97,6 +107,11 @@ export const defaultBindings = (): Bindings => ({
     pause: ['Escape', 'KeyP'],
     drs: ['KeyF'],
     boost: ['KeyB'],
+    lights: ['KeyL'],
+    indicatorLeft: ['Comma'],
+    indicatorRight: ['Period'],
+    hazards: ['KeyX'],
+    horn: ['KeyN'],
   },
 });
 

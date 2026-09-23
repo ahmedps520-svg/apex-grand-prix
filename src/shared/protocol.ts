@@ -40,6 +40,13 @@ export interface DriverInput {
   /** DRS and ERS boost presses since the previous frame (cars that have them). */
   drs: number;
   boost: number;
+  /** Light switch presses since the previous frame: headlights, indicators, hazards. */
+  lights: number;
+  indicatorLeft: number;
+  indicatorRight: number;
+  hazards: number;
+  /** The horn is held. */
+  horn: boolean;
 }
 
 export const neutralInput = (): DriverInput => ({
@@ -54,6 +61,11 @@ export const neutralInput = (): DriverInput => ({
   shiftDown: 0,
   drs: 0,
   boost: 0,
+  lights: 0,
+  indicatorLeft: 0,
+  indicatorRight: 0,
+  hazards: 0,
+  horn: false,
 });
 
 export type AidLevel = 'off' | 'low' | 'high';
@@ -82,7 +94,9 @@ export const defaultAids = (): DriverAids => ({
 /** Named places on the proving ground to jump to. */
 export type SpawnPoint = 'loop' | 'drag' | 'skidpad';
 
-export type GameMode = 'race' | 'timeTrial' | 'free';
+export type GameMode = 'race' | 'timeTrial' | 'free' | 'roam';
+/** Where a free-roam drive starts in the open world. */
+export type RoamStart = 'downtown' | 'highway' | 'suburbs' | 'port' | 'mountain' | 'circuit';
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 
 /** Everything the simulation needs to set up a session. Car 0 is always the player. */
@@ -96,6 +110,8 @@ export interface SessionConfig {
   fieldCars?: string[];
   /** Free drive start on the proving ground. */
   location: SpawnPoint;
+  /** Free roam start in the open world. */
+  roamStart?: RoamStart;
   opponents: number;
   laps: number;
   difficulty: Difficulty;
@@ -236,6 +252,12 @@ export const FLAG_UPSIDE_DOWN = 8;
 export const FLAG_LIMITER = 16;
 /** A downshift was refused because it would over-rev the engine. */
 export const FLAG_SHIFT_DENIED = 32;
+/** Lights and horn (free roam): headlights on, indicators, hazards, horn sounding. */
+export const FLAG_HEADLIGHTS = 64;
+export const FLAG_INDICATOR_LEFT = 128;
+export const FLAG_INDICATOR_RIGHT = 256;
+export const FLAG_HAZARDS = 512;
+export const FLAG_HORN = 1024;
 
 export const aidLevelNumber = (level: AidLevel): number =>
   level === 'off' ? 0 : level === 'low' ? 1 : 2;

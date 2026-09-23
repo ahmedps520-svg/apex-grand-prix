@@ -192,6 +192,8 @@ export function sceneLook(
   const lowSun = 1 - smooth(elevation, 5, 40);
   /** 1 at dusk, fading out by a 7° sun. */
   const twilight = 1 - smooth(elevation, 2, 7);
+  /** 1 at night (the sun below the horizon): moonlight, a dark sky, dark fog. */
+  const night = 1 - smooth(elevation, -6, 1);
   const { cover, gloom } = style;
   const closed = cover >= 1 ? 1 : 0;
 
@@ -221,6 +223,9 @@ export function sceneLook(
     .multiply(tint)
     .multiplyScalar(daylight);
 
+  horizon.multiplyScalar(1 - 0.9 * night);
+  zenith.multiplyScalar(1 - 0.94 * night);
+
   // Clouds dim and soften the sun; the sky's light takes over.
   sunIntensity *= (1 - 0.8 * cover) * (1 - 0.35 * gloom);
   sunColor.lerp(color(0xe6ecf4), closed * 0.7);
@@ -235,8 +240,10 @@ export function sceneLook(
     toward.lerp(color(theme.fog), 0.3 * (1 - twilight));
   }
   const greyFog = closed ? 1 : cover * 0.5;
-  const fogColor = away.lerp(horizon, greyFog);
-  const fogSunColor = toward.lerp(horizon, greyFog);
+  const fogColor = away.lerp(horizon, greyFog).lerp(color(0x06080f), night);
+  const fogSunColor = toward.lerp(horizon, greyFog).lerp(color(0x0a0c16), night);
+  hemiSky.lerp(color(0x141c3a), night);
+  hemiGround.multiplyScalar(1 - 0.85 * night);
 
   const lightElevation = THREE.MathUtils.lerp(
     Math.max(elevation, MIN_LIGHT_ELEVATION),
@@ -264,16 +271,16 @@ export function sceneLook(
       // The circuit's own look is unchanged; chosen conditions blend the horizon into the fog.
       haze: ownSun && cover === 0 ? 0 : 0.85,
       twilight: twilight * (1 - closed),
-      duskZenith: color(0x1d2f63),
+      duskZenith: color(0x1d2f63).lerp(color(0x03040a), night),
     },
-    sunColor,
-    sunIntensity,
+    sunColor: sunColor.lerp(color(0x8fa6ff), night),
+    sunIntensity: sunIntensity * (1 - 0.94 * night),
     shadowRadius: 1 + cover * 3,
     shadowIntensity: 1 - cover * 0.45,
     hemiSky,
     hemiGround,
-    hemiIntensity,
-    environmentIntensity,
+    hemiIntensity: hemiIntensity * (1 - 0.8 * night),
+    environmentIntensity: environmentIntensity * (1 - 0.9 * night),
     fogColor,
     fogSunColor,
     fogNear: style.fogNear,

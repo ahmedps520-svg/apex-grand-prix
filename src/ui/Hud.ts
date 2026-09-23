@@ -28,6 +28,9 @@ export class Hud {
   private readonly unit = el('div', 'hud-unit', 'km/h');
   private readonly gear = el('div', 'hud-gear', 'N');
   private readonly mode = el('div', 'hud-mode', 'AUTO');
+  /** Free roam: the speed limit of the road, as a round sign. */
+  private readonly limit = el('div', 'hud-limit');
+  private limitShown = -1;
   private readonly segments: HTMLElement[] = [];
   private readonly abs = el('span', 'hud-lamp', 'ABS');
   private readonly tc = el('span', 'hud-lamp', 'TC');
@@ -83,8 +86,18 @@ export class Hud {
     const speedBlock = el('div', 'hud-speed-block');
     speedBlock.append(this.speed, this.unit);
     readout.append(gearBlock, speedBlock);
-    this.root.append(this.damage, this.hybrid, this.lights, bar, readout, lamps);
+    this.limit.hidden = true;
+    this.root.append(this.damage, this.hybrid, this.lights, bar, readout, lamps, this.limit);
     parent.appendChild(this.root);
+  }
+
+  /** Shows the road's speed limit (km/h or mph by the units; 0 hides the sign). */
+  setSpeedLimit(kmh: number): void {
+    const shown = this.units === 'metric' ? Math.round(kmh) : Math.round(kmh * 0.621371);
+    if (shown === this.limitShown) return;
+    this.limitShown = shown;
+    this.limit.hidden = kmh <= 0;
+    setText(this.limit, String(shown));
   }
 
   /** Shift-light thresholds for the car being driven. */

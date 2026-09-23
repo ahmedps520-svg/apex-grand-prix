@@ -93,11 +93,11 @@ describe('tyre and road mappings', () => {
     expect(grassGain(1, 0)).toBe(0);
   });
 
-  it('keeps the squeal pitch in the 1–2.5 kHz band, rising with speed', () => {
+  it('keeps the squeal pitch around a kilohertz (0.8–2 kHz), rising with speed', () => {
     expectRising([5, 20, 40, 60].map((v) => squealFrequency(v, 1.2)));
     for (const v of [0, 30, 100, 1e6]) {
-      expect(squealFrequency(v, 5)).toBeGreaterThanOrEqual(1000);
-      expect(squealFrequency(v, 5)).toBeLessThanOrEqual(2500);
+      expect(squealFrequency(v, 5)).toBeGreaterThanOrEqual(800);
+      expect(squealFrequency(v, 5)).toBeLessThanOrEqual(2000);
     }
   });
 

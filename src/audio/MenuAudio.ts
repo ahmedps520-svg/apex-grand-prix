@@ -39,6 +39,8 @@ export class MenuAudio {
   private sfxLevel = 0.6;
   private muted = false;
   private failed = false;
+  private hornGain: GainNode | null = null;
+  private hornOscs: OscillatorNode[] = [];
 
   /** Creates or resumes the audio context; call from a user gesture. */
   unlock(): void {
@@ -94,6 +96,40 @@ export class MenuAudio {
           this.blip(t, hz(note), hz(note), 0.5, 0.06, 'sawtooth');
         this.hiss(t, 0.3, 4000, 0.06);
         break;
+    }
+  }
+
+  /** The car's horn: two detuned tones while `on`. */
+  horn(on: boolean): void {
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus) return;
+    if (on && !this.hornGain) {
+      const t = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.03);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 1500;
+      filter.connect(gain).connect(bus);
+      this.hornOscs = [415, 523].map((freq) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = freq;
+        osc.connect(filter);
+        osc.start(t);
+        return osc;
+      });
+      this.hornGain = gain;
+    } else if (!on && this.hornGain) {
+      const t = ctx.currentTime;
+      this.hornGain.gain.cancelScheduledValues(t);
+      this.hornGain.gain.setValueAtTime(this.hornGain.gain.value, t);
+      this.hornGain.gain.linearRampToValueAtTime(0, t + 0.06);
+      for (const osc of this.hornOscs) osc.stop(t + 0.1);
+      this.hornOscs = [];
+      this.hornGain = null;
     }
   }
 

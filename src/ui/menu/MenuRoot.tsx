@@ -10,6 +10,7 @@ import {
   ChampionshipScreen,
   ControlsScreen,
   FreeSetupScreen,
+  RoamSetupScreen,
   MainScreen,
   PauseScreen,
   RaceSetupScreen,
@@ -41,6 +42,7 @@ const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
   standings: StandingsScreen,
   raceSetup: RaceSetupScreen,
   freeSetup: FreeSetupScreen,
+  roamSetup: RoamSetupScreen,
   pause: PauseScreen,
   results: ResultsScreen,
   replay: ReplayScreen,
@@ -64,6 +66,7 @@ const FOOTER: Record<ScreenId, Array<PromptAction | [PromptAction, string]>> = {
   standings: ['confirm'],
   raceSetup: ['confirm', 'adjust', 'back'],
   freeSetup: ['confirm', 'adjust', 'back'],
+  roamSetup: ['confirm', 'adjust', 'back'],
   pause: ['confirm', 'back'],
   results: ['confirm'],
   replay: [

@@ -25,6 +25,11 @@ import {
 import {
   C,
   FLAG_ABS,
+  FLAG_HAZARDS,
+  FLAG_HEADLIGHTS,
+  FLAG_HORN,
+  FLAG_INDICATOR_LEFT,
+  FLAG_INDICATOR_RIGHT,
   FLAG_LIMITER,
   FLAG_SHIFT_DENIED,
   FLAG_SHIFTING,
@@ -132,6 +137,8 @@ export interface Spawn {
   x: number;
   z: number;
   yaw: number;
+  /** Height hint where surfaces stack (a spawn up on a road deck). */
+  y?: number;
 }
 
 class Wheel {
@@ -253,6 +260,13 @@ export class Car {
   /** Energy in the battery, J, and whether the boost is on. */
   ersEnergy = 0;
   ersBoost = false;
+  /** Lights (free roam): headlights, indicator (-1 left, 0, 1 right), hazards, and the horn. */
+  headlights = false;
+  indicator = 0;
+  hazards = false;
+  horn = false;
+  /** The most the driver has steered into the indicated turn: the indicator cancels after it. */
+  private indicatorPeak = 0;
   /** The AI uses DRS and the boost by itself. */
   autoHybrid = false;
   private boostTime = 0;
@@ -323,6 +337,25 @@ export class Car {
       if (input.boost > 0) this.setBoost(!this.ersBoost);
     }
     this.pendingDown = Math.min(this.pendingDown + input.shiftDown, 3);
+    if (input.lights % 2 === 1) this.headlights = !this.headlights;
+    if (input.hazards % 2 === 1) this.hazards = !this.hazards;
+    if (input.indicatorLeft > 0) this.setIndicator(-1);
+    if (input.indicatorRight > 0) this.setIndicator(1);
+    this.horn = input.horn;
+  }
+
+  /** An indicator press: on, or off again when it was already showing that side. */
+  setIndicator(side: -1 | 1): void {
+    this.indicator = this.indicator === side ? 0 : side;
+    this.indicatorPeak = 0;
+  }
+
+  /** The indicator cancels itself once the car has turned and the wheel is straight again. */
+  private updateIndicator(): void {
+    if (this.indicator === 0) return;
+    const into = this.steer * this.indicator;
+    this.indicatorPeak = Math.max(this.indicatorPeak, into);
+    if (this.indicatorPeak > 0.25 && Math.abs(this.steer) < 0.05) this.indicator = 0;
   }
 
   setAids(aids: DriverAids): void {
@@ -383,7 +416,7 @@ export class Car {
     let groundY = 0;
     const ground = this.ground;
     if (ground) {
-      groundY = ground.heightAt(spawn.x, spawn.z);
+      groundY = ground.heightAt(spawn.x, spawn.z, spawn.y);
       const hit = this.hit;
       if (ground.raycast(spawn.x, groundY + 2, spawn.z, 0, -1, 0, 4, hit)) {
         groundY += 2 - hit.distance;
@@ -434,6 +467,7 @@ export class Car {
     rotateV(this.right, this.rot, RIGHT);
     this.updateControls(dt);
     this.updateHybrid(dt);
+    this.updateIndicator();
     this.absActive = false;
     this.tcActive = false;
     this.impactForce = 0;
@@ -980,7 +1014,7 @@ export class Car {
       const wx = this.pos.x + arm.x;
       const wy = this.pos.y + arm.y;
       const wz = this.pos.z + arm.z;
-      const depth = surface.heightAt(wx, wz) - wy;
+      const depth = surface.heightAt(wx, wz, wy) - wy;
       if (depth <= 0) continue;
       const vp = crossV(this.t1, this.angVel, arm);
       addScaledV(vp, vp, this.vel, 1);
@@ -1005,7 +1039,7 @@ export class Car {
       const arm = rotateV(this.t0, this.rot, p);
       const wx = this.pos.x + arm.x;
       const wz = this.pos.z + arm.z;
-      const depth = surface.wallContact!(wx, wz, normal);
+      const depth = surface.wallContact!(wx, wz, normal, this.pos.y + arm.y);
       if (depth <= 0) continue;
       const vp = crossV(this.t1, this.angVel, arm);
       addScaledV(vp, vp, this.vel, 1);
@@ -1272,7 +1306,12 @@ export class Car {
       (this.shiftTimer > 0 ? FLAG_SHIFTING : 0) |
       (this.up.y < 0.3 ? FLAG_UPSIDE_DOWN : 0) |
       (this.limiterActive ? FLAG_LIMITER : 0) |
-      (this.shiftDeniedTimer > 0 ? FLAG_SHIFT_DENIED : 0);
+      (this.shiftDeniedTimer > 0 ? FLAG_SHIFT_DENIED : 0) |
+      (this.headlights ? FLAG_HEADLIGHTS : 0) |
+      (this.indicator < 0 ? FLAG_INDICATOR_LEFT : 0) |
+      (this.indicator > 0 ? FLAG_INDICATOR_RIGHT : 0) |
+      (this.hazards ? FLAG_HAZARDS : 0) |
+      (this.horn ? FLAG_HORN : 0);
     out[base + C.ACCEL_LONG] = this.accelLong;
     out[base + C.ACCEL_LAT] = this.accelLat;
     out[base + C.STEER_ANGLE] = (this.wheels[0]!.steer + this.wheels[1]!.steer) / 2;

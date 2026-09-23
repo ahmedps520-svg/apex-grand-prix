@@ -97,8 +97,8 @@ const SHIFT_DIP = 0.3;
 /** Shortest time a limiter or shift flag is heard, so low frame rates can't skip it. */
 const LIMITER_HOLD = 0.08;
 const SHIFT_HOLD = 0.05;
-/** Second squeal band relative to the first: two peaks sound less like a whistle. */
-const SQUEAL_SPREAD = 1.37;
+/** The second squeal tone's ratio to the first: a slow beat between them makes it shimmer. */
+const SQUEAL_SPREAD = 1.006;
 const WANDER_RATE = 22050;
 
 type AudioContextClass = new (options?: AudioContextOptions) => AudioContext;
@@ -158,6 +158,8 @@ interface Graph {
   squeal: Knob;
   squealA: Knob;
   squealB: Knob;
+  squealBand: Knob;
+  squealNoiseBand: Knob;
   windCutoff: Knob;
   wind: Knob;
   grass: Knob;
@@ -337,6 +339,8 @@ export class EngineAudio {
     g.squeal.set(squealGain(f.slip, f.speed, f.offRoad) * LEVEL.squeal, now, tone);
     g.squealA.set(squealHz, now, tone);
     g.squealB.set(squealHz * SQUEAL_SPREAD, now, tone);
+    g.squealBand.set(squealHz, now, tone);
+    g.squealNoiseBand.set(squealHz, now, tone);
     g.windCutoff.set(windCutoff(f.speed), now, tone);
     g.wind.set(windGain(f.speed) * LEVEL.wind, now, tone);
     g.grass.set(grassGain(f.offRoad, f.speed) * LEVEL.grass, now, tone);
@@ -477,17 +481,38 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   const cutDepth = gainNode(ctx, 0);
   limiterOsc.connect(cutDepth).connect(cut.gain);
 
-  // Tyre squeal: two resonant bands of noise with a wandering pitch.
-  const squealA = filterNode(ctx, 'bandpass', 1400, 9);
-  const squealB = filterNode(ctx, 'bandpass', 1400 * SQUEAL_SPREAD, 12);
+  // Tyre squeal: the stick-slip tone of a sliding tyre. Two slightly detuned sawtooths (all
+  // the harmonics) through a resonant band, warbling and wandering in pitch, over a little
+  // noise in the same band for the scrub.
+  const squealOscA = ctx.createOscillator();
+  squealOscA.type = 'sawtooth';
+  squealOscA.frequency.value = 1000;
+  const squealOscB = ctx.createOscillator();
+  squealOscB.type = 'sawtooth';
+  squealOscB.frequency.value = 1000 * SQUEAL_SPREAD;
+  const squealBand = filterNode(ctx, 'bandpass', 1000, 2.2);
+  const squealTone = gainNode(ctx, 0.5);
+  squealOscA.connect(squealBand);
+  squealOscB.connect(squealBand);
+  squealBand.connect(squealTone);
+  const squealNoiseBand = filterNode(ctx, 'bandpass', 1000, 5);
+  const squealNoise = gainNode(ctx, 0.35);
+  roadNoise.connect(squealNoiseBand).connect(squealNoise);
   const squeal = gainNode(ctx, 0);
-  roadNoise.connect(squealA).connect(squeal);
-  roadNoise.connect(squealB).connect(squeal);
+  squealTone.connect(squeal);
+  squealNoise.connect(squeal);
   squeal.connect(stallGuard);
+  // Pitch: a 6.5 Hz warble on top of the random wander.
+  const squealVibrato = ctx.createOscillator();
+  squealVibrato.frequency.value = 6.5;
+  const squealVibratoDepth = gainNode(ctx, 22);
+  squealVibrato.connect(squealVibratoDepth);
   const squealWobble = gainNode(ctx, 40);
   fastWander.connect(squealWobble);
-  squealWobble.connect(squealA.detune);
-  squealWobble.connect(squealB.detune);
+  for (const target of [squealOscA.detune, squealOscB.detune, squealBand.detune]) {
+    squealVibratoDepth.connect(target);
+    squealWobble.connect(target);
+  }
 
   // Wind and grass rumble.
   const windFilter = filterNode(ctx, 'lowpass', windCutoff(0), 0);
@@ -501,6 +526,9 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   loadOsc.start(now);
   idleOsc.start(now);
   limiterOsc.start(now);
+  squealOscA.start(now);
+  squealOscB.start(now);
+  squealVibrato.start(now);
   engineNoise.start(now);
   // Offsets decorrelate sources that share a buffer.
   roadNoise.start(now, 0.9);
@@ -524,8 +552,10 @@ function buildGraph(ctx: BaseAudioContext): Graph {
     cutBase: new Knob(cut.gain),
     cutDepth: new Knob(cutDepth.gain),
     squeal: new Knob(squeal.gain),
-    squealA: new Knob(squealA.frequency),
-    squealB: new Knob(squealB.frequency),
+    squealA: new Knob(squealOscA.frequency),
+    squealB: new Knob(squealOscB.frequency),
+    squealBand: new Knob(squealBand.frequency),
+    squealNoiseBand: new Knob(squealNoiseBand.frequency),
     windCutoff: new Knob(windFilter.frequency),
     wind: new Knob(wind.gain),
     grass: new Knob(grass.gain),
