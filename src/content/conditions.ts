@@ -3,7 +3,7 @@
  * the simulation, the menus and the renderer can all share them.
  */
 
-export type TimeOfDay = 'morning' | 'midday' | 'afternoon' | 'golden' | 'dusk';
+export type TimeOfDay = 'morning' | 'midday' | 'afternoon' | 'golden' | 'dusk' | 'night';
 export type Weather = 'clear' | 'cloudy' | 'overcast' | 'lightRain' | 'heavyRain';
 
 export interface Conditions {
@@ -23,6 +23,7 @@ export const TIMES_OF_DAY: ReadonlyArray<{ value: Conditions['time']; text: stri
   { value: 'afternoon', text: 'Afternoon' },
   { value: 'golden', text: 'Golden hour' },
   { value: 'dusk', text: 'Dusk' },
+  { value: 'night', text: 'Night' },
 ];
 
 /** Choices for a weather setting, driest first. */
@@ -41,6 +42,7 @@ export const SUN_ELEVATION: Readonly<Record<TimeOfDay, number>> = {
   afternoon: 35,
   golden: 7,
   dusk: 2,
+  night: -14,
 };
 
 const WETNESS: Readonly<Record<Weather, number>> = {

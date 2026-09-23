@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import type { Settings } from '../../app/settings';
 import type { Conditions, Weather } from '../../content/conditions';
-import type { Difficulty, GameMode, SpawnPoint } from '../../shared/protocol';
+import type { Difficulty, GameMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import type { PromptFamily } from './prompts';
 
 /**
@@ -21,6 +21,7 @@ export type ScreenId =
   | 'standings'
   | 'raceSetup'
   | 'freeSetup'
+  | 'roamSetup'
   | 'pause'
   | 'results'
   | 'replay'
@@ -41,6 +42,8 @@ export interface SessionSetup {
   carId: string;
   /** Free drive on the proving ground. */
   location: SpawnPoint;
+  /** Free roam: where in the open world to start. */
+  roamStart: RoamStart;
   opponents: number;
   laps: number;
   difficulty: Difficulty;
@@ -199,6 +202,7 @@ export class MenuStore {
     trackId: '',
     carId: 'gt',
     location: 'loop',
+    roamStart: 'downtown',
     opponents: 7,
     laps: 3,
     difficulty: 'medium',

@@ -13,18 +13,18 @@ Starts with a short studio and logo intro (any button skips it), then a title sc
 - **Quick Race:** pick a circuit and a car, 1–11 AI opponents, laps, difficulty and grid slot. A flyover of the circuit leads into the grid; standing start with five red lights, positions, lap and sector timing; the top three take the podium under confetti before the results.
 - **Championship:** a season of 3 to 6 races with points for the top ten (25-18-15-12-10-8-6-4-2-1); the grid lines up in championship order and a season in progress is saved.
 - **Time Trial:** hot laps with sector splits against your best and the stored track record, chasing a ghost of your best lap.
-- **Free Drive:** the proving ground with a handling loop, a timed 1 km drag strip and a 60 m skidpad.
+- **Free Roam:** an open world streamed around you as you drive: a downtown grid of avenues and towers, an elevated orbital highway with on/off ramps at four interchanges, suburbs, an industrial port on the sea, a mountain road winding up the ridge, and the club circuit joined to the roads. Day, night or any weather; a speed-limit sign on the HUD and a road minimap; headlights, indicators, hazards and a horn. Traffic, police and events follow in later pushes. The proving ground (handling loop, timed 1 km drag strip, 60 m skidpad) is still there under Free Roam → Proving ground.
 - **Driving school:** offered on the first visit and always in the menu. Throttle, braking, staying on track, the racing line, braking zones, DRS and ERS, each a button prompt and a progress bar rather than a paragraph, in a junior formula car on the club circuit.
 - **Circuits:** eight fictional tracks, from a 2.5 km club circuit to a 5.5 km high-speed autodrome, a street circuit, a roval and a desert finale, with kerbs, gravel or grass run-off, barriers, grandstands and working start lights.
 - **Replays:** watch the race again from TV cameras, a chase camera or onboard, at 0.25× to 4×, following any car. Between races, the menus show an AI race from the TV cameras.
 - **Cars:** 30 cars in six classes (GT, Formula, Prototype, Touring sedans, Street and all-wheel-drive SUVs), each with its own power, weight, grip and aero.
 - **Grids:** race everyone in your car, a mixed field from your class, or two classes at once (the faster class starts in front).
 - **Liveries:** design your own (pattern, three colours, race number, gloss, matte, metallic or pearl finish) or pick a preset; every rival gets its own look.
-- **Weather and time of day:** morning to dusk, clear to heavy rain. Rain darkens and wets the track, cuts grip for you and the AI, and throws up spray.
+- **Weather and time of day:** morning to night, clear to heavy rain. Rain darkens and wets the track, cuts grip for you and the AI, and throws up spray.
 - **Damage:** off, light or full. Crashes cost downforce, power or steering alignment, shown on the HUD and called out by the race engineer.
 - **Photo mode:** from the pause menu: free camera, depth of field, exposure, filters, and save the shot as a PNG.
 - **Handling:** a 400 Hz physics model with Pacejka tyres, limited-slip diff, ABS/TC Off/Low/High, manual paddles or automatic gears. Formula and Prototype cars have DRS (open it in the zones when you are within a second of the car ahead) and an ERS boost that recharges under braking; the AI uses both.
-- **Controls:** keyboard, DualSense/Xbox controllers (with rumble on Chrome/Edge) and steering wheels (setup wizard, 1:1 steering). Menus work with a controller, keyboard, mouse or touch; buttons and keys can be rebound.
+- **Controls:** keyboard, DualSense/Xbox controllers (with rumble on Chrome/Edge) and steering wheels (setup wizard, 1:1 steering). Menus work with a controller, keyboard, mouse or touch; buttons and keys can be rebound. On an iPad or phone: on-screen pedals and paddles, and steering by dragging on the left half of the screen or by tilting the device (Settings → Controls; iPadOS asks for motion access on the first tap).
 - **Installable:** add it to the home screen (iPad: Share → Add to Home Screen); it works offline after the first visit.
 
 | Action | Keyboard | Controller |
@@ -34,6 +34,9 @@ Starts with a short studio and logo intro (any button skips it), then a title sc
 | Shift up / down | E / Q | R1 / L1 (RB / LB) |
 | Handbrake | Space | ✕ (A) |
 | DRS / ERS boost | F / B | □ (X) / L3 |
+| Headlights / hazards (free roam) | L / X | D-pad up / down |
+| Indicators (free roam) | , / . | D-pad left / right |
+| Horn (free roam) | N | R3 |
 | Pause menu | Esc or P | Options (Menu) |
 | Camera | C | ○ (B) |
 | Reset car | R | △ (Y) |

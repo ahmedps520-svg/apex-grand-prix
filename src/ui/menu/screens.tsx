@@ -15,7 +15,8 @@ import {
   type PadAction,
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
-import type { AidLevel, SpawnPoint } from '../../shared/protocol';
+import type { Detail } from '../../app/settings';
+import type { AidLevel, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
@@ -207,12 +208,12 @@ export function MainScreen({ store }: ScreenProps) {
           onPress={() => go('timeTrial')}
         />
         <Tile
-          icon="road"
-          label="Free Drive"
-          hint="The proving ground"
+          icon="city"
+          label="Free Roam"
+          hint="The open world"
           onPress={() => {
-            store.update({ mode: 'free' });
-            store.push('freeSetup');
+            store.update({ mode: 'roam' });
+            store.push('roamSetup');
           }}
         />
         <Tile
@@ -774,6 +775,56 @@ export function FreeSetupScreen({ store }: ScreenProps) {
   );
 }
 
+const DETAIL_OPTIONS: ReadonlyArray<{ value: Detail; text: string }> = [
+  { value: 'auto', text: 'Auto' },
+  { value: 'low', text: 'Low' },
+  { value: 'medium', text: 'Medium' },
+  { value: 'high', text: 'High' },
+];
+
+const ROAM_STARTS: ReadonlyArray<{ value: RoamStart; text: string }> = [
+  { value: 'downtown', text: 'Downtown' },
+  { value: 'highway', text: 'Orbital highway' },
+  { value: 'suburbs', text: 'Suburbs' },
+  { value: 'port', text: 'Port' },
+  { value: 'mountain', text: 'Ridge Road' },
+  { value: 'circuit', text: 'Circuit' },
+];
+
+export function RoamSetupScreen({ store }: ScreenProps) {
+  const setup = store.setup.value;
+  return (
+    <div class="mn-panel">
+      <Header title="Free Roam" subtitle="The open world: city, orbital, port, ridge and circuit" />
+      <div class="mn-list">
+        <Choice
+          label="Start"
+          value={setup.roamStart}
+          options={ROAM_STARTS}
+          onChange={(roamStart) => store.update({ roamStart })}
+          wrap
+        />
+        <Choice
+          label="Car"
+          value={setup.carId}
+          options={CARS.map((c) => ({ value: c.id, text: `${c.name} (${c.className})` }))}
+          onChange={(carId) => store.update({ carId })}
+          wrap
+        />
+        <ConditionChoices store={store} />
+        <AidChoices store={store} aids={store.settings.aids} />
+        <Button
+          label="Drive"
+          primary
+          autofocus
+          onPress={() => store.actions.startSession({ ...store.setup.value, mode: 'roam' })}
+        />
+        <Button label="Proving ground" onPress={() => store.push('freeSetup')} />
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ pause & results
 
 export function PauseScreen({ store }: ScreenProps) {
@@ -1172,6 +1223,12 @@ export function SettingsScreen({ store }: ScreenProps) {
               step={0.05}
               format={percent}
               onChange={(v) => ((s.resolutionScale = v), changed())}
+            />
+            <Choice
+              label="World detail"
+              value={s.detail}
+              options={DETAIL_OPTIONS}
+              onChange={(v) => ((s.detail = v), changed())}
             />
             <Toggle
               label="Performance overlay"

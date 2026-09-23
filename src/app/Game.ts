@@ -17,6 +17,10 @@ import { createCarRenderState, interpolateCar, type CarRenderState } from '../re
 import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
+import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
+import { CityMinimap } from '../ui/CityMinimap';
+import { cityMap } from '../content/city/map';
+import { MAP_MAX_X, MAP_MAX_Z, MAP_MIN_X, MAP_MIN_Z } from '../content/city/terrain';
 import {
   PhotoCamera,
   PhotoControls,
@@ -28,6 +32,7 @@ import {
 } from '../render/PhotoMode';
 import { TvDirector } from '../render/TvCamera';
 import {
+  FLAG_HORN,
   FLAG_LIMITER,
   FLAG_SHIFTING,
   SIM_HZ,
@@ -121,7 +126,7 @@ declare global {
   }
 }
 
-type Scenery = TestGroundScene | TrackScene;
+type Scenery = TestGroundScene | TrackScene | CityScene;
 
 const STATS_INTERVAL = 0.5;
 /** The first shift light comes on this far below the shift point. */
@@ -253,7 +258,7 @@ export class Game {
   private readonly menus: MenuStore;
   private readonly focus: FocusManager;
   private readonly menuHost: HTMLElement;
-  private minimap: Minimap | null = null;
+  private minimap: Minimap | CityMinimap | null = null;
   private carModel: CarModel = carById('gt');
   /** The model each car view was built for. */
   private readonly carModels: CarModel[] = [];
@@ -591,9 +596,11 @@ export class Game {
     return {
       fieldCars: setup.mode === 'race' ? this.pickField(setup, count, seed) : undefined,
       mode: setup.mode,
-      trackId: setup.mode === 'free' ? '' : setup.trackId || TRACKS[0]?.id || '',
+      trackId:
+        setup.mode === 'free' || setup.mode === 'roam' ? '' : setup.trackId || TRACKS[0]?.id || '',
       carId: setup.carId,
       location: setup.location,
+      roamStart: setup.roamStart,
       opponents: setup.opponents,
       laps: setup.laps,
       difficulty: setup.difficulty,
@@ -617,9 +624,16 @@ export class Game {
     const previous = this.session;
     this.session = config;
     // The proving ground is built at start-up; circuits are built when first driven.
-    const changed = previous ? previous.trackId !== config.trackId : config.trackId !== '';
+    const roam = config.mode === 'roam';
+    const changed = previous
+      ? previous.trackId !== config.trackId || (previous.mode === 'roam') !== roam
+      : config.trackId !== '' || roam;
+    this.input.roam = roam;
     if (changed) this.buildScenery(config);
-    else if (this.scenery instanceof TrackScene && config.conditions) {
+    else if (
+      (this.scenery instanceof TrackScene || this.scenery instanceof CityScene) &&
+      config.conditions
+    ) {
       this.scenery.setConditions(config.conditions);
     }
     this.attract = attract && this.tv !== null;
@@ -747,7 +761,20 @@ export class Game {
     this.minimap = null;
     this.cones = null;
     const def = config.trackId ? trackById(config.trackId) : undefined;
-    if (def) {
+    if (config.mode === 'roam') {
+      this.track = null;
+      this.tv = null;
+      const map = cityMap();
+      const detail =
+        this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
+      this.scenery = new CityScene(map, config.conditions, detail);
+      this.minimap = new CityMinimap(this.ui, map, {
+        minX: MAP_MIN_X,
+        maxX: MAP_MAX_X,
+        minZ: MAP_MIN_Z,
+        maxZ: MAP_MAX_Z,
+      });
+    } else if (def) {
       this.track = new Track(def);
       const scene = new TrackScene(this.track, config.conditions);
       this.scenery = scene;
@@ -783,7 +810,7 @@ export class Game {
     for (let i = 0; i < models.length; i++) {
       const model = models[i]!;
       if (this.carModels[i]?.id === model.id) continue;
-      const view = new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i));
+      const view = new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
       const old = this.cars[i];
       if (old) {
         old.root.removeFromParent();
@@ -860,7 +887,8 @@ export class Game {
     const driving =
       this.driving && !this.menus.open && !this.photo && !this.flyover && !this.podium;
     this.hud.root.hidden = !driving;
-    this.raceHud.setVisible(driving && this.session?.mode !== 'free' && !this.school);
+    const mode = this.session?.mode;
+    this.raceHud.setVisible(driving && mode !== 'free' && mode !== 'roam' && !this.school);
     this.minimap?.setVisible(driving);
     this.telemetry.setVisible(driving && this.settings.telemetry);
     this.telemetry.root.classList.toggle('below-map', this.minimap !== null);
@@ -946,6 +974,11 @@ export class Game {
       }
       if (controls) {
         this.hud.update(player, dt);
+        const roam = this.session?.mode === 'roam';
+        this.hud.setSpeedLimit(
+          roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
+        );
+        this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
         this.telemetry.update(dt, player, {
           steer: input.raw.steer,
           throttle: input.raw.throttle,
@@ -986,6 +1019,10 @@ export class Game {
   /** Rain around the camera and spray behind the cars (does nothing in the dry). */
   private updateWeather(dt: number): void {
     const scene = this.scenery;
+    if (scene instanceof CityScene) {
+      scene.update(dt, this.camera.camera);
+      return;
+    }
     if (!(scene instanceof TrackScene)) return;
     scene.update(dt, this.camera.camera);
     for (let i = 0; i < this.cars.length; i++) {
@@ -1655,7 +1692,7 @@ export class Game {
       const green = race !== null && race.phase === 'racing' && race.time < 1.5;
       this.scenery.setStartLights(lights, green);
     }
-    if (this.minimap && track) {
+    if (this.minimap && (track || this.session?.mode === 'roam')) {
       for (let i = 0; i < count; i++) {
         const dot = this.minimapCars[i]!;
         dot.x = this.states[i]!.pos.x;

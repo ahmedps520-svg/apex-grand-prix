@@ -88,9 +88,12 @@ export function squealGain(slip: number, speed: number, offRoad: number): number
   return smoothstep(0.8, 1.3, slip) * smoothstep(3, 10, speedOf(speed)) * (1 - clamp01(offRoad));
 }
 
-/** Squeal pitch, Hz: rises a little with speed and with how hard the tyre slides. */
+/**
+ * Squeal pitch, Hz: the stick-slip tone of a sliding tyre sits around a kilohertz, rising a
+ * little with speed and with how hard the tyre slides.
+ */
 export function squealFrequency(speed: number, slip: number): number {
-  return 1100 + 11 * Math.min(speedOf(speed), 80) + 350 * clamp01(slip - 1);
+  return 820 + 8 * Math.min(speedOf(speed), 80) + 300 * clamp01(slip - 1);
 }
 
 /** Wind and road noise 0…1, rising with the square of speed (full at ~270 km/h). */

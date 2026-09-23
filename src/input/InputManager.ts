@@ -188,6 +188,12 @@ export class InputManager {
   private pendingShiftUp = 0;
   private pendingDrs = 0;
   private pendingBoost = 0;
+  private pendingLights = 0;
+  private pendingIndicatorLeft = 0;
+  private pendingIndicatorRight = 0;
+  private pendingHazards = 0;
+  /** Free roam: the D-pad works the car's lights instead of the quick menu. */
+  roam = false;
   private pendingShiftDown = 0;
   private readonly prevButtons = new Map<number, boolean[]>();
   private readonly prevWheel = new Map<WheelAction, boolean>();
@@ -255,13 +261,22 @@ export class InputManager {
     d.shiftDown = this.pendingShiftDown;
     d.drs = this.pendingDrs;
     d.boost = this.pendingBoost;
+    d.lights = this.pendingLights;
+    d.indicatorLeft = this.pendingIndicatorLeft;
+    d.indicatorRight = this.pendingIndicatorRight;
+    d.hazards = this.pendingHazards;
     this.pendingShiftUp = 0;
     this.pendingShiftDown = 0;
     this.pendingDrs = 0;
     this.pendingBoost = 0;
+    this.pendingLights = 0;
+    this.pendingIndicatorLeft = 0;
+    this.pendingIndicatorRight = 0;
+    this.pendingHazards = 0;
 
     const k = this.keys;
     const keysDown = (codes: readonly string[]) => codes.some((c) => k.has(c));
+    d.horn = keysDown(this.bindings.keys.horn);
     const kb = this.bindings.keys;
     const kbSteer = (keysDown(kb.steerRight) ? 1 : 0) - (keysDown(kb.steerLeft) ? 1 : 0);
     let throttle = keysDown(kb.throttle) ? 1 : 0;
@@ -309,10 +324,20 @@ export class InputManager {
         for (const [binding, action] of PAD_BUTTON_ACTIONS) {
           if (pressed(b[binding])) this.actions.push(action);
         }
-        if (pressed(PAD.DPAD_UP)) this.actions.push('menuUp');
-        if (pressed(PAD.DPAD_DOWN)) this.actions.push('menuDown');
-        if (pressed(PAD.DPAD_LEFT)) this.actions.push('menuPrev');
-        if (pressed(PAD.DPAD_RIGHT)) this.actions.push('menuNext');
+        if (this.roam) {
+          // Free roam: the D-pad works the lights and R3 is the horn (the quick menu stays on
+          // the keyboard there).
+          if (pressed(PAD.DPAD_UP)) d.lights++;
+          if (pressed(PAD.DPAD_DOWN)) d.hazards++;
+          if (pressed(PAD.DPAD_LEFT)) d.indicatorLeft++;
+          if (pressed(PAD.DPAD_RIGHT)) d.indicatorRight++;
+          if (now2[PAD.R3] && !now2[PAD.L3]) d.horn = true;
+        } else {
+          if (pressed(PAD.DPAD_UP)) this.actions.push('menuUp');
+          if (pressed(PAD.DPAD_DOWN)) this.actions.push('menuDown');
+          if (pressed(PAD.DPAD_LEFT)) this.actions.push('menuPrev');
+          if (pressed(PAD.DPAD_RIGHT)) this.actions.push('menuNext');
+        }
         if (pressed(b.shiftUp)) d.shiftUp++;
         if (pressed(b.drs)) d.drs++;
         if (pressed(b.boost)) d.boost++;
@@ -552,6 +577,10 @@ export class InputManager {
         if (this.bindings.keys.shiftUp.includes(event.code)) this.pendingShiftUp++;
         if (this.bindings.keys.drs.includes(event.code)) this.pendingDrs++;
         if (this.bindings.keys.boost.includes(event.code)) this.pendingBoost++;
+        if (this.bindings.keys.lights.includes(event.code)) this.pendingLights++;
+        if (this.bindings.keys.indicatorLeft.includes(event.code)) this.pendingIndicatorLeft++;
+        if (this.bindings.keys.indicatorRight.includes(event.code)) this.pendingIndicatorRight++;
+        if (this.bindings.keys.hazards.includes(event.code)) this.pendingHazards++;
         if (this.bindings.keys.shiftDown.includes(event.code)) this.pendingShiftDown++;
       }
       this.keys.add(event.code);

@@ -4,6 +4,12 @@ import * as THREE from 'three/webgpu';
 import { defaultLivery, type Livery } from '../content/livery';
 import type { CarStyle } from '../sim/vehicle/cars';
 import type { AxleSpec, CarSpec } from '../sim/vehicle/spec';
+import {
+  FLAG_HAZARDS,
+  FLAG_HEADLIGHTS,
+  FLAG_INDICATOR_LEFT,
+  FLAG_INDICATOR_RIGHT,
+} from '../shared/protocol';
 import type { CarRenderState } from './interpolate';
 import { LiveryMaterial, type LiveryLayout } from './liveryMaterial';
 
@@ -16,7 +22,7 @@ interface WheelView {
 }
 
 /** Materials of the static body parts; each becomes one merged mesh (one draw call). */
-type Part = 'paint' | 'glass' | 'carbon' | 'head' | 'tail';
+type Part = 'paint' | 'glass' | 'carbon' | 'head' | 'tail' | 'indicatorL' | 'indicatorR';
 
 /** Proportions of the closed-cockpit body styles. */
 const CLOSED_LOOKS: Record<
@@ -141,11 +147,28 @@ export class CarView {
     carbon: [],
     head: [],
     tail: [],
+    indicatorL: [],
+    indicatorR: [],
   };
   private readonly paint: LiveryMaterial;
+  /** Lamp materials, driven by the car's lights and brakes each frame. */
+  private readonly lamps: {
+    head: THREE.MeshStandardMaterial;
+    tail: THREE.MeshStandardMaterial;
+    left: THREE.MeshStandardMaterial;
+    right: THREE.MeshStandardMaterial;
+  };
+  /** The player's car casts real headlight beams. */
+  private readonly beams: THREE.SpotLight[] = [];
 
   /** `livery` wins over `paint`; without one the car wears the default livery in `paint`. */
-  constructor(spec: CarSpec, paint = 0xa3101f, style: CarStyle = 'gt', livery?: Livery) {
+  constructor(
+    spec: CarSpec,
+    paint = 0xa3101f,
+    style: CarStyle = 'gt',
+    livery?: Livery,
+    beams = false,
+  ) {
     const mat = {
       glass: this.material(
         new THREE.MeshPhysicalMaterial({ color: 0x0d141c, roughness: 0.08, metalness: 0.3 }),
@@ -170,11 +193,27 @@ export class CarView {
           emissiveIntensity: 1.5,
         }),
       ),
+      indicatorL: this.material(
+        new THREE.MeshStandardMaterial({
+          color: 0x7a3a08,
+          emissive: 0xff8f1f,
+          emissiveIntensity: 0.15,
+        }),
+      ),
+      indicatorR: this.material(
+        new THREE.MeshStandardMaterial({
+          color: 0x7a3a08,
+          emissive: 0xff8f1f,
+          emissiveIntensity: 0.15,
+        }),
+      ),
     };
+    this.lamps = { head: mat.head, tail: mat.tail, left: mat.indicatorL, right: mat.indicatorR };
 
     const layout = style === 'formula' ? this.buildFormula(spec) : this.buildClosed(spec, style);
     this.paint = new LiveryMaterial(layout, livery ?? { ...defaultLivery(), primary: paint });
     this.mergeParts({ ...mat, paint: this.paint.material });
+    if (beams) this.addBeams(layout.front);
 
     this.addAxle(spec, spec.front, mat.tyre, mat.rim, mat.caliper);
     this.addAxle(spec, spec.rear, mat.tyre, mat.rim, mat.caliper);
@@ -199,6 +238,17 @@ export class CarView {
 
   update(state: CarRenderState): void {
     this.root.position.set(state.pos.x, state.pos.y, state.pos.z);
+    const flags = state.flags;
+    const blink = performance.now() % 800 < 400;
+    const left = (flags & (FLAG_INDICATOR_LEFT | FLAG_HAZARDS)) !== 0 && blink;
+    const right = (flags & (FLAG_INDICATOR_RIGHT | FLAG_HAZARDS)) !== 0 && blink;
+    const lights = (flags & FLAG_HEADLIGHTS) !== 0;
+    const lamps = this.lamps;
+    lamps.left.emissiveIntensity = left ? 4 : 0.15;
+    lamps.right.emissiveIntensity = right ? 4 : 0.15;
+    lamps.head.emissiveIntensity = lights ? 4.5 : 1.6;
+    lamps.tail.emissiveIntensity = state.brake > 0.05 ? 3.5 : lights ? 1.6 : 0.6;
+    for (const beam of this.beams) beam.visible = lights;
     this.root.quaternion.set(state.rot.x, state.rot.y, state.rot.z, state.rot.w);
     for (let i = 0; i < this.wheels.length; i++) {
       const view = this.wheels[i]!;
@@ -357,6 +407,17 @@ export class CarView {
       ]);
       this.block('tail', 0.34, 0.09, 0.04, [
         side * (halfWidth - 0.3),
+        lightY + 0.04,
+        body.rear + 0.005,
+      ]);
+      const indicator = side < 0 ? 'indicatorL' : 'indicatorR';
+      this.block(indicator, 0.1, 0.07, 0.04, [
+        side * (halfWidth - 0.09),
+        lightY,
+        -body.front - 0.005,
+      ]);
+      this.block(indicator, 0.1, 0.07, 0.04, [
+        side * (halfWidth - 0.08),
         lightY + 0.04,
         body.rear + 0.005,
       ]);
@@ -540,6 +601,19 @@ export class CarView {
     at: readonly [number, number, number],
   ): void {
     this.parts[part].push(new THREE.BoxGeometry(w, h, d).translate(at[0], at[1], at[2]));
+  }
+
+  /** Two spot lights from the headlamps, lighting the road ahead (the player's car only). */
+  private addBeams(front: number): void {
+    for (const side of [-1, 1]) {
+      const beam = new THREE.SpotLight(0xfff4de, 90, 75, 0.55, 0.6, 1.4);
+      beam.position.set(side * 0.62, 0.55, -front);
+      beam.target.position.set(side * 1.2, -0.6, -front - 30);
+      beam.castShadow = false;
+      beam.visible = false;
+      this.root.add(beam, beam.target);
+      this.beams.push(beam);
+    }
   }
 
   /** Turns the collected body parts into one mesh per material. */

@@ -285,8 +285,8 @@ export class Track implements Surface {
    * Barrier contact for a body point: how far it is through the wall and the direction to push
    * it back (horizontal, unit length). Returns 0 when clear.
    */
-  wallContact(x: number, z: number, out: { nx: number; nz: number }, hint = -1): number {
-    const pr = this.project(x, z, hint);
+  wallContact(x: number, z: number, out: { nx: number; nz: number }): number {
+    const pr = this.project(x, z);
     const depth = Math.abs(pr.lateral) - this.wallOffset;
     if (depth <= 0) return 0;
     const p = this.samples[pr.index]!;

@@ -37,9 +37,13 @@ export interface PadSettings {
   brakeDeadzone: number;
 }
 
+export type Detail = 'auto' | 'low' | 'medium' | 'high';
+
 export interface Settings {
   version: 3;
   resolutionScale: number;
+  /** World detail (open-world draw distance, buildings, shadows); auto picks by device. */
+  detail: Detail;
   units: Units;
   overlay: boolean;
   telemetry: boolean;
@@ -95,6 +99,7 @@ export const defaultPadSettings = (): PadSettings => ({
 export const defaultSettings = (): Settings => ({
   version: 3,
   resolutionScale: 1,
+  detail: 'auto',
   units: 'metric',
   overlay: false,
   telemetry: false,
@@ -167,6 +172,10 @@ export function parseSettings(raw: unknown): Settings {
     version: SETTINGS_VERSION,
     // Version 1 fields keep their names, so they carry over as they are.
     resolutionScale: num(raw.resolutionScale, 0.25, 1.5, d.resolutionScale),
+    detail:
+      raw.detail === 'low' || raw.detail === 'medium' || raw.detail === 'high'
+        ? raw.detail
+        : 'auto',
     units: raw.units === 'imperial' ? 'imperial' : 'metric',
     overlay: typeof raw.overlay === 'boolean' ? raw.overlay : d.overlay,
     telemetry: typeof raw.telemetry === 'boolean' ? raw.telemetry : d.telemetry,
