@@ -38,7 +38,7 @@ import {
 import { mulberry32 } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 import { Track } from '../sim/track/Track';
-import { carById, type CarModel } from '../sim/vehicle/cars';
+import { CARS, carById, type CarModel } from '../sim/vehicle/cars';
 import { TEST_MULE } from '../sim/vehicle/spec';
 import { HelpPanel } from '../ui/HelpPanel';
 import { Hud } from '../ui/Hud';
@@ -147,6 +147,16 @@ const LOCATIONS: ReadonlyArray<{ value: SpawnPoint; text: string }> = [
 
 const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4];
 const REPLAY_CAMERAS: readonly ReplayCamera[] = ['tv', 'chase', 'onboard'];
+/** Rough pace order of the classes, so a two-class grid starts with the faster cars in front. */
+const CLASS_PACE: Record<string, number> = {
+  Formula: 1,
+  Prototype: 2,
+  GT: 3,
+  Touring: 4,
+  Street: 5,
+  SUV: 6,
+};
+
 /** Base car of each class: the menus' backdrop race uses one of them. */
 const SHOWCASE_CARS = ['gt', 'formula', 'prototype', 'touring', 'street'];
 /** Seconds the backdrop race follows one car before the director picks another. */
@@ -219,6 +229,8 @@ export class Game {
   private readonly menuHost: HTMLElement;
   private minimap: Minimap | null = null;
   private carModel: CarModel = carById('gt');
+  /** The model each car view was built for. */
+  private readonly carModels: CarModel[] = [];
   private readonly minimapCars: MinimapCar[] = [];
   private readonly audio = new EngineAudio();
   private readonly engineer = new RaceEngineer();
@@ -460,6 +472,33 @@ export class Game {
     return { ...this.menus.setup.value, mode: 'free' };
   }
 
+  /**
+   * The car for every place on the grid: all the player's car, mixed cars from their class, or
+   * two classes with the faster one lined up in front. Seeded by the season in a championship,
+   * so each rival keeps the same car all year.
+   */
+  private pickField(setup: SessionSetup, count: number, seed: number): string[] {
+    const cars = [setup.carId];
+    if (setup.field === 'same') {
+      while (cars.length < count) cars.push(setup.carId);
+      return cars;
+    }
+    const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
+    const rand = mulberry32(((season?.liverySeed ?? seed) ^ 0x5bd1e995) >>> 0);
+    const pick = (className: string) => {
+      const pool = CARS.filter((c) => c.className === className);
+      return pool[Math.floor(rand() * pool.length)]?.id ?? setup.carId;
+    };
+    const own = carById(setup.carId).className;
+    const other = setup.field === 'multi' && setup.secondClass !== own ? setup.secondClass : own;
+    const rivals: string[] = [];
+    for (let i = 1; i < count; i++) rivals.push(pick(i % 2 === 0 || other === own ? own : other));
+    // Faster class first on the grid (the AI cars fill the grid in order).
+    const pace = (id: string) => CLASS_PACE[carById(id).className] ?? 9;
+    rivals.sort((a, b) => pace(a) - pace(b));
+    return cars.concat(rivals);
+  }
+
   /** The menus' backdrop: ten AI cars racing on a circuit (the given one, or a random one). */
   private showcaseSetup(trackId?: string): SessionSetup {
     const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;
@@ -472,12 +511,16 @@ export class Game {
       laps: 99,
       difficulty: 'expert',
       gridSlot: 0,
+      field: 'class',
       ...randomConditions(),
     };
   }
 
   private configFor(setup: SessionSetup, attract = false): SessionConfig {
+    const seed = (Math.random() * 1e9) | 0;
+    const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
     return {
+      fieldCars: setup.mode === 'race' ? this.pickField(setup, count, seed) : undefined,
       mode: setup.mode,
       trackId: setup.mode === 'free' ? '' : setup.trackId || TRACKS[0]?.id || '',
       carId: setup.carId,
@@ -487,7 +530,7 @@ export class Game {
       difficulty: setup.difficulty,
       gridSlot: Math.min(setup.gridSlot, setup.opponents),
       aids: { ...this.settings.aids },
-      seed: (Math.random() * 1e9) | 0,
+      seed,
       attract: attract || (this.autopilot && setup.mode === 'race'),
       damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
       grip: gripFactor(setup.weather),
@@ -510,7 +553,10 @@ export class Game {
     this.attract = attract && this.tv !== null;
     const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
     this.liverySeed = season?.liverySeed ?? config.seed;
-    this.buildCars(config.mode === 'race' ? config.opponents + 1 : 1, carById(config.carId));
+    const count = config.mode === 'race' ? config.opponents + 1 : 1;
+    this.buildCars(
+      Array.from({ length: count }, (_, i) => carById(config.fieldCars?.[i] ?? config.carId)),
+    );
     this.setupGhost(config);
     this.replay = null;
     this.lastReplay = null;
@@ -644,33 +690,39 @@ export class Game {
     void this.host.renderer.compileAsync(this.scenery.scene, this.camera.camera);
   }
 
-  private buildCars(count: number, model: CarModel): void {
-    if (model.id !== this.carModel.id) {
-      // A different car: rebuild every view.
-      while (this.cars.length > 0) {
-        const car = this.cars.pop()!;
-        car.root.removeFromParent();
-        car.dispose();
-        this.states.pop();
-        this.minimapCars.pop();
-      }
-      this.carModel = model;
-      this.rumble.limiterRpm = model.spec.engine.limiterRpm;
-      const upshift = model.spec.gearbox.upshiftRpm;
+  /** One view per car; a view is rebuilt only when its car model changes. */
+  private buildCars(models: readonly CarModel[]): void {
+    const player = models[0]!;
+    if (player.id !== this.carModel.id) {
+      this.carModel = player;
+      this.rumble.limiterRpm = player.spec.engine.limiterRpm;
+      const upshift = player.spec.gearbox.upshiftRpm;
       this.hud.setEngine({ upshiftRpm: upshift, shiftLightsFrom: upshift - SHIFT_LIGHT_RANGE });
     }
-    while (this.cars.length > count) {
+    while (this.cars.length > models.length) {
       const car = this.cars.pop()!;
       car.root.removeFromParent();
       car.dispose();
       this.states.pop();
       this.minimapCars.pop();
+      this.carModels.pop();
     }
-    while (this.cars.length < count) {
-      const i = this.cars.length;
-      this.cars.push(new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i)));
-      this.states.push(createCarRenderState());
-      this.minimapCars.push({ x: 0, z: 0, color: '#fff', player: i === 0 });
+    for (let i = 0; i < models.length; i++) {
+      const model = models[i]!;
+      if (this.carModels[i]?.id === model.id) continue;
+      const view = new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i));
+      const old = this.cars[i];
+      if (old) {
+        old.root.removeFromParent();
+        old.dispose();
+        this.cars[i] = view;
+        this.carModels[i] = model;
+      } else {
+        this.cars.push(view);
+        this.carModels.push(model);
+        this.states.push(createCarRenderState());
+        this.minimapCars.push({ x: 0, z: 0, color: '#fff', player: i === 0 });
+      }
     }
     for (const car of this.cars) {
       if (!car.root.parent) this.scenery.scene.add(car.root);
@@ -1205,6 +1257,7 @@ export class Game {
         return {
           position: i + 1,
           name: this.driverName(car),
+          car: this.carModels[car]?.name ?? '',
           player: car === 0,
           bestLap: c.bestLap,
           time: c.finished ? c.finishTime : NaN,

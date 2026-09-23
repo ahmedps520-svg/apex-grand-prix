@@ -91,12 +91,29 @@ export class World {
     const count = config.mode === 'race' ? Math.max(config.opponents, 0) + 1 : 1;
     const world = new World(count, track, track.gridSlot(0), spec);
     world.track = track;
+    // Mixed fields: each car gets its own model (the player's is car 0).
+    const models = world.cars.map((_, i) => carById(config.fieldCars?.[i] ?? config.carId));
+    models.forEach((m, i) => {
+      if (m.id !== model.id) world.cars[i] = new Car(m.spec, track.gridSlot(i), track);
+    });
     world.setAids(0, config.aids);
-    const line = computeRacingLine(track, lineOptionsFor(spec, model.aiGrip, track.gripScale));
+    // One racing line per model in the race (they take a moment each to plan).
+    const lines = new Map<string, ReturnType<typeof computeRacingLine>>();
+    const lineFor = (m: typeof model) => {
+      let line = lines.get(m.id);
+      if (!line) {
+        line = computeRacingLine(track, lineOptionsFor(m.spec, m.aiGrip, track.gripScale));
+        lines.set(m.id, line);
+      }
+      return line;
+    };
     const rand = mulberry32(config.seed);
     for (let i = config.attract ? 0 : 1; i < count; i++) {
       const skill = SKILL[config.difficulty] * (0.985 + rand() * 0.03);
-      world.drivers[i] = new AiDriver(track, line, { skill, seed: config.seed + i * 7919 });
+      world.drivers[i] = new AiDriver(track, lineFor(models[i]!), {
+        skill,
+        seed: config.seed + i * 7919,
+      });
       world.cars[i]!.setAids({ ...defaultAids(), gearbox: 'auto', tc: 'high', abs: 'high' });
     }
     for (const car of world.cars) car.damageScale = config.damage ?? 0;

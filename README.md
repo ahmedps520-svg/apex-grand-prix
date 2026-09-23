@@ -14,7 +14,8 @@ A browser racing game built with TypeScript, Vite and three.js. It renders with 
 - **Free Drive:** the proving ground with a handling loop, a timed 1 km drag strip and a 60 m skidpad.
 - **Circuits:** eight fictional tracks, from a 2.5 km club circuit to a 5.5 km high-speed autodrome, a street circuit, a roval and a desert finale, with kerbs, gravel or grass run-off, barriers, grandstands and working start lights.
 - **Replays:** watch the race again from TV cameras, a chase camera or onboard, at 0.25× to 4×, following any car. Between races, the menus show an AI race from the TV cameras.
-- **Cars:** 25 cars in five classes (GT, Formula, Prototype, Touring, Street), each with its own power, weight, grip and aero.
+- **Cars:** 30 cars in six classes (GT, Formula, Prototype, Touring sedans, Street and all-wheel-drive SUVs), each with its own power, weight, grip and aero.
+- **Grids:** race everyone in your car, a mixed field from your class, or two classes at once (the faster class starts in front).
 - **Liveries:** design your own (pattern, three colours, race number, gloss, matte, metallic or pearl finish) or pick a preset; every rival gets its own look.
 - **Weather and time of day:** morning to dusk, clear to heavy rain. Rain darkens and wets the track, cuts grip for you and the AI, and throws up spray.
 - **Damage:** off, light or full. Crashes cost downforce, power or steering alignment, shown on the HUD and called out by the race engineer.

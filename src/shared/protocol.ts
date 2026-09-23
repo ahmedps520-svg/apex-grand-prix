@@ -87,6 +87,8 @@ export interface SessionConfig {
   trackId: string;
   /** Car model for every car in the session (see sim/vehicle/cars). */
   carId: string;
+  /** Mixed fields: the car model for each car by index (car 0 is the player's). */
+  fieldCars?: string[];
   /** Free drive start on the proving ground. */
   location: SpawnPoint;
   opponents: number;

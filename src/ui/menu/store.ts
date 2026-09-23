@@ -47,11 +47,19 @@ export interface SessionSetup {
   gridSlot: number;
   time: Conditions['time'];
   weather: Weather;
+  /** Who races: everyone in the player's car, mixed cars from their class, or two classes. */
+  field: FieldMode;
+  /** The other class in a two-class race. */
+  secondClass: string;
 }
+
+export type FieldMode = 'same' | 'class' | 'multi';
 
 export interface ResultRow {
   position: number;
   name: string;
+  /** Car model. */
+  car: string;
   player: boolean;
   bestLap: number;
   /** Race time, or NaN if the car didn't finish. */
@@ -194,6 +202,8 @@ export class MenuStore {
     gridSlot: 4,
     time: 'track',
     weather: 'clear',
+    field: 'same',
+    secondClass: 'Touring',
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

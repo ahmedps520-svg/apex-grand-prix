@@ -337,6 +337,7 @@ export function ChampionshipScreen({ store }: ScreenProps) {
             store.update({ opponents, gridSlot: Math.min(setup.gridSlot, opponents) })
           }
         />
+        <FieldChoices store={store} />
         <Choice
           label="Laps per race"
           value={setup.laps}
@@ -513,6 +514,7 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               }))}
               onChange={(gridSlot) => store.update({ gridSlot })}
             />
+            <FieldChoices store={store} />
           </>
         )}
         <ConditionChoices store={store} />
@@ -525,6 +527,38 @@ export function RaceSetupScreen({ store }: ScreenProps) {
         />
       </div>
     </div>
+  );
+}
+
+const FIELDS = [
+  { value: 'same', text: 'Same car' },
+  { value: 'class', text: 'Mixed cars, one class' },
+  { value: 'multi', text: 'Two classes' },
+] as const;
+
+/** Who the player races against: their own car, their class, or two classes. */
+function FieldChoices({ store }: ScreenProps) {
+  const setup = store.setup.value;
+  const own = carById(setup.carId).className;
+  const others = CAR_CLASSES.filter((c) => c !== own).map((c) => ({ value: c, text: c }));
+  return (
+    <>
+      <Choice
+        label="Field"
+        value={setup.field}
+        options={FIELDS}
+        onChange={(field) => store.update({ field })}
+      />
+      {setup.field === 'multi' && (
+        <Choice
+          label="Second class"
+          value={setup.secondClass === own ? (others[0]?.value ?? '') : setup.secondClass}
+          options={others}
+          onChange={(secondClass) => store.update({ secondClass })}
+          wrap
+        />
+      )}
+    </>
   );
 }
 
@@ -654,6 +688,7 @@ export function ResultsScreen({ store }: ScreenProps) {
             <tr>
               <th>Pos</th>
               <th>Driver</th>
+              <th>Car</th>
               <th>Best lap</th>
               <th>Time</th>
             </tr>
@@ -663,6 +698,7 @@ export function ResultsScreen({ store }: ScreenProps) {
               <tr class={r.player ? 'player' : ''} style={{ animationDelay: `${i * 60}ms` }}>
                 <td>{r.position}</td>
                 <td>{r.name}</td>
+                <td class="mn-dim">{r.car}</td>
                 <td>{formatTime(r.bestLap)}</td>
                 <td>
                   {!Number.isFinite(r.time)

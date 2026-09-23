@@ -30,6 +30,13 @@ const CLOSED_LOOKS: Record<
     cabinOffset: number;
     wing: number;
     splitter: boolean;
+    /** How far the nose sits below the bonnet line, m. */
+    noseDrop: number;
+    /** Length of the windscreen and rear window slopes, m. */
+    screenRake: number;
+    backRake: number;
+    /** How far the tail drops below the deck, m. */
+    tailDrop: number;
   }
 > = {
   gt: {
@@ -41,6 +48,10 @@ const CLOSED_LOOKS: Record<
     cabinOffset: 0.3,
     wing: 0.36,
     splitter: true,
+    noseDrop: 0.2,
+    screenRake: 0.55,
+    backRake: 0.8,
+    tailDrop: 0.08,
   },
   prototype: {
     bodyRise: -0.02,
@@ -51,16 +62,39 @@ const CLOSED_LOOKS: Record<
     cabinOffset: -0.2,
     wing: 0.22,
     splitter: true,
+    noseDrop: 0.24,
+    screenRake: 0.5,
+    backRake: 0.65,
+    tailDrop: 0.05,
   },
+  // A three-box saloon: bonnet, cabin in the middle, boot.
   touring: {
     bodyRise: 0.08,
     round: 0.08,
     cabinHeight: 0.55,
-    cabinLength: 0.46,
+    cabinLength: 0.44,
     cabinWidth: 1.6,
-    cabinOffset: 0.2,
-    wing: 0.18,
+    cabinOffset: 0.05,
+    wing: 0.14,
     splitter: true,
+    noseDrop: 0.1,
+    screenRake: 0.45,
+    backRake: 0.38,
+    tailDrop: 0.06,
+  },
+  suv: {
+    bodyRise: 0.1,
+    round: 0.14,
+    cabinHeight: 0.68,
+    cabinLength: 0.62,
+    cabinWidth: 1.72,
+    cabinOffset: 0.1,
+    wing: 0,
+    splitter: false,
+    noseDrop: 0.12,
+    screenRake: 0.32,
+    backRake: 0.14,
+    tailDrop: 0.05,
   },
   street: {
     bodyRise: 0.1,
@@ -71,11 +105,15 @@ const CLOSED_LOOKS: Record<
     cabinOffset: 0.15,
     wing: 0,
     splitter: false,
+    noseDrop: 0.15,
+    screenRake: 0.5,
+    backRake: 0.6,
+    tailDrop: 0.07,
   },
 };
 
-/** Rounding of the glasshouse's edges. */
-const CABIN_ROUND = 0.17;
+/** Width of the glasshouse's top as a share of its bottom. */
+const CABIN_TAPER = 0.82;
 const TYRE_WIDTH = 0.3;
 /** The spokes stand this far out from the tyre's sidewall, so the wheel is seen to turn. */
 const SPOKE_OFFSET = 0.012;
@@ -204,26 +242,60 @@ export class CarView {
       body.halfWidth,
       Math.max(spec.front.halfTrack, spec.rear.halfTrack) + WHEEL_OUTER + 0.008,
     );
-    this.box('paint', halfWidth * 2, upperTop - upperBottom, length, look.round, [
-      0,
-      (upperTop + upperBottom) / 2,
-      centreZ,
-    ]);
-
     const cabinHeight = look.cabinHeight;
     const cabinLength = length * look.cabinLength;
     const cabinWidth = body.halfWidth * look.cabinWidth;
     const cabinZ = centreZ + look.cabinOffset;
     const cabinTop = upperTop + cabinHeight - 0.03;
-    this.box('glass', cabinWidth, cabinHeight, cabinLength, CABIN_ROUND, [
+    const cabinFront = cabinZ - cabinLength / 2;
+    const cabinRear = cabinZ + cabinLength / 2;
+
+    // The body shell: a side profile (nose, bonnet rising to the windscreen, deck, tail)
+    // extruded across the car with rounded edges.
+    const zF = -body.front;
+    const zR = body.rear;
+    const yB = upperBottom;
+    const yT = upperTop;
+    const noseTop = yT - look.noseDrop;
+    this.profile(
+      'paint',
+      [
+        [zF + 0.1, yB],
+        [zF, yB + 0.1],
+        [zF - 0.02, noseTop - 0.05],
+        [zF + 0.12, noseTop],
+        [zF + length * 0.2, yT - look.noseDrop * 0.35],
+        [cabinFront - 0.15, yT],
+        [zR - 0.3, yT],
+        [zR - 0.02, yT - look.tailDrop],
+        [zR, yB + 0.12],
+        [zR - 0.1, yB],
+      ],
+      halfWidth,
+      Math.min(look.round, 0.08),
+    );
+
+    // The glasshouse: raked windscreen and rear window, narrower at the top, painted roof.
+    const roofFront = cabinFront + look.screenRake;
+    const roofRear = cabinRear - look.backRake;
+    this.profile(
+      'glass',
+      [
+        [cabinFront - look.screenRake * 0.35, yT - 0.03],
+        [roofFront, cabinTop],
+        [roofRear, cabinTop],
+        [cabinRear + look.backRake * 0.2, yT - 0.03],
+      ],
+      cabinWidth / 2,
+      0.03,
+      { taper: CABIN_TAPER, from: yT, to: cabinTop },
+    );
+    const roofWidth = cabinWidth * CABIN_TAPER - 0.04;
+    this.box('paint', roofWidth, 0.03, Math.max(roofRear - roofFront, 0.2), 0.012, [
       0,
-      cabinTop - cabinHeight / 2,
-      cabinZ,
+      cabinTop + 0.005,
+      (roofFront + roofRear) / 2,
     ]);
-    // The roof: a painted panel over the glasshouse's flat top.
-    const roofWidth = cabinWidth - 2 * CABIN_ROUND + 0.04;
-    const roofLength = cabinLength - 2 * CABIN_ROUND;
-    this.box('paint', roofWidth, 0.03, roofLength, 0.012, [0, cabinTop - 0.005, cabinZ]);
 
     if (look.splitter) {
       this.box('carbon', body.halfWidth * 1.9, 0.04, 0.34, 0.01, [
@@ -301,7 +373,11 @@ export class CarView {
       hoops: [-body.front + 0.26 * length, body.rear - 0.2 * length],
       band: 0.36,
       door,
-      top: { z: cabinZ, y: cabinTop + 0.01, size: Math.min(roofWidth, roofLength) * 0.6 },
+      top: {
+        z: (roofFront + roofRear) / 2,
+        y: cabinTop + 0.02,
+        size: Math.min(roofWidth, Math.max(roofRear - roofFront, 0.2)) * 0.6,
+      },
     };
   }
 
@@ -410,6 +486,49 @@ export class CarView {
   ): void {
     const geo = new RoundedBoxGeometry(w, h, d, 3, Math.min(radius, h / 2 - 0.001));
     this.parts[part].push(geo.translate(at[0], at[1], at[2]));
+  }
+
+  /**
+   * A body part from a side profile — points (z, y) in the car frame, going round the outline —
+   * extruded across the car to ±halfWidth, with bevelled edges. `taper` narrows it towards the
+   * top (a glasshouse).
+   */
+  private profile(
+    part: Part,
+    outline: ReadonlyArray<readonly [number, number]>,
+    halfWidth: number,
+    bevel: number,
+    taper?: { taper: number; from: number; to: number },
+  ): void {
+    const shape = new THREE.Shape();
+    outline.forEach(([z, y], i) => (i === 0 ? shape.moveTo(z, y) : shape.lineTo(z, y)));
+    shape.closePath();
+    const depth = Math.max(2 * (halfWidth - bevel), 0.02);
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: bevel > 0,
+      bevelThickness: bevel,
+      bevelSize: bevel,
+      bevelSegments: 2,
+      curveSegments: 1,
+    });
+    // Shape x → car z, shape y → car y, extrusion → car x: a proper rotation, so faces keep
+    // facing outwards.
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const nor = geo.getAttribute('normal') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const sx = pos.getX(i);
+      const sy = pos.getY(i);
+      const sz = pos.getZ(i);
+      let x = depth / 2 - sz;
+      if (taper) {
+        const t = Math.min(Math.max((sy - taper.from) / (taper.to - taper.from), 0), 1);
+        x *= 1 + (taper.taper - 1) * t;
+      }
+      pos.setXYZ(i, x, sy, sx);
+      nor.setXYZ(i, -nor.getZ(i), nor.getY(i), nor.getX(i));
+    }
+    this.parts[part].push(geo);
   }
 
   /** A plain box body part centred at `at` in the car frame. */

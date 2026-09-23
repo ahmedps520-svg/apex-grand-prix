@@ -5,7 +5,7 @@ import { TEST_MULE, type CarSpec, type TyreSpec } from './spec';
  * fictional. Races put the whole field in the player's car class.
  */
 
-export type CarStyle = 'gt' | 'formula' | 'prototype' | 'touring' | 'street';
+export type CarStyle = 'gt' | 'formula' | 'prototype' | 'touring' | 'street' | 'suv';
 
 export interface CarModel {
   id: string;
@@ -336,6 +336,97 @@ const STREET: CarSpec = {
   body: { halfWidth: 0.95, front: 2.2, rear: 2.3, floor: -0.35, roof: 0.9 },
 };
 
+const SUV_TYRE: TyreSpec = {
+  ...STREET_TYRE,
+  muX: 1.08,
+  muY: 1.02,
+  relaxationLength: 0.55,
+  loadSensitivity: 0.14,
+};
+
+/** A big all-wheel-drive SUV: heavy, tall and softly sprung, so it leans and wallows. */
+const SUV_SPEC: CarSpec = {
+  ...STREET,
+  name: 'Atlas Trailhawk',
+  mass: 2150,
+  inertia: { pitch: 4200, yaw: 4600, roll: 1150 },
+  cogHeight: 0.68,
+  steeringRatio: 14.5,
+  front: {
+    ...STREET.front,
+    offset: 1.45,
+    halfTrack: 0.84,
+    wheelRadius: 0.38,
+    wheelInertia: 1.8,
+    maxLength: 0.28,
+    travel: 0.18,
+    staticLength: 0.2,
+    springRate: 62_000,
+    bumpDamping: 4_200,
+    reboundDamping: 6_400,
+    bumpStopRate: 300_000,
+    antiRollRate: 38_000,
+    rollCentreHeight: 0.12,
+    camber: deg(-0.5),
+    camberGain: deg(-15),
+    maxSteer: deg(34),
+    brakeTorque: 3_400,
+    driven: true,
+    tyre: SUV_TYRE,
+  },
+  rear: {
+    ...STREET.rear,
+    offset: -1.5,
+    halfTrack: 0.84,
+    wheelRadius: 0.38,
+    wheelInertia: 1.9,
+    maxLength: 0.28,
+    travel: 0.18,
+    staticLength: 0.2,
+    springRate: 66_000,
+    bumpDamping: 4_400,
+    reboundDamping: 6_800,
+    bumpStopRate: 300_000,
+    antiRollRate: 26_000,
+    rollCentreHeight: 0.15,
+    camber: deg(-0.5),
+    camberGain: deg(-12),
+    brakeTorque: 2_400,
+    handbrakeTorque: 3_000,
+    driven: true,
+    tyre: SUV_TYRE,
+  },
+  engine: {
+    torqueCurve: [
+      [800, 420],
+      [1800, 640],
+      [2200, 700],
+      [4500, 700],
+      [5800, 620],
+      [6500, 560],
+    ],
+    idleRpm: 750,
+    limiterRpm: 6500,
+    inertia: 0.3,
+    frictionBase: 30,
+    frictionPerRpm: 0.01,
+  },
+  gearbox: {
+    ratios: [4.2, 2.6, 1.8, 1.35, 1.08, 0.88],
+    reverseRatio: 3.6,
+    finalDrive: 3.3,
+    efficiency: 0.85,
+    shiftTime: 0.14,
+    upshiftRpm: 6200,
+    downshiftRpm: 2800,
+    brakingDownshiftRpm: 3800,
+  },
+  diff: { preload: 40, powerLock: 0.2, coastLock: 0.1 },
+  drive: { frontShare: 0.4, centreLock: 0.35 },
+  aero: { dragArea: 1.25, downforceArea: 0.1, frontShare: 0.5 },
+  body: { halfWidth: 1.0, front: 2.4, rear: 2.45, floor: -0.45, roof: 1.15 },
+};
+
 /** Changes from a base car, for the other cars in its class. */
 interface Tweak {
   id: string;
@@ -458,6 +549,11 @@ const AI_GRIP: Record<string, number> = {
   'street-lynx': 0.87,
   'street-brumby': 0.79,
   'street-zephyr': 0.73,
+  suv: 0.82,
+  'suv-trx': 0.83,
+  'suv-kodiak': 0.81,
+  'suv-dune': 0.84,
+  'suv-vanta': 0.8,
 };
 
 function withStats(model: BaseModel): CarModel {
@@ -500,9 +596,17 @@ const TOURING_CAR: BaseModel = {
   id: 'touring',
   name: 'Stallion TR',
   className: 'Touring',
-  description: 'A rear-drive touring car: less grip, more body roll, great for close racing.',
+  description: 'A four-door touring saloon: rear drive, less grip, more roll, close racing.',
   style: 'touring',
   spec: TOURING,
+};
+const SUV_CAR: BaseModel = {
+  id: 'suv',
+  name: 'Atlas Trailhawk',
+  className: 'SUV',
+  description: 'A big all-wheel-drive SUV: heavy and tall, it leans hard but never gives up.',
+  style: 'suv',
+  spec: SUV_SPEC,
 };
 const STREET_CAR: BaseModel = {
   id: 'street',
@@ -629,7 +733,7 @@ export const CARS: readonly CarModel[] = [
   variant(TOURING_CAR, {
     id: 'touring-mistral',
     name: 'Mistral TCR',
-    description: 'Compact and light on its tyres: loves the tight and twisty circuits.',
+    description: 'A compact four-door racer, light on its tyres: loves tight, twisty circuits.',
     power: 0.92,
     mass: 0.95,
     grip: 1.02,
@@ -647,7 +751,7 @@ export const CARS: readonly CarModel[] = [
   variant(TOURING_CAR, {
     id: 'touring-corvo',
     name: 'Corvo TC Sport',
-    description: 'A club racer: modest power, narrow tyres and lots of slide.',
+    description: 'A club-racing saloon: modest power, narrow tyres and lots of slide.',
     power: 0.85,
     mass: 0.95,
     grip: 0.94,
@@ -655,7 +759,7 @@ export const CARS: readonly CarModel[] = [
   variant(TOURING_CAR, {
     id: 'touring-ranger',
     name: 'Ranger V8 Super',
-    description: 'A thundering V8 saloon: heavy, loud and a real handful on the throttle.',
+    description: 'A thundering V8 four-door saloon: heavy, loud, a handful on the throttle.',
     power: 1.32,
     mass: 1.1,
     grip: 0.98,
@@ -702,6 +806,42 @@ export const CARS: readonly CarModel[] = [
     downforce: 3,
     drag: 1.08,
     gearing: 0.84,
+  }),
+  SUV_CAR,
+  variant(SUV_CAR, {
+    id: 'suv-trx',
+    name: 'Atlas TRX-R',
+    description: 'The performance SUV: a supercharged V8, stiffer tuning and big brakes.',
+    power: 1.3,
+    mass: 1.03,
+    grip: 1.04,
+    gearing: 0.95,
+  }),
+  variant(SUV_CAR, {
+    id: 'suv-kodiak',
+    name: 'Kodiak Luxe V8',
+    description: 'A heavy luxury cruiser: silky, soft and surprisingly quick in a straight line.',
+    power: 1.1,
+    mass: 1.12,
+    grip: 0.98,
+  }),
+  variant(SUV_CAR, {
+    id: 'suv-dune',
+    name: 'Sierra Dune',
+    description: 'A compact crossover: light for an SUV, nimble and easy to drive.',
+    power: 0.72,
+    mass: 0.82,
+    grip: 0.96,
+    gearing: 1.05,
+  }),
+  variant(SUV_CAR, {
+    id: 'suv-vanta',
+    name: 'Vanta RS-X',
+    description: 'The super-SUV: hypercar power and grip in something with five seats.',
+    power: 1.55,
+    grip: 1.1,
+    downforce: 3,
+    gearing: 0.88,
   }),
 ].map(withStats);
 
