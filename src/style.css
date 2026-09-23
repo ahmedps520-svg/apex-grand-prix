@@ -1337,6 +1337,12 @@ body.fatal #loading-text {
   color: #ff3b2f;
 }
 
+.fest.intro .fest-line {
+  font-size: 20px;
+  letter-spacing: 0.24em;
+  color: #ffd166;
+}
+
 /* The race's field under the event: position, driver, gap or time. */
 .fest-standings {
   margin-top: 6px;

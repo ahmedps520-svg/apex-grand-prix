@@ -57,8 +57,9 @@ describe("the festival's rules", () => {
     const status: RoamRaceStatus = {
       id: race.id,
       phase: 'countdown',
-      countdown: 2.4,
+      countdown: 3,
       placed: true,
+      intro: true,
       time: 0,
       count: 4,
       position: 4,
@@ -68,9 +69,15 @@ describe("the festival's rules", () => {
     };
     fest.update(0.05, p, status);
     expect(fest.view.active?.kind).toBe('race');
+    expect(fest.view.active?.intro).toBe(true);
+    expect(fest.view.active?.line).toBe('GET READY');
+    expect(fest.view.active?.detail).toContain('3 rivals');
+    // The sweep over, the count.
+    status.intro = false;
+    status.countdown = 2.4;
+    fest.update(0.05, p, status);
     expect(fest.view.active?.countdown).toBe(true);
     expect(fest.view.active?.line).toBe('3');
-    expect(fest.view.active?.detail).toContain('3 rivals');
     // Racing: through the checkpoints in second place, one rival ahead and two behind.
     status.phase = 'racing';
     status.countdown = 0;
@@ -149,6 +156,7 @@ describe("the festival's rules", () => {
       phase: 'racing',
       countdown: 0,
       placed: true,
+      intro: false,
       time: 1,
       count: 4,
       position: 4,

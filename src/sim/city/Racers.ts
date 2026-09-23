@@ -25,6 +25,8 @@ const GRID_ROW = 7;
 const COUNTDOWN = 3;
 /** The player is put on its slot this long after crossing the line (the screen fades first). */
 const PLACE_DELAY = 0.35;
+/** On the grid before the count: the camera's sweep over the field. */
+const INTRO = 3.2;
 /** Kinematic cornering: lateral acceleration, m/s²; straight-line acceleration and braking. */
 const A_LAT = 7;
 const BRAKE = 8.5;
@@ -80,6 +82,7 @@ export class Racers {
     phase: 'grid',
     countdown: 0,
     placed: false,
+    intro: false,
     time: 0,
     count: 1,
     position: 1,
@@ -295,7 +298,7 @@ export class Racers {
   private lineUp(player: Car): void {
     player.holdForStart = true;
     this.phase = 'countdown';
-    this.countdown = COUNTDOWN + PLACE_DELAY;
+    this.countdown = COUNTDOWN + PLACE_DELAY + INTRO;
     this.placeIn = PLACE_DELAY;
     this.placed = false;
     this.holding = true;
@@ -587,13 +590,15 @@ export class Racers {
       st.time = 0;
       st.countdown = 0;
       st.placed = false;
+      st.intro = false;
       return;
     }
     st.id = route.event.id;
     st.phase = this.phase;
-    // The count shown starts once the car is on the grid.
+    // The count shown starts after the sweep over the grid.
     st.countdown = Math.min(this.countdown, COUNTDOWN);
     st.placed = this.placed;
+    st.intro = this.phase === 'countdown' && this.placed && this.countdown > COUNTDOWN;
     st.time = this.time;
     st.count = this.racers.length + 1;
     st.progress = this.playerProgress;

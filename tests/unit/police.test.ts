@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SIM_DT, defaultAids, type SessionConfig } from '../../src/shared/protocol';
+import { SIM_DT, defaultAids, neutralInput, type SessionConfig } from '../../src/shared/protocol';
 import { World } from '../../src/sim/world';
 
 const config = (): SessionConfig => ({
@@ -77,6 +77,39 @@ describe('traffic and the police', () => {
     unit.siren = false;
     unit.active = false;
     run(world, 4);
+    expect(car.pullOver).toBe(0);
+  });
+});
+
+describe('traffic and the horn', () => {
+  it('pulls over for the player leaning on the horn right behind', () => {
+    const world = World.forSession(config());
+    world.police = null;
+    const player = world.cars[0]!;
+    run(world, 2);
+    const traffic = world.traffic!;
+    const car = traffic.vehicles.find(
+      (v) => v.active && !v.police && !v.racer && v.mode === 'lane' && v.s > 40,
+    )!;
+    expect(car).toBeDefined();
+    // Sat in its lane 15 m behind it, on the horn, going nowhere.
+    const point = { x: 0, z: 0, y: 0, tx: 0, tz: 0 };
+    const behind = () => {
+      traffic.graph.pointAt(car.link, Math.max(car.s - 15, 0), point);
+      player.pos.x = point.x;
+      player.pos.z = point.z;
+      player.vel.x = 0;
+      player.vel.z = 0;
+    };
+    behind();
+    player.setInput({ ...neutralInput(), horn: true });
+    run(world, 4, behind);
+    expect(player.horn).toBe(true);
+    expect(car.pullOver).toBeGreaterThan(0.9);
+    expect(car.v).toBeLessThan(2.5);
+    // Horn off: it eases back and drives on.
+    player.setInput(neutralInput());
+    run(world, 4, behind);
     expect(car.pullOver).toBe(0);
   });
 });

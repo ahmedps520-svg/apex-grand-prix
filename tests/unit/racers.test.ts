@@ -125,11 +125,11 @@ describe('street racers', () => {
     const x0 = player.pos.x;
     const z0 = player.pos.z;
     expect(world.racers!.holding).toBe(true);
-    expect(status.countdown).toBeGreaterThan(2);
-    run(world, status.countdown - 0.2);
+    // The sweep over the grid, then the count: about six seconds held in all.
+    run(world, 5.3);
     expect(status.phase).toBe('countdown');
     expect(Math.hypot(player.pos.x - x0, player.pos.z - z0)).toBeLessThan(0.5);
-    run(world, 0.5);
+    run(world, 0.7);
     expect(status.phase).toBe('racing');
     expect(world.racers!.holding).toBe(false);
     expect(status.time).toBeGreaterThan(0);
@@ -183,15 +183,21 @@ describe('street racers', () => {
     along = (player.pos.x - race.x) * race.tx + (player.pos.z - race.z) * race.tz;
     expect(along).toBeGreaterThan(8);
     expect(along).toBeLessThan(16);
+    // On the grid: the sweep first (the count waits at 3), then the count runs.
+    expect(status.intro).toBe(true);
+    expect(status.countdown).toBe(3);
+    run(world, 3.4);
+    expect(status.intro).toBe(false);
+    expect(status.phase).toBe('countdown');
     expect(status.countdown).toBeLessThan(3);
-    expect(status.countdown).toBeGreaterThan(2.5);
+    expect(status.countdown).toBeGreaterThan(2);
   });
 
   it('give the player its finishing time and position at the line', () => {
     const { world, race } = atStart('race-avenue');
     run(world, 1);
     crossTheLine(world, race);
-    run(world, 4);
+    run(world, 7);
     expect(world.racers!.status.phase).toBe('racing');
     // Straight to the finish (the rivals are still on their way).
     const road = race.route!.road;
@@ -213,7 +219,7 @@ describe('street racers', () => {
     run(world, 1);
     expect(world.racers!.active?.phase).toBe('grid');
     crossTheLine(world, race);
-    run(world, 5);
+    run(world, 7);
     expect(world.racers!.active?.phase).toBe('racing');
     world.racers!.endRace();
     run(world, 0.5);
