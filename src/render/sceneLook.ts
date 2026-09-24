@@ -72,6 +72,8 @@ export interface SceneLook {
   waterColor: THREE.Color;
   /** How far into the night the sun is: 0 by day and dusk, 1 with the sun well under. */
   night: number;
+  /** Cloud cover, 0 clear … 1 a closed deck. */
+  cloud: number;
 }
 
 interface WeatherStyle {
@@ -169,6 +171,15 @@ function smooth(x: number, a: number, b: number): number {
   return THREE.MathUtils.smoothstep(x, a, b);
 }
 
+/** A style part way from one weather to another (every setting is a number). */
+function mixStyle(a: WeatherStyle, b: WeatherStyle, t: number): WeatherStyle {
+  const out = { ...a };
+  for (const key of Object.keys(a) as Array<keyof WeatherStyle>) {
+    out[key] = THREE.MathUtils.lerp(a[key], b[key], t);
+  }
+  return out;
+}
+
 /** Clear-day haze at a sun elevation: [away from the sun, towards it]. */
 function hazeAt(elevation: number): [THREE.Color, THREE.Color] {
   const table = CLEAR_HAZE;
@@ -183,14 +194,20 @@ function hazeAt(elevation: number): [THREE.Color, THREE.Color] {
 /**
  * The look of a circuit in some conditions. With the default conditions (the circuit's own sun,
  * clear) it is exactly the look the circuit's theme describes. A `sun` (elevation and bearing,
- * degrees) puts the sun anywhere in the sky instead: a clock running through the day.
+ * degrees) puts the sun anywhere in the sky instead: a clock running through the day. A `mix`
+ * takes the weather part way (`blend`, 0 … 1) from the conditions' to another: weather moving.
  */
 export function sceneLook(
   theme: TrackTheme,
   conditions: Conditions = DEFAULT_CONDITIONS,
   sun?: { elevation: number; azimuth: number },
+  mix?: { to: Weather; blend: number },
 ): SceneLook {
-  const style = WEATHER_STYLE[conditions.weather];
+  const moving = mix !== undefined && mix.to !== conditions.weather;
+  const blend = moving ? THREE.MathUtils.clamp(mix.blend, 0, 1) : 0;
+  const style = moving
+    ? mixStyle(WEATHER_STYLE[conditions.weather], WEATHER_STYLE[mix.to], blend)
+    : WEATHER_STYLE[conditions.weather];
   const elevation = sun ? sun.elevation : sunElevation(conditions.time, theme.sunElevation);
   const ownSun = !sun && conditions.time === 'track';
   const lowSun = 1 - smooth(elevation, 5, 40);
@@ -199,7 +216,9 @@ export function sceneLook(
   /** 1 at night (the sun below the horizon): moonlight, a dark sky, dark fog. */
   const night = 1 - smooth(elevation, -6, 1);
   const { cover, gloom } = style;
-  const closed = cover >= 1 ? 1 : 0;
+  // A closed deck (soft light from the whole sky) comes in over the last of the cover, so
+  // weather moving in never jumps.
+  const closed = smooth(cover, 0.85, 1);
 
   // Clear-sky light, as the circuit themes were tuned: warmer and softer as the sun gets low,
   // and at dusk a weak orange sun under a blue sky.
@@ -243,7 +262,7 @@ export function sceneLook(
     away.lerp(color(theme.fog), 0.3);
     toward.lerp(color(theme.fog), 0.3 * (1 - twilight));
   }
-  const greyFog = closed ? 1 : cover * 0.5;
+  const greyFog = THREE.MathUtils.lerp(cover * 0.5, 1, closed);
   const fogColor = away.lerp(horizon, greyFog).lerp(color(0x06080f), night);
   const fogSunColor = toward.lerp(horizon, greyFog).lerp(color(0x0a0c16), night);
   hemiSky.lerp(color(0x141c3a), night);
@@ -268,12 +287,12 @@ export function sceneLook(
       cloudCoverage: style.cloudCoverage,
       cloudDensity: style.cloudDensity,
       sunDisc: 1 - closed,
-      overcast: closed ? 1 : cover * 0.3,
+      overcast: THREE.MathUtils.lerp(cover * 0.3, 1, closed),
       horizon,
       zenith,
       mottle: 0.5 + gloom * 0.5,
       // The circuit's own look is unchanged; chosen conditions blend the horizon into the fog.
-      haze: ownSun && cover === 0 ? 0 : 0.85,
+      haze: ownSun ? 0.85 * smooth(cover, 0, 0.1) : 0.85,
       twilight: twilight * (1 - closed),
       duskZenith: color(0x1d2f63).lerp(color(0x03040a), night),
     },
@@ -289,9 +308,12 @@ export function sceneLook(
     fogSunColor,
     fogNear: style.fogNear,
     fogFar: style.fogFar,
-    wetness: wetness(conditions.weather),
+    wetness: moving
+      ? THREE.MathUtils.lerp(wetness(conditions.weather), wetness(mix.to), blend)
+      : wetness(conditions.weather),
     rain: style.rain,
     waterColor: horizon.clone().lerp(color(0xffffff), 0.25),
     night,
+    cloud: cover,
   };
 }

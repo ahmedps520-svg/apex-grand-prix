@@ -1,4 +1,4 @@
-import type { Conditions } from '../content/conditions';
+import type { Conditions, Weather } from '../content/conditions';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 
 /**
@@ -127,6 +127,8 @@ export interface SessionConfig {
   dayCycle?: number;
   /** Free roam: the hour to start the day's clock at (else the chosen time of day's hour). */
   clock?: number;
+  /** The weather moves: it changes a step at a time every few minutes, from the one chosen. */
+  weatherMoves?: boolean;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -169,6 +171,8 @@ export type SimCommand =
   | { kind: 'endRace' }
   /** Free roam: skip the sweep over the grid, straight to the count. */
   | { kind: 'skipIntro' }
+  /** Moving weather: a change to this weather starts now (from `blend` along, for the tests). */
+  | { kind: 'weather'; to: Weather; blend?: number }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 
@@ -202,6 +206,15 @@ export interface SnapshotMessage {
   roamRace?: RoamRaceStatus | null;
   /** Free roam: the hour on the day's clock (null elsewhere). */
   clock?: number | null;
+  /** Moving weather: what the sky is changing from and to, and how far along (null when fixed). */
+  weather?: WeatherMix | null;
+}
+
+/** A change of weather under way: `blend` runs 0 … 1 from one to the other. */
+export interface WeatherMix {
+  from: Weather;
+  to: Weather;
+  blend: number;
 }
 
 /**

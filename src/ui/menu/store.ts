@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
-import type { Conditions, DayLength, Weather } from '../../content/conditions';
+import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
 import type {
   Difficulty,
   GameMode,
@@ -62,6 +62,9 @@ export interface SessionSetup {
   /** Whether, and how fast, the day's clock runs: on the circuits, and in free roam. */
   dayLength: DayLength;
   roamDayLength: DayLength;
+  /** Whether the weather moves over the drive: on the circuits, and in free roam. */
+  weatherMotion: WeatherMotion;
+  roamWeatherMotion: WeatherMotion;
   /** Who races: everyone in the player's car, mixed cars from their class, or two classes. */
   field: FieldMode;
   /** The other class in a two-class race. */
@@ -247,6 +250,8 @@ export class MenuStore {
     weather: 'clear',
     dayLength: 'still',
     roamDayLength: 'short',
+    weatherMotion: 'fixed',
+    roamWeatherMotion: 'moving',
     field: 'same',
     secondClass: 'Touring',
     handling: 'sim',

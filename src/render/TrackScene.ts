@@ -10,7 +10,13 @@ import {
   texture,
   uniform,
 } from 'three/tsl';
-import { DEFAULT_CONDITIONS, type Conditions, sunPathAt } from '../content/conditions';
+import {
+  DEFAULT_CONDITIONS,
+  type Conditions,
+  sunPathAt,
+  type Weather,
+} from '../content/conditions';
+import type { WeatherMix } from '../shared/protocol';
 import { mulberry32 } from '../shared/math';
 import { KERB_WIDTH, type Track } from '../sim/track/Track';
 import { Atmosphere } from './Atmosphere';
@@ -137,9 +143,12 @@ export class TrackScene {
   private look: SceneLook;
   /** The day's clock: the hour it stands at, or null for the chosen time of day. */
   private clock: number | null = null;
-  /** The sun and the night the reflections were last rendered for. */
+  /** Weather moving: what the sky is changing to and how far along (null when fixed). */
+  private mix: { to: Weather; blend: number } | null = null;
+  /** The sun, the night and the cloud the reflections were last rendered for. */
   private envElevation = NaN;
   private envNight = NaN;
+  private envCloud = NaN;
   /** Road wetness for the road shader: 0 dry … 1 standing water. */
   private readonly wet = uniform(0);
   private readonly wetSurfaces: WetSurface[] = [];
@@ -229,12 +238,37 @@ export class TrackScene {
   setClock(hour: number | null): void {
     if (hour === this.clock) return;
     this.clock = hour;
+    this.refreshLook();
+  }
+
+  /**
+   * Weather moving: the sky is changing from one weather to another; the look follows the
+   * change frame by frame. Null keeps the conditions' weather.
+   */
+  setWeather(mix: WeatherMix | null): void {
+    const same = mix
+      ? this.current.weather === mix.from && this.mix?.to === mix.to && this.mix.blend === mix.blend
+      : this.mix === null;
+    if (same) return;
+    if (mix) {
+      this.current.weather = mix.from;
+      this.mix = { to: mix.to, blend: mix.blend };
+    } else {
+      this.mix = null;
+    }
+    this.refreshLook();
+    if (this.look.wetness <= 0) this.spraying.clear();
+  }
+
+  /** The look again for a moved sun or sky; the reflections only as it changes enough. */
+  private refreshLook(): void {
     this.look = this.makeLook();
     this.applyLook();
     this.follow(this.followed);
     const moved = Math.abs(this.look.sunElevation - this.envElevation) > 1.5;
     const dimmed = Math.abs(this.look.night - this.envNight) > 0.06;
-    if (moved || dimmed) this.renderEnvironment();
+    const clouded = Math.abs(this.look.cloud - this.envCloud) > 0.12;
+    if (moved || dimmed || clouded) this.renderEnvironment();
   }
 
   /** The look for the conditions, with the sun on its path when the clock runs. */
@@ -242,7 +276,7 @@ export class TrackScene {
     const theme = this.track.def.theme;
     const sun =
       this.clock === null ? undefined : sunPathAt(this.clock, theme.sunElevation, theme.sunAzimuth);
-    return sceneLook(theme, this.current, sun);
+    return sceneLook(theme, this.current, sun, this.mix ?? undefined);
   }
 
   /** Reflections for shiny surfaces: a pre-filtered copy of the sky. */
@@ -374,6 +408,7 @@ export class TrackScene {
       this.scene.environmentIntensity = this.look.environmentIntensity;
       this.envElevation = this.look.sunElevation;
       this.envNight = this.look.night;
+      this.envCloud = this.look.cloud;
     } catch (error) {
       console.warn('Environment map unavailable; continuing without reflections.', error);
     }
