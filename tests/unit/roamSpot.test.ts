@@ -38,6 +38,14 @@ describe('the free roam spot', () => {
     expect(loadRoamSpot()).toBeNull();
   });
 
+  it('keeps the hour on the day clock when there is one, and drops a bad one', () => {
+    vi.stubGlobal('localStorage', fakeStorage());
+    saveRoamSpot({ ...spot, hour: 18.75 });
+    expect(loadRoamSpot()).toEqual({ ...spot, hour: 18.75 });
+    localStorage.setItem('apex-gp.roam', JSON.stringify({ ...spot, hour: 'late' }));
+    expect(loadRoamSpot()).toEqual(spot);
+  });
+
   it('is nothing without storage, and saving never throws', () => {
     vi.stubGlobal('localStorage', undefined);
     expect(loadRoamSpot()).toBeNull();

@@ -76,6 +76,7 @@ function tick(time: number): void {
       race: world.director?.status ?? null,
       police: world.police?.status ?? null,
       roamRace: world.racers?.active ?? null,
+      clock: world.day?.hour ?? null,
     },
     [buffer],
   );

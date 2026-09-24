@@ -1029,6 +1029,15 @@ body.fatal #loading-text {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
+/* Free roam: the time on the day's clock, over the gear and speed. */
+.hud-clock {
+  font: 600 15px var(--font);
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
 /* Free roam: the wanted level, the pursuit's state and the fine, at the top of the screen. */
 .hud-heat {
   position: absolute;

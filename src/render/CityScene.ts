@@ -34,7 +34,8 @@ import {
   districtAt,
 } from '../content/city/terrain';
 import { signalState } from '../content/city/lanes';
-import { DEFAULT_CONDITIONS, type Conditions, darkness } from '../content/conditions';
+import { CITY_SUN_AZIMUTH, CITY_SUN_ELEVATION, citySunAt } from '../content/city/day';
+import { DEFAULT_CONDITIONS, type Conditions, darkness, darknessAt } from '../content/conditions';
 import { mulberry32 } from '../shared/math';
 import type { TrackTheme } from '../sim/track/Track';
 import { Atmosphere } from './Atmosphere';
@@ -84,8 +85,8 @@ export function detectDetail(): DetailLevel {
 const CITY_THEME: TrackTheme = {
   grass: 0x5d8a45,
   runoffSurface: 'grass',
-  sunElevation: 38,
-  sunAzimuth: 215,
+  sunElevation: CITY_SUN_ELEVATION,
+  sunAzimuth: CITY_SUN_AZIMUTH,
   fog: 0xc9d3dd,
   trees: 0,
   barrier: 0x8a8f96,
@@ -159,6 +160,11 @@ export class CityScene {
     node: { x: number; z: number };
   }> = [];
   private simTime = 0;
+  /** Free roam's day: the hour its clock stands at, or null for the chosen time of day. */
+  private clock: number | null = null;
+  /** The sun and the night the reflections were last rendered for. */
+  private envElevation = NaN;
+  private envNight = NaN;
   private renderer: THREE.WebGPURenderer | null = null;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envTarget: THREE.RenderTarget | null = null;
@@ -232,6 +238,21 @@ export class CityScene {
     this.simTime = time;
   }
 
+  /**
+   * The day's clock: the sun moves across the sky with the hour, the sky, the fog and the lamps
+   * with it; null keeps the chosen time of day's look. Cheap enough to call every frame (the
+   * reflections are re-rendered only as the sun moves on).
+   */
+  setClock(hour: number | null): void {
+    if (hour === this.clock) return;
+    this.clock = hour;
+    this.look = this.makeLook();
+    this.applyLook();
+    const moved = Math.abs(this.look.sunElevation - this.envElevation) > 1.5;
+    const dimmed = Math.abs(this.night.value - this.envNight) > 0.06;
+    if (moved || dimmed) this.renderEnvironment();
+  }
+
   /** Per frame: streams chunks around the followed point, lights the signals, moves the rain. */
   update(dt: number, camera: THREE.Camera): void {
     this.stream();
@@ -262,7 +283,8 @@ export class CityScene {
   // ---------------------------------------------------------------- look
 
   private makeLook(): SceneLook {
-    const look = sceneLook(CITY_THEME, this.current);
+    const sun = this.clock === null ? undefined : citySunAt(this.clock);
+    const look = sceneLook(CITY_THEME, this.current, sun);
     // The fog closes in where the streaming stops.
     const reach = this.detail.chunks * CHUNK;
     look.fogNear = Math.min(look.fogNear, reach * 0.55);
@@ -292,8 +314,8 @@ export class CityScene {
     this.sun.shadow.radius = look.shadowRadius;
     this.sun.shadow.intensity = look.shadowIntensity;
     this.scene.environmentIntensity = look.environmentIntensity;
-    const time = this.current.time;
-    this.night.value = darkness(time);
+    this.night.value =
+      this.clock === null ? darkness(this.current.time) : darknessAt(this.look.sunElevation);
     this.rain.set(look.rain, look.waterColor, 1.4, 0.6);
     const wet = look.wetness;
     this.mat.road.roughness = THREE.MathUtils.lerp(0.92, 0.35, wet);
@@ -315,6 +337,8 @@ export class CityScene {
       this.envTarget = target;
       this.scene.environment = target.texture;
       this.scene.environmentIntensity = this.look.environmentIntensity;
+      this.envElevation = this.look.sunElevation;
+      this.envNight = this.night.value;
     } catch (error) {
       console.warn('Environment map unavailable; continuing without reflections.', error);
     }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { VERSION_TEXT } from '../../app/version';
-import { TIMES_OF_DAY, WEATHERS } from '../../content/conditions';
+import { DAY_LENGTHS, TIMES_OF_DAY, WEATHERS, clockText } from '../../content/conditions';
 import { LIVERY_PATTERNS, colourName } from '../../content/livery';
 import { TRACKS } from '../../content/tracks';
 import {
@@ -894,8 +894,13 @@ export function RoamSetupScreen({ store }: ScreenProps) {
   const setup = store.setup.value;
   const spot = store.roamSpot.value;
   const spotCar = spot ? CARS.find((c) => c.id === spot.carId) : undefined;
-  const spotTime =
-    spot && spot.time !== 'track' ? TIMES_OF_DAY.find((t) => t.value === spot.time)?.text : '';
+  const spotTime = !spot
+    ? ''
+    : spot.hour !== undefined
+      ? clockText(spot.hour)
+      : spot.time !== 'track'
+        ? TIMES_OF_DAY.find((t) => t.value === spot.time)?.text
+        : '';
   const spotLabel = [spotCar?.name, spotTime].filter((s) => s).join(', ');
   return (
     <div class="mn-panel">
@@ -916,6 +921,12 @@ export function RoamSetupScreen({ store }: ScreenProps) {
           wrap
         />
         <ConditionChoices store={store} />
+        <Choice
+          label="The day"
+          value={setup.dayLength}
+          options={DAY_LENGTHS}
+          onChange={(dayLength) => store.update({ dayLength })}
+        />
         <AidChoices store={store} aids={store.settings.aids} />
         <Button
           label="Drive"

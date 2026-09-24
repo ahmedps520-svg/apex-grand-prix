@@ -5,10 +5,13 @@ import { bearingPan } from '../audio/synth';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import {
+  DAY_MINUTES,
   darkness,
+  darknessAt,
   gripFactor,
   isTimeOfDay,
   isWeather,
+  sunElevationAt,
   type Conditions,
   type Weather,
 } from '../content/conditions';
@@ -28,6 +31,7 @@ import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
+import { cityHourOf } from '../content/city/day';
 import { cityMap, type CityMap } from '../content/city/map';
 import {
   POLICE_PAINT,
@@ -180,10 +184,12 @@ export interface DebugApi {
    * far the drawn body has moved with it.
    */
   soft: { crush: number; parts: number; moved: number } | null;
-  /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   /** Free roam: pedestrians about, and the nearest one relative to the car (for the tests). */
   pedestrians: number;
   pedestrianSample: { dx: number; dz: number; y: number; state: number } | null;
+  /** Free roam: the hour on the day's clock while it runs (null when the time stands still). */
+  clock: number | null;
+  /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
     phase: string;
     placed: boolean;
@@ -671,6 +677,7 @@ export class Game {
       roamRace: null,
       pedestrians: 0,
       pedestrianSample: null,
+      clock: null,
       errors: [],
     };
     window.__apex = this.debug;
@@ -832,6 +839,9 @@ export class Game {
       damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
       grip: gripFactor(setup.weather),
       conditions: { time: setup.time, weather: setup.weather },
+      // Free roam: the day's clock, running at the chosen rate from the spot's hour when continuing.
+      dayCycle: setup.mode === 'roam' ? DAY_MINUTES[setup.dayLength] || undefined : undefined,
+      clock: setup.mode === 'roam' && DAY_MINUTES[setup.dayLength] > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
     };
   }
@@ -890,6 +900,7 @@ export class Game {
     this.race = null;
     this.policeStatus = null;
     this.hud.setHeat(null);
+    this.hud.setClock(null);
     this.strips.clear();
     this.menuAudio.siren(0);
     this.helicopter.reset();
@@ -1328,6 +1339,9 @@ export class Game {
         this.hud.setSpeedLimit(
           roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
         );
+        const clock = roam ? this.roamClock() : null;
+        this.hud.setClock(clock);
+        this.debug.clock = clock;
         this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
         if (roam) {
           this.updateRoamHints(dt);
@@ -1597,7 +1611,7 @@ export class Game {
     // The helicopter: over the car from four stars, its searchlight on after dark.
     if (this.helicopter.root.parent !== scene) scene.add(this.helicopter.root);
     const me = this.states[0]!;
-    const night = darkness(this.session?.conditions?.time ?? 'track');
+    const night = this.nightNow();
     const overhead = status?.helicopter === true && status.state === 'pursuit';
     this.helicopter.update(dt, me.pos.x, me.pos.y, me.pos.z, overhead, night);
     this.menuAudio.rotor(controls && overhead ? 0.7 : 0);
@@ -1657,6 +1671,7 @@ export class Game {
     const scene = this.scenery;
     if (scene instanceof CityScene) {
       scene.setTime(this.sim.latest?.simTime ?? 0);
+      scene.setClock(this.roamClock());
       scene.update(dt, this.camera.camera);
       return;
     }
@@ -3023,8 +3038,29 @@ export class Game {
       weather: session.conditions?.weather ?? 'clear',
       handling: session.handling ?? 'sim',
     };
+    const clock = this.roamClock();
+    if (clock !== null) spot.hour = Math.round(clock * 1000) / 1000;
     saveRoamSpot(spot);
     this.menus.roamSpot.value = spot;
+  }
+
+  /**
+   * Free roam with the day's clock running: the hour, from the sim's latest snapshot (the
+   * session's start hour before the first arrives); null when the time of day stands still.
+   */
+  private roamClock(): number | null {
+    const session = this.session;
+    if (!session || session.mode !== 'roam' || !(session.dayCycle ?? 0)) return null;
+    const hour = this.sim.latest?.clock;
+    if (typeof hour === 'number') return hour;
+    return session.clock ?? cityHourOf(session.conditions?.time ?? 'track');
+  }
+
+  /** How dark it is now, 0 … 1: by the day's clock in free roam, else by the time of day. */
+  private nightNow(): number {
+    const clock = this.roamClock();
+    if (clock !== null) return darknessAt(sunElevationAt(clock));
+    return darkness(this.session?.conditions?.time ?? 'track');
   }
 
   /** Free roam: the first-drive hints, spaced out over the first minute, once per browser. */

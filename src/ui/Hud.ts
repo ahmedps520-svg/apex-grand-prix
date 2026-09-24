@@ -1,3 +1,4 @@
+import { clockText } from '../content/conditions';
 import {
   FLAG_ABS,
   FLAG_LIMITER,
@@ -37,6 +38,9 @@ export class Hud {
   private readonly mode = el('div', 'hud-mode', 'AUTO');
   /** Free roam: the speed limit of the road, as a round sign. */
   private readonly limit = el('div', 'hud-limit');
+  /** Free roam: the time on the day's clock, above the readout. */
+  private readonly clock = el('div', 'hud-clock');
+  private clockShown = '';
   private limitShown = -1;
   /** Free roam: the wanted level, the state of the pursuit and the fine, at the top. */
   private readonly heat = el('div', 'hud-heat');
@@ -119,6 +123,7 @@ export class Hud {
     speedBlock.append(this.speed, this.unit);
     readout.append(gearBlock, speedBlock);
     this.limit.hidden = true;
+    this.clock.hidden = true;
     const stars = el('div', 'hud-heat-stars');
     for (let i = 0; i < 5; i++) {
       const star = el('span', undefined, '★');
@@ -135,6 +140,7 @@ export class Hud {
       this.hybrid,
       this.lights,
       bar,
+      this.clock,
       readout,
       lamps,
       this.limit,
@@ -148,6 +154,15 @@ export class Hud {
     this.root.hidden = !visible;
     this.heatVisible = visible;
     this.heat.hidden = !(visible && this.heatActive);
+  }
+
+  /** Free roam: the time on the day's clock (null hides it). */
+  setClock(hour: number | null): void {
+    const text = hour === null ? '' : clockText(hour);
+    if (text === this.clockShown) return;
+    this.clockShown = text;
+    this.clock.hidden = text === '';
+    setText(this.clock, text);
   }
 
   /** Free roam: the wanted stars, the pursuit's state and the fine (null hides it all). */

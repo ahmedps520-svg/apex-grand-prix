@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { trafficModel, trafficPaint } from '../../src/content/city/fleet';
 import { laneGraph } from '../../src/content/city/lanes';
 import { cityMap } from '../../src/content/city/map';
+import { afterDark, sunElevationAt } from '../../src/content/conditions';
 import { SIM_DT, defaultAids, type SessionConfig } from '../../src/shared/protocol';
 import { World } from '../../src/sim/world';
 
@@ -49,6 +50,54 @@ describe('after dark', () => {
       conditions: { time: 'midday' as const, weather: 'clear' as const },
     };
     expect(World.forSession(day).cars[0]!.headlights).toBe(false);
+  });
+
+  it('runs the clock at the chosen rate and switches the lights at dusk and at dawn', () => {
+    // Golden hour, a day in 24 minutes: an hour of the clock a real minute.
+    const world = World.forSession({
+      ...config(2),
+      conditions: { time: 'golden', weather: 'clear' },
+      dayCycle: 24,
+    });
+    const day = world.day!;
+    const car = world.cars[0]!;
+    const start = day.hour;
+    expect(afterDark(sunElevationAt(start))).toBe(false);
+    expect(car.headlights).toBe(false);
+    expect(world.traffic!.lightsOn).toBe(false);
+    run(world, 30);
+    expect(day.hour).toBeCloseTo(start + 0.5, 2);
+    expect(afterDark(sunElevationAt(day.hour))).toBe(true);
+    expect(car.headlights).toBe(true);
+    expect(world.traffic!.lightsOn).toBe(true);
+    // The switch still works: off by hand stays off until the clock moves on.
+    car.headlights = false;
+    run(world, 5);
+    expect(car.headlights).toBe(false);
+    // Before dawn, then an hour on: light again.
+    day.hour = 5.5;
+    car.headlights = true;
+    run(world, 60);
+    expect(day.hour).toBeCloseTo(6.5, 2);
+    expect(car.headlights).toBe(false);
+    expect(world.traffic!.lightsOn).toBe(false);
+    // Round midnight the clock wraps.
+    day.hour = 23.99;
+    run(world, 1.2);
+    expect(day.hour).toBeLessThan(0.02);
+  });
+
+  it('keeps the time of day still without a day cycle, and starts at a given hour', () => {
+    const still = World.forSession(config(2));
+    const hour = still.day!.hour;
+    run(still, 5);
+    expect(still.day!.hour).toBe(hour);
+    expect(still.day!.rate).toBe(0);
+    // The spot's hour wins over the time of day: noon, lights off, though the setting says night.
+    const noon = World.forSession({ ...config(2), clock: 12, dayCycle: 24 });
+    expect(noon.day!.hour).toBe(12);
+    expect(noon.cars[0]!.headlights).toBe(false);
+    expect(noon.traffic!.lightsOn).toBe(false);
   });
 });
 

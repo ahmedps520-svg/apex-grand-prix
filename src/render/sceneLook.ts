@@ -180,15 +180,17 @@ function hazeAt(elevation: number): [THREE.Color, THREE.Color] {
 
 /**
  * The look of a circuit in some conditions. With the default conditions (the circuit's own sun,
- * clear) it is exactly the look the circuit's theme describes.
+ * clear) it is exactly the look the circuit's theme describes. A `sun` (elevation and bearing,
+ * degrees) puts the sun anywhere in the sky instead: a clock running through the day.
  */
 export function sceneLook(
   theme: TrackTheme,
   conditions: Conditions = DEFAULT_CONDITIONS,
+  sun?: { elevation: number; azimuth: number },
 ): SceneLook {
   const style = WEATHER_STYLE[conditions.weather];
-  const elevation = sunElevation(conditions.time, theme.sunElevation);
-  const ownSun = conditions.time === 'track';
+  const elevation = sun ? sun.elevation : sunElevation(conditions.time, theme.sunElevation);
+  const ownSun = !sun && conditions.time === 'track';
   const lowSun = 1 - smooth(elevation, 5, 40);
   /** 1 at dusk, fading out by a 7° sun. */
   const twilight = 1 - smooth(elevation, 2, 7);
@@ -253,7 +255,7 @@ export function sceneLook(
 
   return {
     sunElevation: elevation,
-    sunAzimuth: theme.sunAzimuth,
+    sunAzimuth: sun ? sun.azimuth : theme.sunAzimuth,
     lightElevation,
     lowSun,
     sky: {

@@ -123,6 +123,10 @@ export interface SessionConfig {
   roamStart?: RoamStart;
   /** Free roam: exactly where to put the car instead (continuing a drive). */
   roamSpawn?: { x: number; z: number; yaw: number; y?: number };
+  /** Free roam: real minutes for a day of its clock (0 or unset: the time of day stands still). */
+  dayCycle?: number;
+  /** Free roam: the hour to start the day's clock at (else the chosen time of day's hour). */
+  clock?: number;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -196,6 +200,8 @@ export interface SnapshotMessage {
   police?: PoliceStatus | null;
   /** Free roam: the festival race with rivals under way (null when none). */
   roamRace?: RoamRaceStatus | null;
+  /** Free roam: the hour on the day's clock (null elsewhere). */
+  clock?: number | null;
 }
 
 /**
