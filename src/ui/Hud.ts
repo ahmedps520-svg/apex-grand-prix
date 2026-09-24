@@ -42,6 +42,11 @@ export class Hud {
   private readonly heat = el('div', 'hud-heat');
   private readonly heatStars: HTMLElement[] = [];
   private readonly heatState = el('div', 'hud-heat-state');
+  private readonly heatHeli = el(
+    'div',
+    'hud-heat-heli',
+    'HELICOPTER OVERHEAD · HIDE UNDER THE ORBITAL',
+  );
   private readonly heatEvade = el('div', 'hud-heat-evade');
   private readonly heatEvadeFill = el('span');
   private readonly heatFine = el('div', 'hud-heat-fine');
@@ -121,7 +126,7 @@ export class Hud {
       this.heatStars.push(star);
     }
     this.heatEvade.appendChild(this.heatEvadeFill);
-    this.heat.append(stars, this.heatState, this.heatEvade, this.heatFine);
+    this.heat.append(stars, this.heatState, this.heatHeli, this.heatEvade, this.heatFine);
     this.heat.hidden = true;
     this.root.append(
       this.badge,
@@ -150,7 +155,7 @@ export class Hud {
     const shown = !!status && (status.heat > 0 || status.state !== 'clear');
     const evade = status && status.state === 'pursuit' ? status.evade : 0;
     const key = status
-      ? `${shown}:${status.heat}:${status.state}:${status.fine}:${status.fines}:${Math.round(evade * 40)}`
+      ? `${shown}:${status.heat}:${status.state}:${status.fine}:${status.fines}:${Math.round(evade * 40)}:${status.helicopter ? 1 : 0}`
       : '';
     if (key === this.heatShown) return;
     this.heatShown = key;
@@ -170,6 +175,7 @@ export class Hud {
             : '',
     );
     this.heatEvade.hidden = status.state !== 'pursuit';
+    this.heatHeli.hidden = !(status.state === 'pursuit' && status.helicopter);
     this.heatEvadeFill.style.width = `${Math.round(evade * 100)}%`;
     const money = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
     setText(

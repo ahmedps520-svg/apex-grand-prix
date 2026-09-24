@@ -117,6 +117,7 @@ import { Festival, festivalTotals } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
+import { Helicopter } from '../render/Helicopter';
 import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
 import type { FestivalInfo } from '../ui/menu/store';
@@ -161,6 +162,7 @@ export interface DebugApi {
   police: {
     heat: number;
     state: string;
+    helicopter: boolean;
     units: Array<{ x: number; z: number; d: number; siren: boolean }>;
   } | null;
   /**
@@ -531,6 +533,8 @@ export class Game {
   /** Free roam: the winner's moment after a race (the camera circles, confetti falls). */
   private winner: { time: number; overlay: HTMLElement } | null = null;
   private readonly strips = new SpikeStrips();
+  /** Free roam: the police helicopter, above the car from four stars. */
+  private readonly helicopter = new Helicopter();
   /** Arcade: the skill points of the session, and their HUD. */
   private skill: Skill | null = null;
   private readonly skillHud: SkillHud;
@@ -995,6 +999,8 @@ export class Game {
   private buildScenery(config: SessionConfig): void {
     // Take out what outlives the scenery, so disposing it doesn't free their materials.
     for (const car of this.cars) car.root.removeFromParent();
+    this.helicopter.root.removeFromParent();
+    this.strips.root.removeFromParent();
     this.ghostView?.root.removeFromParent();
     this.scenery.dispose();
     this.minimap?.dispose();
@@ -1278,7 +1284,7 @@ export class Game {
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
       if (this.session?.mode === 'roam')
-        this.updatePolice(snapshot.police ?? null, count, controls);
+        this.updatePolice(snapshot.police ?? null, count, controls, dt);
       if (this.replayRecorder && snapshot.race && !this.paused) {
         this.replayRecorder.record(snapshot.simTime, this.states);
       }
@@ -1498,11 +1504,21 @@ export class Game {
    * Free roam: the wanted level on the HUD (with a notice when it changes), the sirens' volume
    * from the nearest police car with its lights on, and the spike strips laid on the road.
    */
-  private updatePolice(status: PoliceStatus | null, count: number, controls: boolean): void {
+  private updatePolice(
+    status: PoliceStatus | null,
+    count: number,
+    controls: boolean,
+    dt: number,
+  ): void {
     const previous = this.policeStatus;
     this.policeStatus = status;
     this.hud.setHeat(status);
     if (status && previous && controls) {
+      if (status.helicopter && !previous.helicopter && status.state === 'pursuit') {
+        this.toasts.show('A helicopter has you from above. Get under the orbital to shake it.', {
+          timeout: 6,
+        });
+      }
       if (status.heat > previous.heat) {
         this.toasts.show(
           previous.heat === 0
@@ -1526,6 +1542,14 @@ export class Game {
     const scene = this.scenery.scene;
     if (this.strips.root.parent !== scene) scene.add(this.strips.root);
     this.strips.update(status?.strips ?? [], cityHeightAt);
+    // The helicopter: over the car from four stars, its searchlight on after dark.
+    if (this.helicopter.root.parent !== scene) scene.add(this.helicopter.root);
+    const me = this.states[0]!;
+    const time = this.session?.conditions?.time;
+    const night = time === 'night' ? 1 : time === 'dusk' ? 0.7 : 0;
+    const overhead = status?.helicopter === true && status.state === 'pursuit';
+    this.helicopter.update(dt, me.pos.x, me.pos.y, me.pos.z, overhead, night);
+    this.menuAudio.rotor(controls && overhead ? 0.7 : 0);
     // The sirens: loudest right beside a police car with its lights on, fading with distance.
     let level = 0;
     if (controls && status && status.state === 'pursuit') {
@@ -1545,6 +1569,7 @@ export class Game {
       ? {
           heat: status.heat,
           state: status.state,
+          helicopter: status.helicopter,
           units: this.states.slice(first, count).map((car) => ({
             x: Math.round(car.pos.x),
             z: Math.round(car.pos.z),

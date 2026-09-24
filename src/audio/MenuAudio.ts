@@ -43,6 +43,8 @@ export class MenuAudio {
   private hornOscs: OscillatorNode[] = [];
   private sirenGain: GainNode | null = null;
   private sirenOscs: OscillatorNode[] = [];
+  private rotorGain: GainNode | null = null;
+  private rotorOscs: OscillatorNode[] = [];
 
   /** Creates or resumes the audio context; call from a user gesture. */
   unlock(): void {
@@ -132,6 +134,55 @@ export class MenuAudio {
       for (const osc of this.hornOscs) osc.stop(t + 0.1);
       this.hornOscs = [];
       this.hornGain = null;
+    }
+  }
+
+  /**
+   * The helicopter's rotor at `level` (0 … 1; 0 stops it): a slow sawtooth for the blade thump
+   * under a low pass, with a faint turbine whine.
+   */
+  rotor(level: number): void {
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus) return;
+    const t = ctx.currentTime;
+    const gain = Math.min(Math.max(level, 0), 1) * 0.2;
+    if (gain > 0.001) {
+      if (!this.rotorGain) {
+        const out = ctx.createGain();
+        out.gain.setValueAtTime(0, t);
+        const thumpFilter = ctx.createBiquadFilter();
+        thumpFilter.type = 'lowpass';
+        thumpFilter.frequency.value = 180;
+        thumpFilter.Q.value = 1.2;
+        const thump = ctx.createOscillator();
+        thump.type = 'sawtooth';
+        thump.frequency.value = 21;
+        thump.connect(thumpFilter).connect(out);
+        const whineFilter = ctx.createBiquadFilter();
+        whineFilter.type = 'bandpass';
+        whineFilter.frequency.value = 900;
+        whineFilter.Q.value = 2;
+        const whineMix = ctx.createGain();
+        whineMix.gain.value = 0.12;
+        const whine = ctx.createOscillator();
+        whine.type = 'triangle';
+        whine.frequency.value = 113;
+        whine.connect(whineFilter).connect(whineMix).connect(out);
+        out.connect(bus);
+        thump.start(t);
+        whine.start(t);
+        this.rotorOscs = [thump, whine];
+        this.rotorGain = out;
+      }
+      this.rotorGain.gain.setTargetAtTime(gain, t, 0.3);
+    } else if (this.rotorGain) {
+      this.rotorGain.gain.cancelScheduledValues(t);
+      this.rotorGain.gain.setValueAtTime(this.rotorGain.gain.value, t);
+      this.rotorGain.gain.linearRampToValueAtTime(0, t + 0.6);
+      for (const osc of this.rotorOscs) osc.stop(t + 0.7);
+      this.rotorOscs = [];
+      this.rotorGain = null;
     }
   }
 

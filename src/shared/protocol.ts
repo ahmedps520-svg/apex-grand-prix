@@ -233,6 +233,8 @@ export interface PoliceStatus {
   fines: number;
   /** Spike strips on the road: [x1, z1, x2, z2] each. */
   strips: number[][];
+  /** A helicopter has the player from above (four stars and up). */
+  helicopter: boolean;
 }
 
 export type WorkerToMain =

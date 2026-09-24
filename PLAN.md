@@ -950,3 +950,10 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **The arcade rubber band** (`AiDriver.paceScale`, `arcadePace`, `World.rubberBand`): in an arcade race each rival's speed plan is scaled by its gap to the player in laps (0.35 per lap, between 0.9 and 1.1): rivals behind push on, rivals ahead ease off; sim races keep their honest pace, and nothing pulls before the lights go out.
 - **Tests:** the band's curve and limits; an arcade race pulls the rivals by their progress and a sim race leaves them at 1.
 - **Honest limits:** the touch row still has no quick menu (TC, ABS, gearbox); the band scales the whole plan rather than only the straights, so a trailing rival also corners a little quicker.
+
+### Push 21: The police helicopter (v0.21.0)
+- **Sight from above:** from four stars the police status carries `helicopter`; while it is up the player counts as seen wherever the units are, except under the orbital's deck (`Police.helicopterSees`: on the ground under a deck piece), so the only ways out of a five-star pursuit are the deck, a bust, or the heat clearing. It goes with the pursuit's end.
+- **The craft** (`src/render/Helicopter.ts`): a body, glazed nose, tail boom and fin, skids, a flashing beacon and two spinning rotor discs, circling the car at 38 m out and 42 m up, arriving from high above and climbing away when the pursuit ends; a spotlight under the nose points at the car, up with the night.
+- **Sound and HUD:** a rotor thump with a faint turbine whine (`MenuAudio.rotor`) while it is overhead; HELICOPTER OVERHEAD · HIDE UNDER THE ORBITAL under the stars; a notice when it arrives.
+- **Tests:** the helicopter sees the player in the open and on the deck but not under it; at four stars it is up and, out of every unit's sight, the pursuit goes on with the escape bar at zero.
+- **Honest limits:** the searchlight casts no shadows and the helicopter has no rotor wash or downdraft; it never lands or gets in the way; the deck is the only cover (no tunnels or multi-storey car parks yet).
