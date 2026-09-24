@@ -21,7 +21,7 @@ import {
   type PadAction,
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
-import type { Detail, Palette } from '../../app/settings';
+import type { Detail, EffectsSetting, Palette } from '../../app/settings';
 import type { AidLevel, HandlingMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
@@ -938,6 +938,14 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
   );
 }
 
+/** Post-processing: by the detail level, or as chosen. */
+const EFFECTS: ReadonlyArray<{ value: EffectsSetting; text: string }> = [
+  { value: 'auto', text: 'By detail level' },
+  { value: 'off', text: 'Off' },
+  { value: 'bloom', text: 'Bloom' },
+  { value: 'full', text: 'Bloom and ambient occlusion' },
+];
+
 /** The HUD's colours: as designed, or safe for eyes that can't tell red from green. */
 const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
   { value: 'standard', text: 'Standard' },
@@ -1764,6 +1772,12 @@ export function SettingsScreen({ store }: ScreenProps) {
               value={s.palette}
               options={PALETTES}
               onChange={(v) => ((s.palette = v), changed())}
+            />
+            <Choice
+              label="Effects"
+              value={s.effects}
+              options={EFFECTS}
+              onChange={(v) => ((s.effects = v), changed())}
             />
           </Section>
         )}
