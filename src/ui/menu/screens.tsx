@@ -28,6 +28,7 @@ import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehic
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
 import type {
+  DailyInfo,
   Difficulty,
   DriftResult,
   FestivalDestination,
@@ -183,10 +184,16 @@ export function TitleScreen({ store }: ScreenProps) {
 
 export function MainScreen({ store }: ScreenProps) {
   const go = (mode: 'race' | 'timeTrial', trial: TrialKind = 'time') => {
-    store.update({ mode, trial, trackId: store.setup.value.trackId || TRACKS[0]?.id || '' });
+    store.update({
+      mode,
+      trial,
+      daily: '',
+      trackId: store.setup.value.trackId || TRACKS[0]?.id || '',
+    });
     store.push('trackSelect');
   };
   const season = store.championship.value;
+  const daily = store.daily.value;
   const inSeason = season !== null && season.round < season.tracks.length;
   return (
     <div class="mn-panel mn-main">
@@ -248,6 +255,15 @@ export function MainScreen({ store }: ScreenProps) {
           hint={store.settings.schoolDone ? 'Graduated · drive it again' : 'Learn to race'}
           onPress={() => store.actions.startSchool()}
         />
+        {daily && (
+          <Tile
+            icon="calendar"
+            label="Daily Challenge"
+            hint={dailyHint(daily)}
+            size="big"
+            onPress={() => store.actions.startDaily()}
+          />
+        )}
       </nav>
       <nav class="mn-tiles small">
         <Tile icon="gear" label="Settings" size="small" onPress={() => store.push('settings')} />
@@ -257,6 +273,12 @@ export function MainScreen({ store }: ScreenProps) {
       </nav>
     </div>
   );
+}
+
+/** The daily tile's line: the circuit, the car, the conditions and today's best. */
+function dailyHint(daily: DailyInfo): string {
+  const best = daily.best ? ` · best ${formatTime(daily.best)}` : '';
+  return `${daily.trackName} · ${daily.carName} · ${daily.conditions}${best}`;
 }
 
 /** First visit: offer the driving school (it can always be found on the main menu). */

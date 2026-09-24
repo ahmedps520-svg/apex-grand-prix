@@ -137,6 +137,8 @@ export interface SessionConfig {
   gridOrder?: number[];
   /** Drift trial: laps of it (a time trial in the simulation, arcade handling, the drifts scoring). */
   drift?: number;
+  /** The daily challenge (the day's key): its best lap is kept apart from the track record. */
+  daily?: string;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */

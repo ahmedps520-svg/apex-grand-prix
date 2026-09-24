@@ -5,6 +5,7 @@ export type IconName =
   | 'trophy'
   | 'stopwatch'
   | 'drift'
+  | 'calendar'
   | 'road'
   | 'city'
   | 'brush'
@@ -21,6 +22,7 @@ const PATHS: Record<IconName, string> = {
     'M8 4h8v5a4 4 0 0 1-8 0z M8 6H5a3 3 0 0 0 3 4 M16 6h3a3 3 0 0 1-3 4 M12 13v4 M8 21h8 M9 17h6',
   stopwatch: 'M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M12 13V9 M10 2h4 M12 5V2 M18.5 6.5l1.5-1.5',
   drift: 'M3 16c4 0 6-9 10-9s4 6 8 6 M6 20l1-2 M11 20l1-2 M16 20l1-2',
+  calendar: 'M4 6h16v14H4z M4 10h16 M8 3v4 M16 3v4 M8 14h3',
   road: 'M8 21l2-18 M16 21l-2-18 M12 4v2 M12 10v3 M12 17v3',
   // A skyline: three towers of different heights on a road.
   city: 'M3 21h18 M5 21V11h4v10 M11 21V4h5v17 M18 21v-7h3v7 M13 8h1 M13 12h1 M13 16h1 M7 15h.01',

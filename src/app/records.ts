@@ -184,3 +184,31 @@ export function saveDriftRecord(key: string, score: number): Records {
   }
   return records;
 }
+
+const DAILY_KEY = 'apex-gp.daily';
+
+/** The daily challenge's best lap, and the day it was set on. */
+export interface DailyBest {
+  key: string;
+  best: number;
+}
+
+export function loadDailyBest(): DailyBest | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(DAILY_KEY) ?? 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.key !== 'string' || typeof r.best !== 'number' || !(r.best > 0)) return null;
+    return { key: r.key, best: r.best };
+  } catch {
+    return null;
+  }
+}
+
+export function saveDailyBest(best: DailyBest): void {
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(best));
+  } catch {
+    // Storage blocked: the best lasts for this session only.
+  }
+}

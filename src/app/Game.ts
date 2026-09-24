@@ -18,8 +18,10 @@ import {
   wetness,
   type Conditions,
   type Weather,
+  TIMES_OF_DAY,
 } from '../content/conditions';
 import { rivalName } from '../content/drivers';
+import { dailyChallenge } from '../content/daily';
 import { driftMedal, driftTargets } from '../content/driftTrial';
 import { ladderStanding } from '../content/ladder';
 import { randomLivery, type Livery } from '../content/livery';
@@ -140,6 +142,8 @@ import {
   type RoamSpot,
   loadDriftRecords,
   saveDriftRecord,
+  loadDailyBest,
+  saveDailyBest,
 } from './records';
 import { Festival, festivalTotals, medalFor } from './Festival';
 import { EventHud } from '../ui/EventHud';
@@ -148,7 +152,7 @@ import { FestivalScene } from '../render/FestivalScene';
 import { Helicopter } from '../render/Helicopter';
 import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
-import type { FestivalInfo } from '../ui/menu/store';
+import type { FestivalInfo, DailyInfo } from '../ui/menu/store';
 import { ReplayRecorder, type Replay } from './replay';
 import {
   DAMAGE_SCALE,
@@ -526,6 +530,8 @@ export class Game {
   private driftRecords = loadDriftRecords();
   /** Drift trial: the laps are done and the score is final. */
   private driftDone = false;
+  /** The daily challenge's best lap, kept in this browser. */
+  private dailyBest = loadDailyBest();
   /** Championship round being raced, or -1. */
   private seasonRound = -1;
   /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
@@ -722,6 +728,7 @@ export class Game {
     window.__apex = this.debug;
     // The festival board reads this from the main menu too.
     this.menus.festival.value = this.festivalInfo();
+    this.menus.daily.value = this.dailyInfo();
     this.sim.onError = (message) => {
       this.debug.errors.push(message);
       this.toasts.show(`Simulation error: ${message}`, { timeout: 0 });
@@ -896,6 +903,7 @@ export class Game {
       gridOrder: carry?.gridOrder,
       qualifying: qualifying ? setup.qualifying : undefined,
       drift,
+      daily: setup.mode === 'timeTrial' && !attract && setup.daily ? setup.daily : undefined,
       aids: { ...this.settings.aids },
       seed,
       attract: attract || (this.autopilot && setup.mode === 'race'),
@@ -1029,6 +1037,7 @@ export class Game {
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
     this.menus.festival.value = this.festivalInfo();
+    this.menus.daily.value = this.dailyInfo();
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -1270,6 +1279,8 @@ export class Game {
     this.rumble.stop(this.input.activePad);
     if (this.session?.mode === 'roam') {
       this.menus.festival.value = this.festivalInfo();
+      this.menus.daily.value = this.dailyInfo();
+      this.menus.daily.value = this.dailyInfo();
       this.keepRoamSpot();
     }
     this.menus.set(['pause']);
@@ -1290,6 +1301,7 @@ export class Game {
     this.seasonRound = -1;
     if (this.session?.mode === 'roam') this.keepRoamSpot();
     this.menus.festival.value = this.festivalInfo();
+    this.menus.daily.value = this.dailyInfo();
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
@@ -2477,7 +2489,12 @@ export class Game {
     const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
     const wrongWay = fx * sample.tx + fz * sample.tz < -0.4 && Math.abs(player.speed) > 3;
     const session = this.session!;
-    const record = this.records[session.trackId] ?? null;
+    // The daily challenge races the day's best; anything else the track record.
+    const record = session.daily
+      ? this.dailyBest?.key === session.daily
+        ? this.dailyBest.best
+        : null
+      : (this.records[session.trackId] ?? null);
     this.raceHud.update(dt, race, 0, record, wrongWay);
     this.updateRadio(dt, race);
 
@@ -2495,6 +2512,17 @@ export class Game {
         }
       }
     }
+    // The daily challenge: its best lap for the day, apart from the track record.
+    if (session.daily && me.bestLap > 0) {
+      const best = this.dailyBest?.key === session.daily ? this.dailyBest.best : Infinity;
+      if (me.bestLap < best) {
+        this.dailyBest = { key: session.daily, best: me.bestLap };
+        saveDailyBest(this.dailyBest);
+        if (Number.isFinite(best)) {
+          this.toasts.show(`New daily best: ${lapTime(me.bestLap)}`, { timeout: 5 });
+        }
+      }
+    }
     // Race over: results a few seconds after the player finished.
     if (session.mode === 'race' && me.finished && !this.resultsShown) {
       if (this.finishedAt < 0) this.finishedAt = this.lastTime;
@@ -2508,6 +2536,44 @@ export class Game {
       }
       if (this.finishedAt >= 0 && this.lastTime - this.finishedAt > 3) this.showDriftResults();
     }
+  }
+
+  /** Today's challenge for the main menu's tile. */
+  private dailyInfo(): DailyInfo {
+    const d = dailyChallenge();
+    const time =
+      d.time === 'track'
+        ? 'Daylight'
+        : (TIMES_OF_DAY.find((t) => t.value === d.time)?.text ?? 'Daylight');
+    return {
+      key: d.key,
+      trackName: trackById(d.trackId)?.name ?? d.trackId,
+      carName: carById(d.carId).name,
+      conditions: `${time}, ${WEATHER_NAMES[d.weather].toLowerCase()}`,
+      best: this.dailyBest?.key === d.key ? this.dailyBest.best : null,
+    };
+  }
+
+  /** The daily challenge: a time trial on the day's circuit, car and conditions. */
+  private startDaily(): void {
+    const d = dailyChallenge();
+    this.seasonRound = -1;
+    const setup: SessionSetup = {
+      ...this.menus.setup.value,
+      mode: 'timeTrial',
+      trial: 'time',
+      daily: d.key,
+      trackId: d.trackId,
+      carId: d.carId,
+      time: d.time,
+      weather: d.weather,
+      dayLength: 'still',
+      weatherMotion: 'fixed',
+      handling: 'sim',
+    };
+    this.menus.update(setup);
+    this.menus.set([]);
+    void this.startSession(setup).then(() => this.resume());
   }
 
   /** After a drift trial: the drifts' points against the targets, and the best kept. */
@@ -2919,6 +2985,7 @@ export class Game {
           this.resetCar();
         }
       },
+      startDaily: () => this.startDaily(),
       startRace: () => {
         const carry = this.carry;
         if (!carry) return;

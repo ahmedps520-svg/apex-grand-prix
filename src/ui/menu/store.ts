@@ -82,6 +82,8 @@ export interface SessionSetup {
   trial: TrialKind;
   /** Drift trial: laps. */
   driftLaps: number;
+  /** The daily challenge: the day's key while the session is it ('' otherwise). */
+  daily?: string;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
@@ -182,6 +184,16 @@ export interface SessionResults {
   drift?: DriftResult;
 }
 
+/** Today's challenge as the main menu shows it. */
+export interface DailyInfo {
+  key: string;
+  trackName: string;
+  carName: string;
+  conditions: string;
+  /** Today's best lap, seconds, or null. */
+  best: number | null;
+}
+
 export interface DriftResult {
   score: number;
   best: number;
@@ -220,6 +232,8 @@ export interface MenuActions {
   restartSession(): void;
   /** After a qualifying: the race, on the grid it set. */
   startRace(): void;
+  /** The daily challenge: a time trial on the day's circuit, car and conditions. */
+  startDaily(): void;
   resume(): void;
   /** A tap on a menu prompt (touch): the same as the key or button for it. */
   tap(event: 'back' | 'pause' | 'confirm' | 'tabNext'): void;
@@ -300,6 +314,8 @@ export class MenuStore {
   readonly inSession = signal(false);
   /** Free roam: the festival map's roads, destinations and the car's spot (null elsewhere). */
   readonly festival = signal<FestivalInfo | null>(null);
+  /** Today's challenge, for the main menu's tile. */
+  readonly daily = signal<DailyInfo | null>(null);
   /** Free roam: where the last drive was left, for the Continue button (null when none). */
   readonly roamSpot = signal<RoamSpot | null>(null);
   readonly results = signal<SessionResults | null>(null);
