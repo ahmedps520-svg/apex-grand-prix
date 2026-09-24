@@ -179,6 +179,7 @@ export class CityScene {
     this.look = this.makeLook();
 
     this.sky = this.atmosphere.createSky();
+    this.sky.add(this.atmosphere.createNightSky(5));
     this.scene.add(this.sky);
     (this.scene as { fogNode?: THREE.Node }).fogNode = this.atmosphere.createFog();
 

@@ -5,12 +5,15 @@ import {
   dot,
   float,
   fog,
+  instanceIndex,
   max,
   mix,
+  normalView,
   normalize,
   positionWorld,
   pow,
   rangeFogFactor,
+  sin,
   smoothstep,
   texture,
   time,
@@ -19,11 +22,19 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
+import { mulberry32 } from '../shared/math';
 import type { SceneLook } from './sceneLook';
 import { noiseTexture } from './textures';
 
 /** The sky is a box around the viewer; it draws at the far plane whatever its size. */
 const SKY_SIZE = 2800;
+/** Stars: how many, how far out (in the sky's own units) and how big on the dome. */
+const STAR_COUNT = 1400;
+const STAR_RADIUS = 0.88;
+const STAR_SIZE = 0.0011;
+/** The moon: 25° up, opposite the sun's bearing, half a degree across at the stars' distance. */
+const MOON_ELEVATION = (25 * Math.PI) / 180;
+const MOON_RADIUS = 0.0039;
 
 type Vec3Node = THREE.Node<'vec3'>;
 
@@ -33,6 +44,7 @@ type Vec3Node = THREE.Node<'vec3'>;
  * deck for overcast and rain. The fog's colour glows towards the sun, and the sky melts into
  * the same colour at the horizon, so the far ground never shows an edge against the sky. One
  * set of uniforms drives the visible sky, the copy the reflections are made from, and the fog.
+ * A night sky (stars and a moon) can hang under the visible sky, coming up with the night.
  */
 export class Atmosphere {
   private readonly clouds = noiseTexture(41, 256, 5, 4);
@@ -44,6 +56,8 @@ export class Atmosphere {
     haze: uniform(0),
     twilight: uniform(0),
     duskZenith: uniform(new THREE.Color()),
+    /** How far into the night: the stars and the moon come up with it. */
+    night: uniform(0),
     fog: uniform(new THREE.Color()),
     fogSun: uniform(new THREE.Color()),
     fogNear: uniform(1),
@@ -53,6 +67,8 @@ export class Atmosphere {
     sunFlat: uniform(new THREE.Vector3(0, 0, 1)),
   };
   private readonly skies: Array<{ mesh: SkyMesh; reflection: boolean }> = [];
+  private readonly moons: THREE.Object3D[] = [];
+  private readonly nightParts: Array<{ dispose(): void }> = [];
   private look: SceneLook | null = null;
 
   /** Fog for `Scene.fogNode`: range fog in the haze colour of each view direction. */
@@ -119,7 +135,82 @@ export class Atmosphere {
     u.sunFlat.value.set(sunDirection.x, 0, sunDirection.z);
     if (u.sunFlat.value.lengthSq() < 1e-8) u.sunFlat.value.set(0, 0, 1);
     u.sunFlat.value.normalize();
+    u.night.value = look.night;
+    for (const moon of this.moons) this.placeMoon(moon, sunDirection);
     for (const { mesh, reflection } of this.skies) this.applyTo(mesh, reflection);
+  }
+
+  /**
+   * The night sky, to add to a sky made by `createSky` (it follows it): a field of stars over
+   * the dome and a full moon opposite the sun, 25° up. They come up with the night and go
+   * under a closed cloud deck; the stars twinkle a little.
+   */
+  createNightSky(seed = 1): THREE.Group {
+    const u = this.u;
+    const clear = u.night.mul(float(1).sub(u.overcast));
+    const rand = mulberry32(seed);
+    const group = new THREE.Group();
+    // Stars: tiny spheres spread evenly over the dome (a uniform height is uniform on a
+    // sphere), brighter, larger and warmer at random, each twinkling to its own beat.
+    const starGeo = new THREE.IcosahedronGeometry(STAR_SIZE, 0);
+    const starMat = new THREE.MeshBasicNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    starMat.fog = false;
+    const beat = sin(time.mul(2.1).add(instanceIndex.toFloat().mul(0.37)));
+    starMat.opacityNode = clear.mul(beat.mul(0.18).add(0.82));
+    const stars = new THREE.InstancedMesh(starGeo, starMat, STAR_COUNT);
+    const matrix = new THREE.Matrix4();
+    const color = new THREE.Color();
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const y = 0.06 + rand() * 0.94;
+      const a = rand() * Math.PI * 2;
+      const r = Math.sqrt(1 - y * y);
+      const scale = 0.6 + rand() * rand() * 1.6;
+      matrix
+        .makeScale(scale, scale, scale)
+        .setPosition(Math.cos(a) * r * STAR_RADIUS, y * STAR_RADIUS, Math.sin(a) * r * STAR_RADIUS);
+      stars.setMatrixAt(i, matrix);
+      const bright = 0.35 + rand() * 0.65;
+      const warm = rand();
+      color.setRGB(
+        bright * (0.85 + warm * 0.15),
+        bright * (0.9 + warm * 0.08),
+        bright * (1 - warm * 0.1),
+      );
+      stars.setColorAt(i, color);
+    }
+    stars.frustumCulled = false;
+    stars.renderOrder = 3;
+    // The moon: a pale disc (a small sphere reads the same) in a soft glow that fades to its rim.
+    const moonMat = new THREE.MeshBasicNodeMaterial({
+      color: 0xf6f1e2,
+      transparent: true,
+      depthWrite: false,
+    });
+    moonMat.fog = false;
+    moonMat.opacityNode = clear;
+    const glowMat = new THREE.MeshBasicNodeMaterial({
+      color: 0xc9d4ff,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    glowMat.fog = false;
+    glowMat.opacityNode = clear.mul(pow(max(normalView.z, 0), 3).mul(0.35));
+    const moon = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.SphereGeometry(MOON_RADIUS, 24, 16), moonMat);
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(MOON_RADIUS * 3.4, 24, 16), glowMat);
+    glow.renderOrder = 3;
+    disc.renderOrder = 4;
+    moon.add(glow, disc);
+    group.add(stars, moon);
+    this.moons.push(moon);
+    this.nightParts.push(starGeo, starMat, moonMat, glowMat, disc.geometry, glow.geometry);
+    this.placeMoon(moon, u.sun.value);
+    return group;
   }
 
   /** Disposes a sky made by `createSky` and forgets it. */
@@ -134,6 +225,17 @@ export class Atmosphere {
   dispose(): void {
     this.clouds.dispose();
     this.skies.length = 0;
+    this.moons.length = 0;
+    for (const part of this.nightParts.splice(0)) part.dispose();
+  }
+
+  /** The moon opposite the sun's bearing, 25° up, out among the stars. */
+  private placeMoon(moon: THREE.Object3D, sun: THREE.Vector3): void {
+    const flat = Math.hypot(sun.x, sun.z);
+    const dx = flat > 1e-6 ? -sun.x / flat : 0;
+    const dz = flat > 1e-6 ? -sun.z / flat : -1;
+    const cos = Math.cos(MOON_ELEVATION);
+    moon.position.set(dx * cos, Math.sin(MOON_ELEVATION), dz * cos).multiplyScalar(STAR_RADIUS);
   }
 
   /** The horizon's haze colour looking along `dir`: warmer (at a low sun) towards the sun. */
