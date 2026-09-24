@@ -1,6 +1,6 @@
 import { h, render } from 'preact';
 import * as THREE from 'three/webgpu';
-import { EngineAudio, type AudioFrame } from '../audio/EngineAudio';
+import { EngineAudio, OTHER_VOICES, type AudioFrame, type OtherEngine } from '../audio/EngineAudio';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import { gripFactor, type Conditions, type Weather } from '../content/conditions';
@@ -112,7 +112,7 @@ import {
   saveRecord,
   saveSeason,
 } from './records';
-import { Festival } from './Festival';
+import { Festival, festivalTotals } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
@@ -274,6 +274,31 @@ const MENU_AUDIO = 0.35;
 /** Free roam: seconds of the sweep over a street race's grid, and of the winner's moment. */
 const GRID_INTRO_TIME = 3;
 const WINNER_TIME = 5;
+/** Other cars are heard within this many metres. */
+const OTHER_EARSHOT = 90;
+/** Free roam: the first-drive hints and when they come (seconds into the drive). */
+const ROAM_HINTS: ReadonlyArray<{ at: number; keys: string; pad: string }> = [
+  {
+    at: 4,
+    keys: 'Welcome to the city. L headlights, , and . indicators, X hazards, N horn.',
+    pad: 'Welcome to the city. D-pad: up headlights, down hazards, left and right indicators; R3 horn.',
+  },
+  {
+    at: 16,
+    keys: 'Esc → Festival map shows every event; pick one to fast-travel there.',
+    pad: 'Options → Festival map shows every event; pick one to fast-travel there.',
+  },
+  {
+    at: 30,
+    keys: 'Speed past the police and the heat rises: lose them out of sight, or pull over and pay.',
+    pad: 'Speed past the police and the heat rises: lose them out of sight, or pull over and pay.',
+  },
+  {
+    at: 44,
+    keys: 'Drive up to a race arch and a field lines up; cross the line to race. R resets and repairs.',
+    pad: 'Drive up to a race arch and a field lines up; cross the line to race. △ / Y resets and repairs.',
+  },
+];
 /** Seconds of the circuit flyover before a race, and of the podium after one. */
 const FLYOVER_TIME = 7;
 const PODIUM_TIME = 5.5;
@@ -356,6 +381,15 @@ export class Game {
   private readonly carModels: CarModel[] = [];
   private readonly minimapCars: MinimapCar[] = [];
   private readonly audio = new EngineAudio();
+  /** The nearest other cars' engines, for their voices (reused every frame). */
+  private readonly otherEngines: OtherEngine[] = Array.from({ length: OTHER_VOICES }, () => ({
+    rpm: 0,
+    throttle: 0,
+    distance: 0,
+  }));
+  private readonly otherPicks: Array<{ i: number; d: number }> = [];
+  /** Free roam: the first-drive hints, one at a time. */
+  private roamHints: { time: number; next: number } | null = null;
   private readonly engineer = new RaceEngineer();
   private readonly radio = new RadioVoice();
   private readonly radioBox: RadioBox;
@@ -849,6 +883,11 @@ export class Game {
     this.fade.classList.remove('on');
     this.endGridIntro();
     this.endWinner();
+    // The first drive in the city: a few hints, once.
+    this.roamHints =
+      roam && !idle && !attract && !this.settings.roamHinted && !navigator.webdriver
+        ? { time: 0, next: 0 }
+        : null;
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
     this.menus.festival.value = roam ? this.festivalInfo() : null;
@@ -1247,6 +1286,7 @@ export class Game {
           roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
         );
         this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
+        if (roam) this.updateRoamHints(dt);
         if (this.skill) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
@@ -2845,6 +2885,54 @@ export class Game {
     frame.slip = slip;
     frame.offRoad = contacts > 0 ? offRoad / contacts : 0;
     this.audio.update(dt, frame);
+    this.audio.updateOthers(dt, this.nearestEngines(state));
+  }
+
+  /** The nearest other cars within earshot, nearest first, as engines for their voices. */
+  private nearestEngines(focus: CarRenderState): readonly OtherEngine[] {
+    const picks = this.otherPicks;
+    picks.length = 0;
+    const count = Math.min(this.sim.latest?.carCount ?? 0, this.states.length);
+    for (let i = 0; i < count; i++) {
+      const s = this.states[i]!;
+      if (s === focus) continue;
+      const d = Math.hypot(s.pos.x - focus.pos.x, s.pos.y - focus.pos.y, s.pos.z - focus.pos.z);
+      if (d > OTHER_EARSHOT) continue;
+      // Keep the nearest few, in order.
+      let at = picks.length;
+      while (at > 0 && picks[at - 1]!.d > d) at--;
+      if (at >= OTHER_VOICES) continue;
+      picks.splice(at, 0, { i, d });
+      if (picks.length > OTHER_VOICES) picks.length = OTHER_VOICES;
+    }
+    for (let k = 0; k < picks.length; k++) {
+      const pick = picks[k]!;
+      const s = this.states[pick.i]!;
+      const o = this.otherEngines[k]!;
+      o.rpm = s.rpm;
+      o.throttle = s.throttle;
+      o.distance = pick.d;
+    }
+    return picks.length === this.otherEngines.length
+      ? this.otherEngines
+      : this.otherEngines.slice(0, picks.length);
+  }
+
+  /** Free roam: the first-drive hints, spaced out over the first minute, once per browser. */
+  private updateRoamHints(dt: number): void {
+    const hints = this.roamHints;
+    if (!hints) return;
+    hints.time += dt;
+    const hint = ROAM_HINTS[hints.next];
+    if (!hint || hints.time < hint.at) return;
+    const pad = this.input.lastDevice === 'gamepad' || this.input.lastDevice === 'wheel';
+    this.toasts.show(pad ? hint.pad : hint.keys, { timeout: 8 });
+    hints.next++;
+    if (hints.next >= ROAM_HINTS.length) {
+      this.roamHints = null;
+      this.settings.roamHinted = true;
+      this.save();
+    }
   }
 
   private deviceName(): string {
@@ -2885,6 +2973,7 @@ export class Game {
     }
     return {
       destinations,
+      totals: festivalTotals(festivalEvents(map), this.festivalRecords),
       roads: map.roads.map((r) => ({
         points: r.points,
         loop: r.loop,

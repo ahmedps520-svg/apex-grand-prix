@@ -8,6 +8,8 @@ import {
   fillWhiteNoise,
   firingFrequency,
   grassGain,
+  otherEngineCutoff,
+  otherEngineLevel,
   saturationCurve,
   softClipCurve,
   softSquareWave,
@@ -296,6 +298,23 @@ describe('EngineAudio', () => {
     paramCalls = 0;
   });
 
+  it("other cars' engines fade and muffle with distance, and never go bad", () => {
+    const near = otherEngineLevel(4000, 0.8, 5);
+    const far = otherEngineLevel(4000, 0.8, 60);
+    expect(near).toBeGreaterThan(far);
+    expect(far).toBeGreaterThan(0);
+    expect(otherEngineLevel(4000, 0.8, 0)).toBeCloseTo(engineGain(4000, 0.8), 6);
+    expect(otherEngineCutoff(4000, 0.8, 0)).toBeCloseTo(engineCutoff(4000, 0.8), 6);
+    expect(otherEngineCutoff(4000, 0.8, 80)).toBeLessThan(engineCutoff(4000, 0.8));
+    expect(otherEngineCutoff(4000, 0.8, 1e6)).toBeCloseTo(engineCutoff(4000, 0.8) * 0.25, 6);
+    for (const w of WEIRD) {
+      expect(Number.isFinite(otherEngineLevel(w, 0.5, 10))).toBe(true);
+      expect(Number.isFinite(otherEngineLevel(4000, w, 10))).toBe(true);
+      expect(Number.isFinite(otherEngineLevel(4000, 0.5, w))).toBe(true);
+      expect(Number.isFinite(otherEngineCutoff(4000, 0.5, w))).toBe(true);
+    }
+  });
+
   it('stays silent and never throws without Web Audio', () => {
     vi.stubGlobal('AudioContext', undefined);
     const audio = new EngineAudio();
@@ -304,6 +323,7 @@ describe('EngineAudio', () => {
     audio.setVolume(0.5);
     audio.setMuted(true);
     audio.update(1 / 60, frame());
+    audio.updateOthers(1 / 60, [{ rpm: 3000, throttle: 0.5, distance: 20 }]);
     audio.suspend();
     audio.resume();
     expect(audio.running).toBe(false);

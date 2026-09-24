@@ -57,3 +57,11 @@ describe('settings', () => {
     expect(parseSettings(JSON.parse(JSON.stringify(s)))).toEqual(s);
   });
 });
+
+describe('free roam hints flag', () => {
+  it('is off by default and repairs a bad value', () => {
+    expect(defaultSettings().roamHinted).toBe(false);
+    expect(parseSettings({ ...defaultSettings(), roamHinted: true }).roamHinted).toBe(true);
+    expect(parseSettings({ ...defaultSettings(), roamHinted: 'yes' }).roamHinted).toBe(false);
+  });
+});

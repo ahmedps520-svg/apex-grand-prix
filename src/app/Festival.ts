@@ -482,6 +482,31 @@ export class Festival {
   }
 }
 
+/** How the festival is going: events with a result, and the races' medals. */
+export interface FestivalTotals {
+  events: number;
+  done: number;
+  gold: number;
+  silver: number;
+  bronze: number;
+}
+
+export function festivalTotals(
+  events: readonly FestivalEvent[],
+  records: FestivalRecords,
+): FestivalTotals {
+  const totals: FestivalTotals = { events: events.length, done: 0, gold: 0, silver: 0, bronze: 0 };
+  for (const e of events) {
+    const value = records[e.id];
+    if (value === undefined) continue;
+    totals.done++;
+    if (e.kind !== 'race') continue;
+    const medal = medalFor(e, value);
+    if (medal) totals[medal]++;
+  }
+  return totals;
+}
+
 export function medalFor(event: FestivalEvent, time: number): Medal {
   for (const m of MEDALS) if (time <= event.par * m.factor) return m.name;
   return null;

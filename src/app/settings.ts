@@ -57,6 +57,8 @@ export interface Settings {
   /** Driving school: finished, and offered once on the first visit. */
   schoolDone: boolean;
   schoolOffered: boolean;
+  /** Free roam: the first-drive hints have been shown. */
+  roamHinted: boolean;
   /** How much crashes damage the car. */
   damage: DamageLevel;
   /** Race engineer: spoken calls and subtitles. */
@@ -110,6 +112,7 @@ export const defaultSettings = (): Settings => ({
   ghost: true,
   schoolDone: false,
   schoolOffered: false,
+  roamHinted: false,
   damage: 'light',
   radio: { voice: true, subtitles: true, volume: 0.9 },
   wheels: {},
@@ -205,6 +208,7 @@ export function parseSettings(raw: unknown): Settings {
     ghost: typeof raw.ghost === 'boolean' ? raw.ghost : d.ghost,
     schoolDone: raw.schoolDone === true,
     schoolOffered: raw.schoolOffered === true,
+    roamHinted: raw.roamHinted === true,
     damage: oneOf(raw.damage, DAMAGE_LEVELS, d.damage),
     radio: {
       voice: typeof radio.voice === 'boolean' ? radio.voice : d.radio.voice,

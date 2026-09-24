@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Festival, formatTime, medalFor } from '../../src/app/Festival';
+import { Festival, festivalTotals, formatTime, medalFor } from '../../src/app/Festival';
 import type { RoamRaceStatus } from '../../src/shared/protocol';
 import { festivalEvents, rampOf } from '../../src/content/city/events';
 import { cityMap } from '../../src/content/city/map';
@@ -237,6 +237,26 @@ describe("the festival's rules", () => {
     fest.update(0.05, p);
     expect(fest.records[jump.id]).toBeCloseTo(20, 0);
     expect(fest.notices.at(-1)!.text).toContain('Jump');
+  });
+
+  it('totals up the events done and the medals', () => {
+    const races = events.filter((e) => e.kind === 'race');
+    const cam = events.find((e) => e.kind === 'camera')!;
+    const records = {
+      [races[0]!.id]: races[0]!.par * 0.9,
+      [races[1]!.id]: races[1]!.par * 1.1,
+      [races[2]!.id]: races[2]!.par * 1.3,
+      [races[3]!.id]: races[3]!.par * 2,
+      [cam.id]: 140,
+    };
+    expect(festivalTotals(events, records)).toEqual({
+      events: events.length,
+      done: 5,
+      gold: 1,
+      silver: 1,
+      bronze: 1,
+    });
+    expect(festivalTotals(events, {}).done).toBe(0);
   });
 
   it('formats times and picks medals', () => {
