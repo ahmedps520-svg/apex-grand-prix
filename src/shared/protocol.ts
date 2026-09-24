@@ -129,6 +129,8 @@ export interface SessionConfig {
   clock?: number;
   /** The weather moves: it changes a step at a time every few minutes, from the one chosen. */
   weatherMoves?: boolean;
+  /** Elimination race: every this many seconds the last car is out (unset: a standard race). */
+  elimination?: number;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -364,6 +366,8 @@ export const FLAG_HORN = 1024;
 export const FLAG_SIREN = 2048;
 /** Arcade: the nitro is burning. */
 export const FLAG_NITRO = 4096;
+/** Out of the race and off the track (an elimination): not drawn, not in the way. */
+export const FLAG_RETIRED = 8192;
 
 export const aidLevelNumber = (level: AidLevel): number =>
   level === 'off' ? 0 : level === 'low' ? 1 : 2;

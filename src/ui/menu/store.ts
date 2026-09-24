@@ -72,11 +72,14 @@ export interface SessionSetup {
   secondClass: string;
   /** Sim or arcade handling, for any mode. */
   handling: HandlingMode;
+  /** Quick races: a standard race, or an elimination (the last car out every so often). */
+  raceType: RaceType;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
+export type RaceType = 'standard' | 'elimination';
 
 export interface ResultRow {
   position: number;
@@ -88,6 +91,8 @@ export interface ResultRow {
   /** Race time, or NaN if the car didn't finish. */
   time: number;
   gap: number;
+  /** Elimination race: put out before the end. */
+  out?: boolean;
 }
 
 /** A championship in progress: a fixed series of circuits with points after each race. */
@@ -261,6 +266,7 @@ export class MenuStore {
     field: 'same',
     secondClass: 'Touring',
     handling: 'sim',
+    raceType: 'standard',
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

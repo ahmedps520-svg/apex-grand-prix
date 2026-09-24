@@ -19,8 +19,10 @@ export interface CarRaceState {
   /** Time on the lap being driven (0 until timing starts). */
   currentLap: number;
   finished: boolean;
-  /** Race clock when the car took the flag. */
+  /** Race clock when the car took the flag (or was put out). */
   finishTime: number;
+  /** Elimination race: put out as the last car when the clock ran down. */
+  eliminated: boolean;
   /** Sector being driven: 0, 1 or 2 (three equal lengths of the lap). */
   sector: number;
   /** Latest time for each sector. */
@@ -45,6 +47,8 @@ export interface RaceStatus {
   cars: CarRaceState[];
   /** Car indices by position. */
   order: number[];
+  /** Elimination race: seconds between eliminations, seconds to the next, and cars put out. */
+  elimination: { every: number; next: number; out: number } | null;
 }
 
 /** Seconds on the grid before the first red light. */
@@ -95,6 +99,7 @@ export class RaceDirector {
     mode: RaceMode,
     laps: number,
     seed = 1,
+    elimination = 0,
   ) {
     this.rand = mulberry32(seed ^ 0x51f15e);
     this.status = {
@@ -106,6 +111,10 @@ export class RaceDirector {
       time: 0,
       cars: [],
       order: [],
+      elimination:
+        mode === 'race' && elimination > 0
+          ? { every: elimination, next: elimination, out: 0 }
+          : null,
     };
     for (let i = 0; i < carCount; i++) {
       this.status.cars.push(freshState());
@@ -158,6 +167,10 @@ export class RaceDirector {
     this.leaderFinished = false;
     this.playerFinishedAt = -1;
     this.pointTimes.length = 0;
+    if (status.elimination) {
+      status.elimination.next = status.elimination.every;
+      status.elimination.out = 0;
+    }
     for (let i = 0; i < this.trackers.length; i++) {
       Object.assign(this.status.cars[i]!, freshState());
       this.status.cars[i]!.position = i + 1;
@@ -212,6 +225,7 @@ export class RaceDirector {
     this.updateOrder();
 
     if (status.mode === 'race' && status.phase === 'racing') {
+      this.eliminate(dt);
       const player = status.cars[0];
       if (player?.finished && this.playerFinishedAt < 0) this.playerFinishedAt = status.time;
       let all = true;
@@ -220,6 +234,38 @@ export class RaceDirector {
         status.phase = 'finished';
       }
     }
+  }
+
+  /**
+   * Elimination race: the clock runs down; at zero the last car still running is out (finished
+   * where it stands, ranked below the rest by when it went), and when one car is left it has won.
+   */
+  private eliminate(dt: number): void {
+    const status = this.status;
+    const elim = status.elimination;
+    if (!elim) return;
+    const running = status.order.filter((i) => !status.cars[i]!.finished);
+    if (running.length <= 1) {
+      if (running.length === 1) this.finishHere(running[0]!, false);
+      return;
+    }
+    elim.next -= dt;
+    if (elim.next > 0) return;
+    elim.next = elim.every;
+    elim.out++;
+    this.finishHere(running[running.length - 1]!, true);
+    if (running.length === 2) this.finishHere(running[0]!, false);
+  }
+
+  /** Ends a car's race where it stands: put out, or the winner of an elimination race. */
+  private finishHere(i: number, out: boolean): void {
+    const state = this.status.cars[i]!;
+    state.finished = true;
+    state.eliminated = out;
+    state.finishTime = this.status.time;
+    state.currentLap = 0;
+    if (!out) this.leaderFinished = true;
+    if (i === 0 && this.playerFinishedAt < 0) this.playerFinishedAt = this.status.time;
   }
 
   /** Projects every car onto the track (fresh lookups when `reset`). */
@@ -330,7 +376,8 @@ export class RaceDirector {
     const keys = this.keys;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i]!;
-      keys[i] = c.finished ? c.lap : c.progress;
+      // Cars put out rank below everyone, the last out highest.
+      keys[i] = c.eliminated ? -1000 + c.finishTime : c.finished ? c.lap : c.progress;
     }
     // Insertion sort: the order barely changes from one step to the next.
     for (let a = 1; a < order.length; a++) {
@@ -397,6 +444,7 @@ const freshState = (): CarRaceState => ({
   currentLap: 0,
   finished: false,
   finishTime: 0,
+  eliminated: false,
   sector: 0,
   sectorTimes: [0, 0, 0],
   bestSectors: [0, 0, 0],

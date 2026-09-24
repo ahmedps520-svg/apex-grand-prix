@@ -27,7 +27,7 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, FestivalDestination, MenuStore, ReplayCommand } from './store';
+import type { Difficulty, FestivalDestination, MenuStore, RaceType, ReplayCommand } from './store';
 import {
   Button,
   Choice,
@@ -643,6 +643,12 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(laps) => store.update({ laps })}
             />
             <Choice
+              label="Race type"
+              value={setup.raceType}
+              options={RACE_TYPES}
+              onChange={(raceType) => store.update({ raceType })}
+            />
+            <Choice
               label="Difficulty"
               value={setup.difficulty}
               options={DIFFICULTY}
@@ -737,6 +743,11 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
     </>
   );
 }
+
+const RACE_TYPES: ReadonlyArray<{ value: RaceType; text: string }> = [
+  { value: 'standard', text: 'Standard' },
+  { value: 'elimination', text: 'Elimination: last place out every 20 s' },
+];
 
 const HANDLING: ReadonlyArray<{ value: HandlingMode; text: string }> = [
   { value: 'sim', text: 'Sim' },
@@ -1026,11 +1037,13 @@ export function ResultsScreen({ store }: ScreenProps) {
                 <td class="mn-dim">{r.car}</td>
                 <td>{formatTime(r.bestLap)}</td>
                 <td>
-                  {!Number.isFinite(r.time)
-                    ? '—'
-                    : i === 0
-                      ? formatTime(r.time)
-                      : `+${r.gap.toFixed(3)}`}
+                  {r.out
+                    ? 'OUT'
+                    : !Number.isFinite(r.time)
+                      ? '—'
+                      : i === 0
+                        ? formatTime(r.time)
+                        : `+${r.gap.toFixed(3)}`}
                 </td>
               </tr>
             ))}

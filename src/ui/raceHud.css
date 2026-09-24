@@ -131,6 +131,32 @@
   box-shadow: 0 0 24px #2cff6a;
 }
 
+/* Elimination race: the clock to the next car out, under the lap. */
+.rh-elimination {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #ffd166;
+}
+
+.rh-elimination.last {
+  color: #ff5a4a;
+  animation: rh-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.rh-elimination[hidden] {
+  display: none;
+}
+
+@keyframes rh-pulse {
+  from {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .rh-banner {
   position: absolute;
   top: 38%;

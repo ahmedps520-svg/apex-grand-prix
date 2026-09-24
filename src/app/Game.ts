@@ -83,6 +83,7 @@ import {
   type RoamStart,
   type SpawnPoint,
   type WeatherMix,
+  FLAG_RETIRED,
 } from '../shared/protocol';
 import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
@@ -254,6 +255,8 @@ declare global {
 type Scenery = TestGroundScene | TrackScene | CityScene;
 
 const STATS_INTERVAL = 0.5;
+/** Elimination races: seconds between the last car going out. */
+const ELIMINATION_EVERY = 20;
 /** The first shift light comes on this far below the shift point. */
 const SHIFT_LIGHT_RANGE = 1900;
 /** Rival colours: every paint the player can pick, plus a few more. */
@@ -872,6 +875,10 @@ export class Game {
         (setup.mode === 'roam' ? setup.roamWeatherMotion : setup.weatherMotion) === 'moving',
       clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
+      elimination:
+        setup.mode === 'race' && !attract && setup.raceType === 'elimination'
+          ? ELIMINATION_EVERY
+          : undefined,
     };
   }
 
@@ -2496,8 +2503,9 @@ export class Game {
           car: this.carModels[car]?.name ?? '',
           player: car === 0,
           bestLap: c.bestLap,
-          time: c.finished ? c.finishTime : NaN,
-          gap: c.finished ? c.finishTime - leaderTime : NaN,
+          time: c.finished && !c.eliminated ? c.finishTime : NaN,
+          gap: c.finished && !c.eliminated ? c.finishTime - leaderTime : NaN,
+          out: c.eliminated,
         };
       }),
     };
@@ -3052,7 +3060,7 @@ export class Game {
     const count = Math.min(this.sim.latest?.carCount ?? 0, this.states.length);
     for (let i = 0; i < count; i++) {
       const s = this.states[i]!;
-      if (s === focus) continue;
+      if (s === focus || (s.flags & FLAG_RETIRED) !== 0) continue;
       const d = Math.hypot(s.pos.x - focus.pos.x, s.pos.y - focus.pos.y, s.pos.z - focus.pos.z);
       if (d > OTHER_EARSHOT) continue;
       // Keep the nearest few, in order.

@@ -32,6 +32,9 @@ export class RaceHud {
   private readonly lights = el('div', 'rh-lights');
   private readonly lightEls: HTMLElement[] = [];
   private readonly banner = el('div', 'rh-banner');
+  /** Elimination race: the clock to the next car out, red when it would be the player. */
+  private readonly elimination = el('div', 'rh-elimination');
+  private eliminationShown = '';
   private readonly wrongWay = el('div', 'rh-wrong', 'WRONG WAY');
   private shownSector = -1;
   private splitTimer = 0;
@@ -43,7 +46,8 @@ export class RaceHud {
     const left = el('div', 'rh-left');
     const pos = el('div', 'rh-pos-block');
     pos.append(this.position, this.positionTotal);
-    left.append(pos, this.lap);
+    left.append(pos, this.lap, this.elimination);
+    this.elimination.hidden = true;
     const times = el('div', 'rh-times');
     times.append(this.current, this.last, this.best, this.record, this.split);
     for (let i = 0; i < 5; i++) {
@@ -54,6 +58,26 @@ export class RaceHud {
     this.root.append(left, times, this.lights, this.banner, this.wrongWay);
     this.root.hidden = true;
     parent.appendChild(this.root);
+  }
+
+  /** Elimination race: OUT IN n, and LAST when the player is the one on the way out. */
+  private updateElimination(race: RaceStatus, player: number): void {
+    const elim = race.elimination;
+    const me = race.cars[player];
+    const on = !!elim && race.phase === 'racing' && !!me && !me.finished;
+    let text = '';
+    let last = false;
+    if (on && elim && me) {
+      const running = race.order.filter((i) => !race.cars[i]!.finished);
+      last = running.length > 1 && running[running.length - 1] === player;
+      text = `${last ? 'LAST · ' : ''}OUT IN ${Math.max(0, Math.ceil(elim.next))}`;
+    }
+    const key = `${text}:${last}`;
+    if (key === this.eliminationShown) return;
+    this.eliminationShown = key;
+    this.elimination.hidden = text === '';
+    setText(this.elimination, text);
+    this.elimination.classList.toggle('last', last);
   }
 
   setVisible(visible: boolean): void {
@@ -88,6 +112,7 @@ export class RaceHud {
       ? `LAP ${Math.min(Math.max(me.lap + 1, 1), race.laps)}/${race.laps}`
       : `LAP ${Math.max(me.lap + 1, 1)}`;
     setText(this.lap, me.finished ? 'FINISHED' : lapText);
+    this.updateElimination(race, player);
     setText(this.current, lapTime(me.currentLap));
     setText(this.last, `Last ${lapTime(me.lastLap)}`);
     setText(this.best, `Best ${lapTime(me.bestLap)}`);
