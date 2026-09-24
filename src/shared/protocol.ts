@@ -207,6 +207,8 @@ export interface RoamRaceStatus {
   countdown: number;
   /** The player has been put on its grid slot (false while the screen covers the move). */
   placed: boolean;
+  /** On the grid before the count: the camera's sweep over the field. */
+  intro: boolean;
   /** Seconds since the start. */
   time: number;
   /** Cars in the race, the player included, and the player's position among them. */

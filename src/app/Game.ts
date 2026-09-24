@@ -271,6 +271,9 @@ const ATTRACT_SHOT = 16;
 const HERO_FOV = 34;
 /** Engine sound level while the menus are open over the backdrop race. */
 const MENU_AUDIO = 0.35;
+/** Free roam: seconds of the sweep over a street race's grid, and of the winner's moment. */
+const GRID_INTRO_TIME = 3;
+const WINNER_TIME = 5;
 /** Seconds of the circuit flyover before a race, and of the podium after one. */
 const FLYOVER_TIME = 7;
 const PODIUM_TIME = 5.5;
@@ -487,6 +490,10 @@ export class Game {
   private policeStatus: PoliceStatus | null = null;
   /** Free roam: the festival race with rivals under way, as the sim last reported it. */
   private roamRace: RoamRaceStatus | null = null;
+  /** Free roam: the camera's sweep over a race's grid before the count. */
+  private gridIntro: { time: number } | null = null;
+  /** Free roam: the winner's moment after a race (the camera circles, confetti falls). */
+  private winner: { time: number; overlay: HTMLElement } | null = null;
   private readonly strips = new SpikeStrips();
   /** Arcade: the skill points of the session, and their HUD. */
   private skill: Skill | null = null;
@@ -840,6 +847,8 @@ export class Game {
     this.eventHud.reset();
     this.raceCard.hide();
     this.fade.classList.remove('on');
+    this.endGridIntro();
+    this.endWinner();
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
     this.menus.festival.value = roam ? this.festivalInfo() : null;
@@ -1221,6 +1230,8 @@ export class Game {
       else if (this.attract && !showroom) this.updateAttractCamera(dt, count, snapshot.race);
       else if (this.flyover) this.updateFlyover(dt);
       else if (this.podium) this.updatePodium(dt);
+      else if (this.gridIntro) this.updateGridIntro(dt, player);
+      else if (this.winner) this.updateWinner(dt, player);
       else this.camera.update(dt, player);
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
@@ -1250,6 +1261,7 @@ export class Game {
             } else {
               this.toasts.show(n.text, { timeout: 6 });
             }
+            if (n.position === 1) this.startWinner(n.event.name);
             if (n.position === 1 && this.skill) this.skill.award('race', 1000, 'WIN');
             else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
           }
@@ -1325,13 +1337,20 @@ export class Game {
       if (status.placed && !previous.placed) {
         this.camera.reset();
         this.fade.classList.remove('on');
+        // The sweep over the grid, until the sim starts the count.
+        if (status.intro) this.gridIntro = { time: 0 };
       }
-      if (Math.ceil(status.countdown) !== Math.ceil(previous.countdown))
+      if (
+        !status.intro &&
+        Math.ceil(status.countdown) !== Math.ceil(previous.countdown) &&
+        status.countdown > 0
+      )
         this.menuAudio.play('move');
     } else if (phase === 'racing' && before === 'countdown') {
       this.menuAudio.play('start');
     }
     if (phase !== 'countdown') this.fade.classList.remove('on');
+    if (this.gridIntro && !(phase === 'countdown' && status?.intro)) this.endGridIntro();
     this.debug.roamRace = status
       ? {
           phase: status.phase,
@@ -1342,6 +1361,94 @@ export class Game {
           rivals: status.rivals.map((r) => Math.round(r.progress)),
         }
       : null;
+  }
+
+  /**
+   * Free roam: the sweep over a race's grid: from ahead of the field on its right, looking back
+   * along it, down to behind the car, easing in as the count is about to start.
+   */
+  private updateGridIntro(dt: number, player: CarRenderState): void {
+    const intro = this.gridIntro!;
+    intro.time += dt;
+    const t = Math.min(intro.time / GRID_INTRO_TIME, 1);
+    const u = 1 - (1 - t) * (1 - t);
+    const q = player.rot;
+    let fx = -2 * (q.x * q.z + q.w * q.y);
+    let fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const len = Math.hypot(fx, fz) || 1;
+    fx /= len;
+    fz /= len;
+    const rx = -fz;
+    const rz = fx;
+    const p = player.pos;
+    const sx = p.x + fx * 26 + rx * 7;
+    const sz = p.z + fz * 26 + rz * 7;
+    const ex = p.x - fx * 7.5;
+    const ez = p.z - fz * 7.5;
+    const cam = this.camera.camera;
+    cam.up.set(0, 1, 0);
+    cam.position.set(sx + (ex - sx) * u, p.y + 5 - 2.6 * u, sz + (ez - sz) * u);
+    const look = 12 - 10 * u;
+    cam.lookAt(p.x + fx * look, p.y + 0.8, p.z + fz * look);
+    if (cam.fov !== 50) {
+      cam.fov = 50;
+      cam.updateProjectionMatrix();
+    }
+    if (t >= 1) this.endGridIntro();
+  }
+
+  private endGridIntro(): void {
+    if (!this.gridIntro) return;
+    this.gridIntro = null;
+    this.camera.reset();
+  }
+
+  /** Free roam: a race won: confetti and a banner, and the camera circling the car a while. */
+  private startWinner(name: string): void {
+    this.endWinner();
+    const overlay = el('div', 'podium-overlay');
+    const confetti = el('div', 'podium-confetti');
+    const colours = ['#ff3b2f', '#ffd166', '#39d98a', '#ffffff', '#4cc9f0'];
+    for (let i = 0; i < 60; i++) {
+      const piece = el('span');
+      piece.style.setProperty('--x', `${(Math.random() * 100).toFixed(1)}%`);
+      piece.style.setProperty('--d', `${(Math.random() * 2).toFixed(2)}s`);
+      piece.style.setProperty('--t', `${(3 + Math.random() * 2).toFixed(2)}s`);
+      piece.style.setProperty('--c', colours[i % colours.length]!);
+      confetti.appendChild(piece);
+    }
+    const banner = el('div', 'podium-banner');
+    const label = el('span', 'podium-label');
+    setText(label, 'You win');
+    const title = el('span', 'podium-name');
+    setText(title, name);
+    banner.append(label, title);
+    banner.addEventListener('pointerdown', () => this.endWinner());
+    overlay.append(confetti, banner);
+    this.ui.appendChild(overlay);
+    this.winner = { time: 0, overlay };
+    this.camera.mode = 'orbit';
+    this.camera.reset();
+    this.menuAudio.play('start');
+  }
+
+  private updateWinner(dt: number, player: CarRenderState): void {
+    const winner = this.winner!;
+    winner.time += dt;
+    this.camera.update(dt, player);
+    const skip = winner.time > 1 && this.input.ui.length > 0;
+    if (winner.time >= WINNER_TIME || skip) this.endWinner();
+  }
+
+  private endWinner(): void {
+    const winner = this.winner;
+    if (!winner) return;
+    this.winner = null;
+    const overlay = winner.overlay;
+    overlay.classList.add('podium-done');
+    setTimeout(() => overlay.remove(), 700);
+    this.camera.mode = this.drivingCamera;
+    this.camera.reset();
   }
 
   /**

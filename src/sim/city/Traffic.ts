@@ -345,8 +345,9 @@ export class Traffic {
         );
     }
 
-    // A siren close by: slow right down and ease over to the right until it has gone.
-    if (!car.police && this.sirenNear(car)) {
+    // A siren close by, or the player on the horn right behind: slow right down and ease over
+    // to the right until it has gone.
+    if (!car.police && (this.sirenNear(car) || this.hornBehind(car, player))) {
       target = Math.min(target, PULL_OVER_SPEED);
       car.pullOver = Math.min(car.pullOver + dt * 1.2, 1);
     } else if (car.pullOver > 0) {
@@ -441,6 +442,16 @@ export class Traffic {
         if (q && Math.abs(q.lateral) < 2.6) consider(remaining + q.s - car.front - 1.5, 0);
       }
     }
+  }
+
+  /** The player close behind this car in its lane, leaning on the horn. */
+  private hornBehind(car: Vehicle, player: Car): boolean {
+    if (!player.horn) return false;
+    if (Math.abs(player.pos.x - car.x) > 40 || Math.abs(player.pos.z - car.z) > 40) return false;
+    const p = this.projectOnLink(car.link, player.pos.x, player.pos.z);
+    if (!p || Math.abs(p.lateral) > 4.5) return false;
+    const behind = car.s - p.s;
+    return behind > 0 && behind < 35;
   }
 
   /** A police car with its siren on within reach (ahead or behind). */

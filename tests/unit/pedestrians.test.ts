@@ -10,6 +10,7 @@ import {
   SOFT_FLOATS,
   CAR_STRIDE,
   defaultAids,
+  neutralInput,
   snapshotFloats,
   type SessionConfig,
 } from '../../src/shared/protocol';
@@ -128,6 +129,29 @@ describe('pedestrians', () => {
     // Off the car's line by more than its half width.
     const lateral = Math.abs(-(ped.x - player.pos.x) * fz + (ped.z - player.pos.z) * fx);
     expect(lateral).toBeGreaterThan(1.8);
+  });
+
+  it('hurry across when a horn sounds close by', () => {
+    const world = World.forSession(config());
+    const peds = world.pedestrians!;
+    const player = world.cars[0]!;
+    run(world, 1);
+    // Someone crossing 15 m from the car, which is on the horn.
+    const ped = peds.list[0]!;
+    ped.active = true;
+    ped.state = PED_CROSSING;
+    ped.crossTo = ped.s + 20;
+    ped.x = player.pos.x + 15;
+    ped.z = player.pos.z;
+    ped.y = player.pos.y;
+    expect(ped.hurry).toBe(0);
+    player.setInput({ ...neutralInput(), horn: true });
+    run(world, 0.3, () => {
+      ped.state = PED_CROSSING;
+      ped.x = player.pos.x + 15;
+      ped.z = player.pos.z;
+    });
+    expect(ped.hurry).toBeGreaterThan(0);
   });
 
   it('stop the traffic while someone is crossing in front of it', () => {

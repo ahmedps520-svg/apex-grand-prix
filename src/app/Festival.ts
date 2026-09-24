@@ -40,8 +40,9 @@ export interface FestivalView {
     name: string;
     line: string;
     detail: string;
-    /** A race's countdown is showing. */
+    /** A race's countdown is showing, or the sweep over the grid before it. */
     countdown?: boolean;
+    intro?: boolean;
     /** A race's field in order. */
     standings?: Standing[];
   } | null;
@@ -61,6 +62,7 @@ type Active =
       position: number;
       count: number;
       countdown: number;
+      intro: boolean;
     }
   | { kind: 'drift'; event: FestivalEvent; points: number; out: number }
   | {
@@ -162,6 +164,7 @@ export class Festival {
             position: race.position,
             count: race.count,
             countdown: race.countdown,
+            intro: race.intro,
           };
         }
       }
@@ -226,6 +229,7 @@ export class Festival {
       a.position = race.position;
       a.count = race.count;
       a.countdown = race.phase === 'countdown' ? race.countdown : 0;
+      a.intro = race.phase === 'countdown' && race.intro;
       a.time = race.time;
       if (race.phase === 'countdown') return;
       if (race.finished >= 0) {
@@ -315,8 +319,15 @@ export class Festival {
       if (a.kind === 'race') {
         const cp = a.event.checkpoints[a.next]!;
         const rivals = a.count - 1;
-        view.active =
-          a.countdown > 0
+        view.active = a.intro
+          ? {
+              kind: 'race',
+              name: a.event.name,
+              line: 'GET READY',
+              detail: `Standing start · ${rivals} rival${rivals === 1 ? '' : 's'}`,
+              intro: true,
+            }
+          : a.countdown > 0
             ? {
                 kind: 'race',
                 name: a.event.name,

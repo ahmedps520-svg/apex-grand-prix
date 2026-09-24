@@ -84,6 +84,8 @@ export interface Pedestrian {
   pushZ: number;
   /** Seconds waited at the kerb (a long wait ends with a turn instead). */
   waited: number;
+  /** Seconds left of hurrying across (a horn close by). */
+  hurry: number;
 }
 
 export class Pedestrians {
@@ -125,6 +127,7 @@ export class Pedestrians {
         pushX: 0,
         pushZ: 0,
         waited: 0,
+        hurry: 0,
       });
     }
   }
@@ -207,6 +210,14 @@ export class Pedestrians {
     if (ped.state === PED_LEAPING) return;
     const info = ped.info;
     if (!info) return;
+    // A horn close by hurries anyone crossing.
+    if (
+      player.horn &&
+      ped.state === PED_CROSSING &&
+      Math.hypot(player.pos.x - ped.x, player.pos.z - ped.z) < 30
+    ) {
+      ped.hurry = 3;
+    }
     if (ped.state === PED_CROSSING) return;
     // The junction ahead, and the kerb before it.
     const next = this.nextJunction(ped);
@@ -296,10 +307,12 @@ export class Pedestrians {
       if (signalState(node, at.crossAxis, this.time) !== 'red') return false;
       if (signalState(node, ped.info!.axis, this.time) !== 'green') return false;
     }
-    // Nothing moving near the junction on the crossing road (or anywhere close).
+    // Nothing moving near the junction on the crossing road (or anywhere close), and nobody
+    // on the horn there.
     const near = (x: number, z: number, speed: number) =>
       speed > 1 && Math.hypot(x - node.x, z - node.z) < GAP_RANGE;
-    if (near(player.pos.x, player.pos.z, Math.hypot(player.vel.x, player.vel.z))) return false;
+    const playerSpeed = Math.hypot(player.vel.x, player.vel.z);
+    if (near(player.pos.x, player.pos.z, player.horn ? 2 : playerSpeed)) return false;
     if (traffic) {
       for (const v of traffic.vehicles) {
         if (v.active && near(v.x, v.z, v.v)) return false;
@@ -371,10 +384,11 @@ export class Pedestrians {
         ped.pushX *= k;
         ped.pushZ *= k;
       }
+      if (ped.hurry > 0) ped.hurry -= dt;
       if (ped.state === PED_WALKING) {
         ped.s += ped.dir * ped.pace * dt;
       } else if (ped.state === PED_CROSSING) {
-        ped.s += ped.dir * ped.pace * 1.25 * dt;
+        ped.s += ped.dir * ped.pace * (ped.hurry > 0 ? 1.9 : 1.25) * dt;
         if ((ped.s - ped.crossTo) * ped.dir >= 0) {
           ped.s = ped.crossTo;
           ped.state = PED_WALKING;
@@ -434,6 +448,7 @@ export class Pedestrians {
       ped.pushX = 0;
       ped.pushZ = 0;
       ped.waited = 0;
+      ped.hurry = 0;
       ped.active = true;
       this.move(ped, 0);
       return true;
