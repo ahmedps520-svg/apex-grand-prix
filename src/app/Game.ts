@@ -234,6 +234,7 @@ const EVENT_COLOURS: Record<EventKind, string> = {
   drift: '#37d4ff',
   camera: '#ffd166',
   jump: '#ff8a5b',
+  getaway: '#c77dff',
 };
 
 /** The free-roam starts, as fast-travel destinations. */
@@ -968,6 +969,7 @@ export class Game {
               this.festivalRecords = saveFestivalRecord(id, value);
             },
             () => this.sim.command({ kind: 'endRace' }),
+            (heat) => this.sim.command({ kind: 'pursuit', heat }),
           )
         : null;
     this.roamRace = null;
@@ -1412,7 +1414,7 @@ export class Game {
         }
         if (this.festival) {
           this.updateRoamRace(snapshot.roamRace ?? null);
-          this.festival.update(dt, player, snapshot.roamRace ?? null);
+          this.festival.update(dt, player, snapshot.roamRace ?? null, snapshot.police ?? null);
           this.eventHud.update(this.festival.view);
           for (const n of this.festival.notices.splice(0)) {
             if (n.results) {
@@ -1425,7 +1427,10 @@ export class Game {
             if (n.position === 1) {
               this.progress.wins++;
               this.progressDirty = true;
-            } else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
+            } else if (n.medal && this.skill) {
+              const getaway = n.event.kind === 'getaway';
+              this.skill.award('race', getaway ? 800 : 500, getaway ? 'GETAWAY' : 'RACE');
+            }
           }
           this.festivalScene?.setNextCheckpoint(this.festival.nextCheckpoint(), dt);
           // An event on, or close ahead, is sanctioned: the police let the speed go.

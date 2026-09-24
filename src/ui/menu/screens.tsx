@@ -838,6 +838,7 @@ const DESTINATION_COLOUR: Record<FestivalDestination['kind'], string> = {
   drift: '#37d4ff',
   camera: '#ffd166',
   jump: '#ff8a5b',
+  getaway: '#c77dff',
 };
 const DESTINATION_LABEL: Record<FestivalDestination['kind'], string> = {
   spawn: 'Start',
@@ -845,6 +846,7 @@ const DESTINATION_LABEL: Record<FestivalDestination['kind'], string> = {
   drift: 'Drift zone',
   camera: 'Speed trap',
   jump: 'Jump',
+  getaway: 'Getaway',
 };
 
 /** Free roam: the festival map (roads, events, the car) and the places to fast-travel to. */

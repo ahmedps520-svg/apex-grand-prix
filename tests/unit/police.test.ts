@@ -281,3 +281,23 @@ describe('police', () => {
     expect(world.police!.status.strips.length).toBe(0);
   });
 });
+
+describe('a getaway', () => {
+  it('puts the police on the player at the stars asked, from where they are', () => {
+    const world = World.forSession(config());
+    const police = world.police!;
+    for (let i = 0; i < 400; i++) world.step(SIM_DT);
+    expect(police.status.heat).toBe(0);
+    police.startPursuit(4);
+    expect(police.status.heat).toBe(4);
+    expect(police.status.state).toBe('pursuit');
+    expect(police.status.fine).toBe(1000);
+    for (let i = 0; i < 400 * 3; i++) world.step(SIM_DT);
+    expect(police.status.state).toBe('pursuit');
+    expect(police.status.heat).toBe(4);
+    expect(world.traffic!.vehicles.some((v) => v.police && v.chase)).toBe(true);
+    // Clamped to the stars there are.
+    police.startPursuit(9);
+    expect(police.status.heat).toBe(5);
+  });
+});

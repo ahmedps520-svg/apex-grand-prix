@@ -1,7 +1,7 @@
 import { MEDALS, type EventKind, type FestivalEvent } from '../content/city/events';
 import { racerName } from '../content/drivers';
 import type { CarRenderState } from '../render/interpolate';
-import type { RoamRaceStatus } from '../shared/protocol';
+import type { PoliceStatus, RoamRaceStatus } from '../shared/protocol';
 
 /**
  * The festival's rules, on the main thread from the render states: speed cameras register a
@@ -65,6 +65,7 @@ type Active =
       intro: boolean;
     }
   | { kind: 'drift'; event: FestivalEvent; points: number; out: number }
+  | { kind: 'getaway'; event: FestivalEvent; time: number; chased: boolean }
   | {
       kind: 'jump';
       event: FestivalEvent;
@@ -100,17 +101,20 @@ export class Festival {
     private readonly save: (id: string, value: number) => void = () => undefined,
     /** Tells the simulation the race under way is off (its rivals stand down). */
     private readonly endRace: () => void = () => undefined,
+    /** A getaway's line crossed: the police come at this many stars. */
+    private readonly startPursuit: (heat: number) => void = () => undefined,
   ) {}
 
   /** Whether a lower result is better for an event (races), or a higher one. */
   static lowerIsBetter(kind: EventKind): boolean {
-    return kind === 'race';
+    return kind === 'race' || kind === 'getaway';
   }
 
   /** Reads an event's best result as text. */
   static format(kind: EventKind, value: number): string {
     switch (kind) {
       case 'race':
+      case 'getaway':
         return formatTime(value);
       case 'drift':
         return `${Math.round(value).toLocaleString('en-US')} pts`;
@@ -133,7 +137,12 @@ export class Festival {
     this.prevAlong.clear();
   }
 
-  update(dt: number, player: CarRenderState, race: RoamRaceStatus | null = null): void {
+  update(
+    dt: number,
+    player: CarRenderState,
+    race: RoamRaceStatus | null = null,
+    police: PoliceStatus | null = null,
+  ): void {
     const x = player.pos.x;
     const z = player.pos.z;
     if (!this.started) {
@@ -170,13 +179,18 @@ export class Festival {
       }
     }
     const active = this.active;
-    if (active) this.updateActive(active, dt, player, race);
+    if (active) this.updateActive(active, dt, player, race, police);
     // Lines: the cameras register a crossing.
     for (const event of this.events) {
       if (event.kind === 'camera' && this.crossed(event, x, z, player.pos.y)) {
         const kmh = speed * 3.6;
         const best = this.record(event, kmh);
         this.notice(event, `Speed trap · ${event.name}: ${Math.round(kmh)} km/h`, best);
+      }
+      // A getaway starts on its line: the police come at its stars.
+      if (event.kind === 'getaway' && this.crossed(event, x, z, player.pos.y) && !this.active) {
+        this.active = { kind: 'getaway', event, time: 0, chased: false };
+        this.startPursuit(event.heat ?? 3);
       }
     }
     // Drift zones and jumps start by being there.
@@ -216,6 +230,7 @@ export class Festival {
     dt: number,
     player: CarRenderState,
     race: RoamRaceStatus | null,
+    police: PoliceStatus | null,
   ): void {
     const x = player.pos.x;
     const z = player.pos.z;
@@ -265,6 +280,10 @@ export class Festival {
       }
       return;
     }
+    if (a.kind === 'getaway') {
+      this.updateGetaway(a, dt, police);
+      return;
+    }
     if (a.kind === 'drift') {
       const inside = this.inZone(a.event, x, z);
       if (inside) {
@@ -311,6 +330,38 @@ export class Festival {
     }
   }
 
+  /**
+   * A getaway runs on the police's word: from the first sight of the pursuit, an escape ends
+   * it with the time (a medal against par), a bust ends it with nothing. Police that never
+   * come (none in the session) let it lapse.
+   */
+  private updateGetaway(
+    a: Extract<Active, { kind: 'getaway' }>,
+    dt: number,
+    police: PoliceStatus | null,
+  ): void {
+    a.time += dt;
+    if (police?.state === 'pursuit') a.chased = true;
+    if (!a.chased) {
+      if (a.time > 6) this.active = null;
+      return;
+    }
+    if (police?.state === 'escaped') {
+      this.active = null;
+      const best = this.record(a.event, a.time);
+      const medal = medalFor(a.event, a.time);
+      this.notice(
+        a.event,
+        `Getaway · ${a.event.name}: ${formatTime(a.time)}${medal ? ` · ${medal.toUpperCase()}` : ''}`,
+        best,
+        medal,
+      );
+    } else if (police?.state === 'busted') {
+      this.active = null;
+      this.notice(a.event, `Getaway · ${a.event.name}: busted.`, false);
+    }
+  }
+
   private updateView(x: number, z: number): void {
     const a = this.active;
     const view = this.view;
@@ -345,6 +396,13 @@ export class Festival {
                     : `Checkpoint ${a.next} / ${a.event.checkpoints.length - 1} · ${Math.round(Math.hypot(cp.x - x, cp.z - z))} m`,
                 standings: this.standings(),
               };
+      } else if (a.kind === 'getaway') {
+        view.active = {
+          kind: 'getaway',
+          name: a.event.name,
+          line: formatTime(a.time),
+          detail: a.chased ? `${a.event.heat ?? 3} stars · lose them` : 'Here they come',
+        };
       } else if (a.kind === 'drift') {
         view.active = {
           kind: 'drift',
@@ -500,7 +558,7 @@ export function festivalTotals(
     const value = records[e.id];
     if (value === undefined) continue;
     totals.done++;
-    if (e.kind !== 'race') continue;
+    if (e.kind !== 'race' && e.kind !== 'getaway') continue;
     const medal = medalFor(e, value);
     if (medal) totals[medal]++;
   }

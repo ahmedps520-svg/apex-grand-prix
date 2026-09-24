@@ -172,7 +172,7 @@ export interface SessionResults {
 /** A place to fast-travel to: a spawn, or a festival event with its best result. */
 export interface FestivalDestination {
   id: string;
-  kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump';
+  kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump' | 'getaway';
   name: string;
   best: string | null;
   x: number;

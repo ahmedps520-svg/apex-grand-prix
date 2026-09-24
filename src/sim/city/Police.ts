@@ -157,6 +157,20 @@ export class Police {
     }
   }
 
+  /**
+   * A getaway: the police are on the player at this many stars from this moment (the units
+   * head for where the player was last seen, which is here).
+   */
+  startPursuit(heat: number): void {
+    const status = this.status;
+    status.heat = Math.max(1, Math.min(Math.round(heat), 5));
+    status.fine = 250 * status.heat;
+    status.state = 'pursuit';
+    this.sinceSeen = 0;
+    this.stopped = 0;
+    this.offenceAt = this.time;
+  }
+
   // ---------------------------------------------------------------- offences
 
   private offence(): void {

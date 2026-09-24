@@ -112,6 +112,10 @@ export class FestivalScene {
         sign.scale.set(0.8, 0.8, 0.06);
         place(sign, e, -0.1, half, 3.2);
         this.root.add(sign);
+      } else if (e.kind === 'getaway') {
+        // A gantry with a red banner: cross it and the police come.
+        posts(e, 0, 4.6, half, steel);
+        bar(e, 0, 4.1, half * 2 + 0.3, 0.9, 0.06, red);
       } else if (e.kind === 'drift') {
         // Gates at the zone's start and end: posts with a cyan banner.
         const zone = e.zone!;

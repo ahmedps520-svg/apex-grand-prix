@@ -175,6 +175,8 @@ export type SimCommand =
   | { kind: 'skipIntro' }
   /** Moving weather: a change to this weather starts now (from `blend` along, for the tests). */
   | { kind: 'weather'; to: Weather; blend?: number }
+  /** Free roam: a getaway starts, the police on the player at this many stars. */
+  | { kind: 'pursuit'; heat: number }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 

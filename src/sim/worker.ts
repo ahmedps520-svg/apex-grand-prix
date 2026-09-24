@@ -130,6 +130,7 @@ scope.onmessage = (event) => {
         } else if (command.kind === 'endRace') world.racers?.endRace();
         else if (command.kind === 'skipIntro') world.racers?.skipIntro();
         else if (command.kind === 'weather') world.weather?.changeTo(command.to, command.blend);
+        else if (command.kind === 'pursuit') world.police?.startPursuit(command.heat);
         else if (command.kind === 'teleport') world.teleport(command.car, command.to);
         else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
         else if (command.kind === 'holdStart' && world.director) {
