@@ -3255,15 +3255,6 @@ export class Game {
     };
     return [
       choiceItem(
-        'Pit stop',
-        [
-          { value: 'stay', text: 'Stay out' },
-          { value: 'box', text: 'Box this lap' },
-        ] as const,
-        () => (this.pit?.phase === 'armed' ? 'box' : 'stay'),
-        (v) => this.setPit(v === 'box'),
-      ),
-      choiceItem(
         'Traction control',
         AID_OPTIONS,
         () => s.aids.tc,
@@ -3348,6 +3339,16 @@ export class Game {
         () => this.menus.setup.value.location,
         (v) => this.teleport(v),
         true,
+      ),
+      // Last, after the driving aids the proving ground is set up with: the pit call in a race.
+      choiceItem(
+        'Pit stop',
+        [
+          { value: 'stay', text: 'Stay out' },
+          { value: 'box', text: 'Box this lap' },
+        ] as const,
+        () => (this.pit?.phase === 'armed' ? 'box' : 'stay'),
+        (v) => this.setPit(v === 'box'),
       ),
     ];
   }
