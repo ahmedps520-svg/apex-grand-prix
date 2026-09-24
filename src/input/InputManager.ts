@@ -16,6 +16,7 @@ import {
 /** One-shot actions (edge-triggered) while driving. */
 export type Action =
   | 'reset'
+  | 'pit'
   | 'camera'
   | 'festivalMap'
   | 'overlay'
@@ -84,6 +85,7 @@ const PAD_BUTTON_ACTIONS: ReadonlyArray<[PadAction, Action]> = [
 
 const KEY_BUTTON_ACTIONS: ReadonlyArray<[KeyAction, Action]> = [
   ['reset', 'reset'],
+  ['pit', 'pit'],
   ['camera', 'camera'],
   ['overlay', 'overlay'],
   ['telemetry', 'telemetry'],

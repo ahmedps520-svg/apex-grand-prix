@@ -5,6 +5,7 @@
  */
 
 import type { GameMode } from '../shared/protocol';
+import type { PitPhase } from '../shared/pitLane';
 
 /** What the engineer knows about the player's race, every frame. */
 export interface RadioInput {
@@ -13,6 +14,8 @@ export interface RadioInput {
   qualifying?: boolean;
   /** Tread gone across the tyres, 0 new … 1 worn out (races with tyre wear). */
   tyreWear?: number;
+  /** Pit stops: where the player's is. */
+  pit?: PitPhase;
   phase: 'grid' | 'countdown' | 'racing' | 'finished';
   /** Laps completed by the player. */
   lapsDone: number;
@@ -78,6 +81,7 @@ export class RaceEngineer {
   private steerSaid = false;
   private tyresHalfSaid = false;
   private tyresGoneSaid = false;
+  private pitPhase: PitPhase = 'none';
 
   reset(): void {
     this.lastPhase = null;
@@ -95,6 +99,7 @@ export class RaceEngineer {
     this.steerSaid = false;
     this.tyresHalfSaid = false;
     this.tyresGoneSaid = false;
+    this.pitPhase = 'none';
   }
 
   update(dt: number, r: RadioInput): RadioMessage[] {
@@ -203,6 +208,17 @@ export class RaceEngineer {
       } else if (!this.tyresHalfSaid && (r.tyreWear ?? 0) > 0.5) {
         this.tyresHalfSaid = true;
         out.push({ text: 'Tyres are half worn. Smooth inputs from here.', priority: 1 });
+      }
+    }
+
+    // The pit stop: the call, and the send-off.
+    const pit = r.pit ?? 'none';
+    if (pit !== this.pitPhase) {
+      const was = this.pitPhase;
+      this.pitPhase = pit;
+      if (pit === 'armed') out.push({ text: 'Box this lap. Box, box.', priority: 2 });
+      else if (pit === 'out' && was === 'stop') {
+        out.push({ text: 'Pit stop done, new tyres on. Go, go, go.', priority: 2 });
       }
     }
 

@@ -218,3 +218,19 @@
     opacity: 0;
   }
 }
+
+/* Pit stops: the call to box, the lane, the stop's clock. */
+.rh-pit {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #4cc9f0;
+}
+
+.rh-pit.stop {
+  color: #ffd166;
+}
+
+.rh-pit[hidden] {
+  display: none;
+}

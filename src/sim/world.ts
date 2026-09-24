@@ -25,6 +25,7 @@ import {
 import { AiDriver, arcadePace } from './race/AiDriver';
 import { resolveCarContacts } from './race/collisions';
 import { RaceDirector } from './race/RaceDirector';
+import { Pits } from './race/Pits';
 import { DEFAULT_LINE_OPTIONS, computeRacingLine, type RacingLineOptions } from './race/racingLine';
 import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
@@ -76,6 +77,8 @@ export class World {
   /** Set for race and time-trial sessions. */
   track: Track | null = null;
   director: RaceDirector | null = null;
+  /** Pit stops (races with tyre wear): the lane, and who is in it. */
+  pits: Pits | null = null;
   /** The grid from a qualifying (car indices by position, pole first), kept for restarts. */
   gridOrder: number[] | null = null;
   /** AI driver per car (null for the player). */
@@ -201,6 +204,13 @@ export class World {
       car.damageScale = config.damage ?? 0;
       car.wearRate = config.tyreWear ?? 0;
     }
+    if (config.mode === 'race' && config.pitStops) {
+      world.pits = new Pits(
+        track,
+        count,
+        Array.from({ length: count }, (_, i) => world.drivers[i] !== undefined),
+      );
+    }
     // The day's clock when it runs (the hour of the chosen time of day, with the circuit's own
     // sun in the afternoon); the headlights come on after dark either way.
     const hour = wrapHour(
@@ -274,6 +284,7 @@ export class World {
       car.repair();
       car.retired = false;
     }
+    this.pits?.reset(this.cars);
     this.director?.restart(this.cars, playerSlot, this.gridOrder ?? undefined);
     if (!this.director) this.cars[0]?.reset();
   }
@@ -286,10 +297,12 @@ export class World {
   step(dt: number): void {
     const cars = this.cars;
     const director = this.director;
+    // The pit lane: who goes in, and the drive down it on rails.
+    this.pits?.update(dt, cars, director?.status ?? null);
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i]!;
-      // Out of the race: left where it stopped, unseen and untouched.
-      if (car.retired) continue;
+      // Out of the race: left where it stopped, unseen and untouched. In the pit lane: on rails.
+      if (car.retired || car.onRails) continue;
       const ai = this.drivers[i];
       if (ai) {
         car.setInput(ai.drive(car, cars, dt));

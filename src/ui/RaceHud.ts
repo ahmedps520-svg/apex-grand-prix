@@ -1,4 +1,5 @@
 import type { RaceStatus } from '../sim/race/RaceDirector';
+import type { PitInfo } from '../shared/pitLane';
 import { el, setText } from './dom';
 import './raceHud.css';
 
@@ -34,6 +35,8 @@ export class RaceHud {
   private readonly banner = el('div', 'rh-banner');
   /** Elimination race: the clock to the next car out, red when it would be the player. */
   private readonly elimination = el('div', 'rh-elimination');
+  private readonly pit = el('div', 'rh-pit');
+  private pitShown = '';
   private eliminationShown = '';
   private readonly wrongWay = el('div', 'rh-wrong', 'WRONG WAY');
   private shownSector = -1;
@@ -46,8 +49,9 @@ export class RaceHud {
     const left = el('div', 'rh-left');
     const pos = el('div', 'rh-pos-block');
     pos.append(this.position, this.positionTotal);
-    left.append(pos, this.lap, this.elimination);
+    left.append(pos, this.lap, this.elimination, this.pit);
     this.elimination.hidden = true;
+    this.pit.hidden = true;
     const times = el('div', 'rh-times');
     times.append(this.current, this.last, this.best, this.record, this.split);
     for (let i = 0; i < 5; i++) {
@@ -58,6 +62,26 @@ export class RaceHud {
     this.root.append(left, times, this.lights, this.banner, this.wrongWay);
     this.root.hidden = true;
     parent.appendChild(this.root);
+  }
+
+  /** Pit stops: the call to box, the lane, the stop's clock, the exit. */
+  updatePit(info: PitInfo | null): void {
+    const phase = info?.phase ?? 'none';
+    const text =
+      phase === 'armed'
+        ? 'BOX THIS LAP'
+        : phase === 'in'
+          ? 'PIT LANE'
+          : phase === 'stop'
+            ? `PIT STOP · ${(info?.timer ?? 0).toFixed(1)}`
+            : phase === 'out'
+              ? 'PIT EXIT'
+              : '';
+    if (text === this.pitShown) return;
+    this.pitShown = text;
+    this.pit.hidden = text === '';
+    setText(this.pit, text);
+    this.pit.classList.toggle('stop', phase === 'stop');
   }
 
   /** Elimination race: OUT IN n, and LAST when the player is the one on the way out. */
@@ -169,6 +193,8 @@ export class RaceHud {
   }
 
   reset(): void {
+    this.pitShown = '';
+    this.pit.hidden = true;
     this.shownSector = -1;
     this.splitTimer = 0;
     this.bannerTimer = 0;

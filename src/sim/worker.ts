@@ -78,6 +78,7 @@ function tick(time: number): void {
       roamRace: world.racers?.active ?? null,
       clock: world.day?.hour ?? null,
       weather: world.weather?.status ?? null,
+      pit: world.pits?.info(0) ?? null,
     },
     [buffer],
   );
@@ -135,7 +136,7 @@ scope.onmessage = (event) => {
         else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
         else if (command.kind === 'holdStart' && world.director) {
           world.director.holdGrid = command.hold;
-        }
+        } else if (command.kind === 'pit') world.pits?.arm(command.car, command.on);
         break;
       }
     }

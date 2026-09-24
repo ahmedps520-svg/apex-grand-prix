@@ -88,6 +88,7 @@ import {
   type SpawnPoint,
   type WeatherMix,
   FLAG_RETIRED,
+  type PitInfo,
 } from '../shared/protocol';
 import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
@@ -584,6 +585,8 @@ export class Game {
   private frames = 0;
   /** Free roam: what the police make of the player, and their spike strips on the road. */
   private policeStatus: PoliceStatus | null = null;
+  /** Pit stops: the player's, from the snapshot (null when the lane is closed). */
+  private pit: PitInfo | null = null;
   /** Free roam: the festival race with rivals under way, as the sim last reported it. */
   private roamRace: RoamRaceStatus | null = null;
   /** Free roam: the camera's sweep over a race's grid before the count. */
@@ -915,6 +918,13 @@ export class Game {
       tyreWear:
         setup.mode === 'race' && !attract
           ? TYRE_WEAR_RATES[setup.tyreWear ?? 'off'] || undefined
+          : undefined,
+      pitStops:
+        setup.mode === 'race' &&
+        !attract &&
+        !qualifying &&
+        TYRE_WEAR_RATES[setup.tyreWear ?? 'off'] > 0
+          ? true
           : undefined,
       aids: { ...this.settings.aids },
       seed,
@@ -1458,6 +1468,7 @@ export class Game {
       else this.camera.update(dt, player);
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
+      this.pit = snapshot.pit ?? null;
       if (this.session?.mode === 'roam')
         this.updatePolice(snapshot.police ?? null, count, controls, dt);
       if (this.replayRecorder && snapshot.race && !this.paused) {
@@ -2516,6 +2527,7 @@ export class Game {
         : null
       : (this.records[session.trackId] ?? null);
     this.raceHud.update(dt, race, 0, record, wrongWay);
+    this.raceHud.updatePit(this.pit);
     this.updateRadio(dt, race);
 
     const me = race.cars[0];
@@ -2651,6 +2663,7 @@ export class Game {
       ? player.wheels.reduce((sum, w) => sum + w.wear, 0) / player.wheels.length
       : 0;
     let rivalBest = 0;
+    r.pit = this.pit?.phase ?? 'none';
     for (let i = 1; i < race.cars.length; i++) {
       const best = race.cars[i]!.bestLap;
       if (best > 0 && (rivalBest === 0 || best < rivalBest)) rivalBest = best;
@@ -3026,6 +3039,9 @@ export class Game {
         case 'reset':
           this.resetCar();
           break;
+        case 'pit':
+          this.setPit(this.pit?.phase !== 'armed');
+          break;
         case 'camera':
           this.cycleCamera();
           break;
@@ -3212,6 +3228,19 @@ export class Game {
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
 
+  /** Pit stops: box this lap (or stay out), in a race with the lane open. */
+  private setPit(on: boolean): void {
+    if (!this.session?.pitStops || !this.driving) return;
+    const phase = this.pit?.phase ?? 'none';
+    if (phase !== 'none' && phase !== 'armed') return;
+    if (on === (phase === 'armed')) return;
+    this.sim.command({ kind: 'pit', car: 0, on });
+    this.toasts.show(
+      on ? 'Box this lap: the pit lane is on the left before the line.' : 'Staying out.',
+      { timeout: 3 },
+    );
+  }
+
   private quickMenuItems(): MenuItem[] {
     const s = this.settings;
     const apply = () => {
@@ -3219,6 +3248,15 @@ export class Game {
       this.save();
     };
     return [
+      choiceItem(
+        'Pit stop',
+        [
+          { value: 'stay', text: 'Stay out' },
+          { value: 'box', text: 'Box this lap' },
+        ] as const,
+        () => (this.pit?.phase === 'armed' ? 'box' : 'stay'),
+        (v) => this.setPit(v === 'box'),
+      ),
       choiceItem(
         'Traction control',
         AID_OPTIONS,
