@@ -4,7 +4,13 @@ import { EngineAudio, OTHER_VOICES, type AudioFrame, type OtherEngine } from '..
 import { bearingPan } from '../audio/synth';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
-import { gripFactor, type Conditions, type Weather } from '../content/conditions';
+import {
+  gripFactor,
+  isTimeOfDay,
+  isWeather,
+  type Conditions,
+  type Weather,
+} from '../content/conditions';
 import { rivalName } from '../content/drivers';
 import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
@@ -108,15 +114,19 @@ import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from 
 import {
   loadFestivalRecords,
   loadRecords,
+  loadRoamSpot,
   loadSeason,
   saveFestivalRecord,
   saveRecord,
+  saveRoamSpot,
   saveSeason,
+  type RoamSpot,
 } from './records';
 import { Festival, festivalTotals } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
+import { Helicopter } from '../render/Helicopter';
 import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
 import type { FestivalInfo } from '../ui/menu/store';
@@ -161,6 +171,7 @@ export interface DebugApi {
   police: {
     heat: number;
     state: string;
+    helicopter: boolean;
     units: Array<{ x: number; z: number; d: number; siren: boolean }>;
   } | null;
   /**
@@ -392,6 +403,7 @@ export class Game {
   private readonly otherPicks: Array<{ i: number; d: number }> = [];
   /** Free roam: the first-drive hints, one at a time. */
   private roamHints: { time: number; next: number } | null = null;
+  private roamSpotTimer = 0;
   private readonly engineer = new RaceEngineer();
   private readonly radio = new RadioVoice();
   private readonly radioBox: RadioBox;
@@ -531,6 +543,8 @@ export class Game {
   /** Free roam: the winner's moment after a race (the camera circles, confetti falls). */
   private winner: { time: number; overlay: HTMLElement } | null = null;
   private readonly strips = new SpikeStrips();
+  /** Free roam: the police helicopter, above the car from four stars. */
+  private readonly helicopter = new Helicopter();
   /** Arcade: the skill points of the session, and their HUD. */
   private skill: Skill | null = null;
   private readonly skillHud: SkillHud;
@@ -625,6 +639,7 @@ export class Game {
     this.photoHost.className = 'photo-host';
     ui.appendChild(this.photoHost);
     this.menus = new MenuStore(settings, this.menuActions());
+    this.menus.roamSpot.value = loadRoamSpot();
     this.menus.championship.value = loadSeason(isChampionship);
     this.focus = new FocusManager(() => this.focusScope());
 
@@ -756,7 +771,18 @@ export class Game {
     };
   }
 
-  private configFor(setup: SessionSetup, attract = false): SessionConfig {
+  private configFor(given: SessionSetup, attract = false): SessionConfig {
+    // Free roam, continuing: the car, the day and the weather the drive was left with.
+    const spot = given.mode === 'roam' && given.resume ? loadRoamSpot() : null;
+    const setup: SessionSetup = spot
+      ? {
+          ...given,
+          carId: CARS.some((c) => c.id === spot.carId) ? spot.carId : given.carId,
+          time: isTimeOfDay(spot.time) ? spot.time : given.time,
+          weather: isWeather(spot.weather) ? spot.weather : given.weather,
+          handling: spot.handling === 'arcade' ? 'arcade' : 'sim',
+        }
+      : given;
     const seed = (Math.random() * 1e9) | 0;
     const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
     // Free roam: traffic slots for this device, each with its own everyday car.
@@ -790,6 +816,7 @@ export class Game {
       carId: setup.carId,
       location: setup.location,
       roamStart: setup.roamStart,
+      roamSpawn: spot ? { x: spot.x, z: spot.z, yaw: spot.yaw, y: spot.y + 0.5 } : undefined,
       opponents: setup.opponents,
       laps: setup.laps,
       difficulty: setup.difficulty,
@@ -995,6 +1022,8 @@ export class Game {
   private buildScenery(config: SessionConfig): void {
     // Take out what outlives the scenery, so disposing it doesn't free their materials.
     for (const car of this.cars) car.root.removeFromParent();
+    this.helicopter.root.removeFromParent();
+    this.strips.root.removeFromParent();
     this.ghostView?.root.removeFromParent();
     this.scenery.dispose();
     this.minimap?.dispose();
@@ -1129,7 +1158,10 @@ export class Game {
     this.audio.suspend();
     this.radio.stop();
     this.rumble.stop(this.input.activePad);
-    if (this.session?.mode === 'roam') this.menus.festival.value = this.festivalInfo();
+    if (this.session?.mode === 'roam') {
+      this.menus.festival.value = this.festivalInfo();
+      this.keepRoamSpot();
+    }
     this.menus.set(['pause']);
     this.applyHudVisibility();
   }
@@ -1146,6 +1178,7 @@ export class Game {
 
   private quitToMenu(): void {
     this.seasonRound = -1;
+    if (this.session?.mode === 'roam') this.keepRoamSpot();
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
@@ -1278,7 +1311,7 @@ export class Game {
       this.applyCameraKick(dt, top);
       this.race = snapshot.race;
       if (this.session?.mode === 'roam')
-        this.updatePolice(snapshot.police ?? null, count, controls);
+        this.updatePolice(snapshot.police ?? null, count, controls, dt);
       if (this.replayRecorder && snapshot.race && !this.paused) {
         this.replayRecorder.record(snapshot.simTime, this.states);
       }
@@ -1289,7 +1322,15 @@ export class Game {
           roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
         );
         this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
-        if (roam) this.updateRoamHints(dt);
+        if (roam) {
+          this.updateRoamHints(dt);
+          // Every so often, so closing the tab keeps the spot too.
+          this.roamSpotTimer += dt;
+          if (this.roamSpotTimer > 15) {
+            this.roamSpotTimer = 0;
+            this.keepRoamSpot();
+          }
+        }
         if (this.skill) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
@@ -1498,11 +1539,21 @@ export class Game {
    * Free roam: the wanted level on the HUD (with a notice when it changes), the sirens' volume
    * from the nearest police car with its lights on, and the spike strips laid on the road.
    */
-  private updatePolice(status: PoliceStatus | null, count: number, controls: boolean): void {
+  private updatePolice(
+    status: PoliceStatus | null,
+    count: number,
+    controls: boolean,
+    dt: number,
+  ): void {
     const previous = this.policeStatus;
     this.policeStatus = status;
     this.hud.setHeat(status);
     if (status && previous && controls) {
+      if (status.helicopter && !previous.helicopter && status.state === 'pursuit') {
+        this.toasts.show('A helicopter has you from above. Get under the orbital to shake it.', {
+          timeout: 6,
+        });
+      }
       if (status.heat > previous.heat) {
         this.toasts.show(
           previous.heat === 0
@@ -1526,6 +1577,14 @@ export class Game {
     const scene = this.scenery.scene;
     if (this.strips.root.parent !== scene) scene.add(this.strips.root);
     this.strips.update(status?.strips ?? [], cityHeightAt);
+    // The helicopter: over the car from four stars, its searchlight on after dark.
+    if (this.helicopter.root.parent !== scene) scene.add(this.helicopter.root);
+    const me = this.states[0]!;
+    const time = this.session?.conditions?.time;
+    const night = time === 'night' ? 1 : time === 'dusk' ? 0.7 : 0;
+    const overhead = status?.helicopter === true && status.state === 'pursuit';
+    this.helicopter.update(dt, me.pos.x, me.pos.y, me.pos.z, overhead, night);
+    this.menuAudio.rotor(controls && overhead ? 0.7 : 0);
     // The sirens: loudest right beside a police car with its lights on, fading with distance.
     let level = 0;
     if (controls && status && status.state === 'pursuit') {
@@ -1545,6 +1604,7 @@ export class Game {
       ? {
           heat: status.heat,
           state: status.state,
+          helicopter: status.helicopter,
           units: this.states.slice(first, count).map((car) => ({
             x: Math.round(car.pos.x),
             z: Math.round(car.pos.z),
@@ -2570,6 +2630,12 @@ export class Game {
         case 'camera':
           this.cycleCamera();
           break;
+        case 'festivalMap':
+          if (this.session?.mode === 'roam' && this.driving && !this.menus.open) {
+            this.pause();
+            this.menus.push('map');
+          }
+          break;
         case 'overlay':
           settings.overlay = !settings.overlay;
           this.save();
@@ -2924,6 +2990,28 @@ export class Game {
     return picks.length === this.otherEngines.length
       ? this.otherEngines
       : this.otherEngines.slice(0, picks.length);
+  }
+
+  /** Free roam: remembers where the car is (with the car, the day and the weather) for Continue. */
+  private keepRoamSpot(): void {
+    const session = this.session;
+    const state = this.states[0];
+    if (!session || session.mode !== 'roam' || !state || !this.driving) return;
+    const q = state.rot;
+    const fx = -2 * (q.x * q.z + q.w * q.y);
+    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const spot: RoamSpot = {
+      x: Math.round(state.pos.x * 100) / 100,
+      z: Math.round(state.pos.z * 100) / 100,
+      y: Math.round(state.pos.y * 100) / 100,
+      yaw: Math.atan2(-fx, -fz),
+      carId: session.carId,
+      time: session.conditions?.time ?? 'midday',
+      weather: session.conditions?.weather ?? 'clear',
+      handling: session.handling ?? 'sim',
+    };
+    saveRoamSpot(spot);
+    this.menus.roamSpot.value = spot;
   }
 
   /** Free roam: the first-drive hints, spaced out over the first minute, once per browser. */

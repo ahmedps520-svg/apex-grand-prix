@@ -121,6 +121,8 @@ export interface SessionConfig {
   location: SpawnPoint;
   /** Free roam start in the open world. */
   roamStart?: RoamStart;
+  /** Free roam: exactly where to put the car instead (continuing a drive). */
+  roamSpawn?: { x: number; z: number; yaw: number; y?: number };
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -233,6 +235,8 @@ export interface PoliceStatus {
   fines: number;
   /** Spike strips on the road: [x1, z1, x2, z2] each. */
   strips: number[][];
+  /** A helicopter has the player from above (four stars and up). */
+  helicopter: boolean;
 }
 
 export type WorkerToMain =

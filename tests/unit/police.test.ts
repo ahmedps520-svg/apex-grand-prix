@@ -114,6 +114,37 @@ describe('traffic and the horn', () => {
   });
 });
 
+describe('the helicopter', () => {
+  it('comes at four stars and sees the player anywhere but under the deck', () => {
+    const world = World.forSession(config());
+    const police = world.police!;
+    const player = world.cars[0]!;
+    run(world, 1);
+    expect(police.status.helicopter).toBe(false);
+    // In the open downtown.
+    expect(police.helicopterSees(player)).toBe(true);
+    // Under the orbital's deck, on the ground.
+    player.teleport({ x: 200, z: -600, yaw: 0, y: 0 });
+    expect(player.pos.y).toBeLessThan(3);
+    expect(police.helicopterSees(player)).toBe(false);
+    // Up on the deck itself it has you again.
+    player.teleport({ x: 200, z: -600, yaw: 0, y: 8 });
+    expect(player.pos.y).toBeGreaterThan(6);
+    expect(police.helicopterSees(player)).toBe(true);
+    // Four stars: the helicopter is up, and out of every unit's sight the pursuit goes on.
+    police.status.heat = 4;
+    run(world, 16, () => {
+      player.pos.x = 1300;
+      player.pos.z = -900;
+      player.vel.x = 0;
+      player.vel.z = 0;
+    });
+    expect(police.status.helicopter).toBe(true);
+    expect(police.status.state).toBe('pursuit');
+    expect(police.status.evade).toBe(0);
+  });
+});
+
 describe('police', () => {
   it('starts clear with patrol cars and no fine', () => {
     const world = World.forSession(config());

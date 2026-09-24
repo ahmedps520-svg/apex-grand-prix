@@ -78,3 +78,50 @@ export function saveFestivalRecord(id: string, value: number): Records {
   }
   return records;
 }
+
+const ROAM_KEY = 'apex-gp.roam';
+
+/** Where a free roam drive was left: the car and where it stood, with the day and the weather. */
+export interface RoamSpot {
+  x: number;
+  z: number;
+  y: number;
+  yaw: number;
+  carId: string;
+  time: string;
+  weather: string;
+  handling: string;
+}
+
+export function loadRoamSpot(): RoamSpot | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(ROAM_KEY) ?? 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+    const str = (v: unknown) => typeof v === 'string' && v.length > 0;
+    if (!num(r.x) || !num(r.z) || !num(r.y) || !num(r.yaw)) return null;
+    if (!str(r.carId) || !str(r.time) || !str(r.weather) || !str(r.handling)) return null;
+    return {
+      x: r.x as number,
+      z: r.z as number,
+      y: r.y as number,
+      yaw: r.yaw as number,
+      carId: r.carId as string,
+      time: r.time as string,
+      weather: r.weather as string,
+      handling: r.handling as string,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveRoamSpot(spot: RoamSpot | null): void {
+  try {
+    if (spot === null) localStorage.removeItem(ROAM_KEY);
+    else localStorage.setItem(ROAM_KEY, JSON.stringify(spot));
+  } catch {
+    // Storage blocked: the spot lasts for this session only.
+  }
+}

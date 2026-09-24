@@ -36,6 +36,7 @@ export class TouchControls {
   private pendingCamera = 0;
   private pendingReset = 0;
   private pendingLights = 0;
+  private pendingMap = 0;
   private pendingHazards = 0;
   private pendingIndicatorLeft = 0;
   private pendingIndicatorRight = 0;
@@ -87,6 +88,7 @@ export class TouchControls {
       this.tap('tc-small tc-roam-btn', '►', () => this.pendingIndicatorRight++),
       this.tap('tc-small tc-roam-btn tc-hazards', '▲', () => this.pendingHazards++),
       this.hold('tc-small tc-roam-btn tc-horn', 'HORN', (v) => (this.horn = v > 0)),
+      this.tap('tc-small tc-roam-btn', 'MAP', () => this.pendingMap++),
     );
     this.root.append(pedals, paddles, pause, extras, this.roam);
     parent.appendChild(this.root);
@@ -154,6 +156,7 @@ export class TouchControls {
     pause: boolean;
     camera: number;
     reset: number;
+    map: number;
     lights: number;
     hazards: number;
     indicatorLeft: number;
@@ -165,6 +168,7 @@ export class TouchControls {
       pause: this.pendingPause,
       camera: this.pendingCamera,
       reset: this.pendingReset,
+      map: this.pendingMap,
       lights: this.pendingLights,
       hazards: this.pendingHazards,
       indicatorLeft: this.pendingIndicatorLeft,
@@ -175,6 +179,7 @@ export class TouchControls {
     this.pendingPause = false;
     this.pendingCamera = 0;
     this.pendingReset = 0;
+    this.pendingMap = 0;
     this.pendingLights = 0;
     this.pendingHazards = 0;
     this.pendingIndicatorLeft = 0;

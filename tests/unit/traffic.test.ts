@@ -32,6 +32,15 @@ const run = (world: World, seconds: number, each?: () => void) => {
   }
 };
 
+describe('continuing a drive', () => {
+  it('puts the car exactly where the drive was left', () => {
+    const world = World.forSession({ ...config(2), roamSpawn: { x: 120, z: -40, yaw: 1.2 } });
+    const car = world.cars[0]!;
+    expect(car.pos.x).toBeCloseTo(120, 0);
+    expect(car.pos.z).toBeCloseTo(-40, 0);
+  });
+});
+
 describe('after dark', () => {
   it('turns the headlights on by themselves at night, not by day', () => {
     expect(World.forSession(config(2)).cars[0]!.headlights).toBe(true);

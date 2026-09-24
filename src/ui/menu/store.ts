@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals';
+import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
 import type { Conditions, Weather } from '../../content/conditions';
 import type {
@@ -64,6 +65,8 @@ export interface SessionSetup {
   secondClass: string;
   /** Sim or arcade handling, for any mode. */
   handling: HandlingMode;
+  /** Free roam: continue from the spot the last drive was left at. */
+  resume?: boolean;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
@@ -247,6 +250,8 @@ export class MenuStore {
   readonly inSession = signal(false);
   /** Free roam: the festival map's roads, destinations and the car's spot (null elsewhere). */
   readonly festival = signal<FestivalInfo | null>(null);
+  /** Free roam: where the last drive was left, for the Continue button (null when none). */
+  readonly roamSpot = signal<RoamSpot | null>(null);
   readonly results = signal<SessionResults | null>(null);
   readonly championship = signal<Championship | null>(null);
   /** A replay of the session just finished can be watched. */

@@ -39,6 +39,8 @@ const FREE_RANGE = 120;
 const LANE_RANGE = 180;
 /** Stopped or crawling: slower than this (m/s) counts as pulled over for the bust. */
 const BUST_SPEED = 2.5;
+/** From this heat a helicopter keeps the player in sight from above, except under the deck. */
+const HELI_HEAT = 4;
 const SHOWN = 4;
 
 interface Block {
@@ -57,6 +59,7 @@ export class Police {
     fine: 0,
     fines: 0,
     strips: [],
+    helicopter: false,
   };
   private readonly units: Vehicle[];
   /** A festival event is on: speeding is sanctioned (red lights and crashes still count). */
@@ -108,6 +111,9 @@ export class Police {
       nearest = Math.min(nearest, d);
       if (d < range && this.lineOfSight(unit.x, unit.z, px, pz)) seen = true;
     }
+    // From four stars a helicopter has the player from above, except under the orbital's deck.
+    status.helicopter = status.heat >= HELI_HEAT;
+    if (status.helicopter && this.helicopterSees(player)) seen = true;
     if (seen || status.heat === 0) {
       this.lastX = px;
       this.lastZ = pz;
@@ -185,6 +191,12 @@ export class Police {
   }
 
   /** Straight line from a police car to the player with no building in the way. */
+  /** Whether the helicopter can see the player: anywhere but under the orbital's deck. */
+  helicopterSees(player: Car): boolean {
+    const deck = this.map.deckAt(player.pos.x, player.pos.z, 1);
+    return !(deck && player.pos.y < deck.height - 2);
+  }
+
   private lineOfSight(ax: number, az: number, bx: number, bz: number): boolean {
     for (let i = 1; i <= 6; i++) {
       const t = i / 7;
@@ -405,6 +417,7 @@ export class Police {
     status.fine = 0;
     status.state = how;
     status.strips = [];
+    status.helicopter = false;
     this.shownUntil = this.time + SHOWN;
     this.sinceSeen = 0;
     this.stopped = 0;
