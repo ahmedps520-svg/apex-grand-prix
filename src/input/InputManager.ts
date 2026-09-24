@@ -17,6 +17,7 @@ import {
 export type Action =
   | 'reset'
   | 'camera'
+  | 'festivalMap'
   | 'overlay'
   | 'telemetry'
   | 'pause'
@@ -407,6 +408,7 @@ export class InputManager {
       if (touch.horn) d.horn = true;
       for (let i = 0; i < presses.camera; i++) this.actions.push('camera');
       for (let i = 0; i < presses.reset; i++) this.actions.push('reset');
+      for (let i = 0; i < presses.map; i++) this.actions.push('festivalMap');
       if (presses.pause) this.actions.push('pause');
       throttle = Math.max(throttle, touch.throttle);
       brake = Math.max(brake, touch.brake);

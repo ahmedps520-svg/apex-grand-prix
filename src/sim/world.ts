@@ -108,7 +108,8 @@ export class World {
         const ramp = rampOf(event);
         if (ramp) surface.ramps.push(ramp);
       }
-      const world = new World(1, surface, surface.map.spawns[config.roamStart ?? 'downtown'], spec);
+      const spawn = config.roamSpawn ?? surface.map.spawns[config.roamStart ?? 'downtown'];
+      const world = new World(1, surface, spawn, spec);
       world.setAids(0, config.aids);
       world.cars[0]!.damageScale = config.damage ?? 0;
       world.cars[0]!.enableSoftBody();

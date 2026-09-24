@@ -121,6 +121,8 @@ export interface SessionConfig {
   location: SpawnPoint;
   /** Free roam start in the open world. */
   roamStart?: RoamStart;
+  /** Free roam: exactly where to put the car instead (continuing a drive). */
+  roamSpawn?: { x: number; z: number; yaw: number; y?: number };
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */

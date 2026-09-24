@@ -957,3 +957,10 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **Sound and HUD:** a rotor thump with a faint turbine whine (`MenuAudio.rotor`) while it is overhead; HELICOPTER OVERHEAD · HIDE UNDER THE ORBITAL under the stars; a notice when it arrives.
 - **Tests:** the helicopter sees the player in the open and on the deck but not under it; at four stars it is up and, out of every unit's sight, the pursuit goes on with the escape bar at zero. A new browser test (`tests/e2e/street-race.spec.ts`) fast-travels to Downtown Dash, sees the field line up, crosses the line into the sweep and the count, and checks the race HUD and standings once under way.
 - **Honest limits:** the searchlight casts no shadows and the helicopter has no rotor wash or downdraft; it never lands or gets in the way; the deck is the only cover (no tunnels or multi-storey car parks yet).
+
+### Push 22: Continue where you left off (v0.22.0)
+- **The spot:** free roam keeps where the car stands (position, heading, the car, the time of day, the weather and the handling) in the browser (`records.ts`: `loadRoamSpot`, `saveRoamSpot`) on pause, on quitting to the menu and every 15 s while driving, so closing the tab keeps it too.
+- **Continue:** the Free Roam setup shows a Continue where you left off button (with the car and the time) when a spot is kept; it starts the session with the spot's car, day, weather and handling and puts the car there (`SessionConfig.roamSpawn`, ahead of `roamStart`).
+- **MAP on touch:** the roam row gains MAP, which pauses into the festival map (a `festivalMap` action).
+- **Tests:** the spot round-trips through storage, repairs bad data and is nothing without storage; a world built with `roamSpawn` puts the car exactly there.
+- **Honest limits:** the spot doesn't keep the heat, the damage, a race under way or the festival event in progress; there is one spot, not a list of saves.
