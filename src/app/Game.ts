@@ -1,6 +1,7 @@
 import { h, render } from 'preact';
 import * as THREE from 'three/webgpu';
 import { EngineAudio, OTHER_VOICES, type AudioFrame, type OtherEngine } from '../audio/EngineAudio';
+import { bearingPan } from '../audio/synth';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import { gripFactor, type Conditions, type Weather } from '../content/conditions';
@@ -386,6 +387,7 @@ export class Game {
     rpm: 0,
     throttle: 0,
     distance: 0,
+    pan: 0,
   }));
   private readonly otherPicks: Array<{ i: number; d: number }> = [];
   /** Free roam: the first-drive hints, one at a time. */
@@ -883,6 +885,7 @@ export class Game {
     this.fade.classList.remove('on');
     this.endGridIntro();
     this.endWinner();
+    this.touch.setRoam(roam && !idle && !attract);
     // The first drive in the city: a few hints, once.
     this.roamHints =
       roam && !idle && !attract && !this.settings.roamHinted && !navigator.webdriver
@@ -2905,6 +2908,10 @@ export class Game {
       picks.splice(at, 0, { i, d });
       if (picks.length > OTHER_VOICES) picks.length = OTHER_VOICES;
     }
+    // Which side each one is on, in the listener's frame (the focused car's heading).
+    const q = focus.rot;
+    const fx = -2 * (q.x * q.z + q.w * q.y);
+    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
     for (let k = 0; k < picks.length; k++) {
       const pick = picks[k]!;
       const s = this.states[pick.i]!;
@@ -2912,6 +2919,7 @@ export class Game {
       o.rpm = s.rpm;
       o.throttle = s.throttle;
       o.distance = pick.d;
+      o.pan = bearingPan(s.pos.x - focus.pos.x, s.pos.z - focus.pos.z, fx, fz);
     }
     return picks.length === this.otherEngines.length
       ? this.otherEngines

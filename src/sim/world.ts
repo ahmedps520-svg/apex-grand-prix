@@ -113,6 +113,8 @@ export class World {
       world.cars[0]!.damageScale = config.damage ?? 0;
       world.cars[0]!.enableSoftBody();
       const time = config.conditions?.time;
+      // The headlights come on by themselves after dark (the switch still works).
+      if (time === 'night' || time === 'dusk') world.cars[0]!.headlights = true;
       const police = config.police ?? 0;
       const racers = config.racers ?? 0;
       if ((config.traffic ?? 0) + police + racers > 0) {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EngineAudio, type AudioFrame } from '../../src/audio/EngineAudio';
 import {
+  bearingPan,
   cycleFrequency,
   engineCutoff,
   engineGain,
@@ -298,6 +299,20 @@ describe('EngineAudio', () => {
     paramCalls = 0;
   });
 
+  it('pans another car by its bearing from the listener', () => {
+    // Heading -z (yaw 0): right is +x.
+    expect(bearingPan(20, 0, 0, -1)).toBeGreaterThan(0.5);
+    expect(bearingPan(-20, 0, 0, -1)).toBeLessThan(-0.5);
+    expect(bearingPan(0, -20, 0, -1)).toBeCloseTo(0, 6);
+    expect(bearingPan(0, 20, 0, -1)).toBeCloseTo(0, 6);
+    // Heading +x: right is +z.
+    expect(bearingPan(0, 20, 1, 0)).toBeGreaterThan(0.5);
+    // Very close: centred rather than snapping to a side.
+    expect(Math.abs(bearingPan(0.5, 0, 0, -1))).toBeLessThan(0.3);
+    for (const w of WEIRD) expect(Number.isFinite(bearingPan(w, 1, 0, -1))).toBe(true);
+    expect(bearingPan(1, 1, 0, 0)).toBe(0);
+  });
+
   it("other cars' engines fade and muffle with distance, and never go bad", () => {
     const near = otherEngineLevel(4000, 0.8, 5);
     const far = otherEngineLevel(4000, 0.8, 60);
@@ -323,7 +338,7 @@ describe('EngineAudio', () => {
     audio.setVolume(0.5);
     audio.setMuted(true);
     audio.update(1 / 60, frame());
-    audio.updateOthers(1 / 60, [{ rpm: 3000, throttle: 0.5, distance: 20 }]);
+    audio.updateOthers(1 / 60, [{ rpm: 3000, throttle: 0.5, distance: 20, pan: 0.3 }]);
     audio.suspend();
     audio.resume();
     expect(audio.running).toBe(false);

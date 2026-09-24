@@ -282,3 +282,21 @@ export function otherEngineCutoff(rpm: number, throttle: number, distance: numbe
   const cutoff = engineCutoff(rpm, throttle);
   return (Number.isFinite(cutoff) ? cutoff : 700) * Math.max(0.25, 1 - d / 90);
 }
+
+/**
+ * Where another car sits left or right of the listener, -1 … 1, from its offset (dx, dz) and
+ * the listener's forward direction (fx, fz) on the ground; straight ahead or behind is 0, and
+ * a car within a couple of metres is centred rather than snapping to a side.
+ */
+export function bearingPan(dx: number, dz: number, fx: number, fz: number): number {
+  if (![dx, dz, fx, fz].every(Number.isFinite)) return 0;
+  const len = Math.hypot(fx, fz);
+  if (len < 1e-6) return 0;
+  // The right-hand normal of the forward direction.
+  const rx = -fz / len;
+  const rz = fx / len;
+  const d = Math.hypot(dx, dz);
+  if (d < 1e-6) return 0;
+  const side = (dx * rx + dz * rz) / Math.max(d, 2);
+  return Math.max(-1, Math.min(1, side * 0.85));
+}

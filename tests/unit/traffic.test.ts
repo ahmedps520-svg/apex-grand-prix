@@ -32,6 +32,17 @@ const run = (world: World, seconds: number, each?: () => void) => {
   }
 };
 
+describe('after dark', () => {
+  it('turns the headlights on by themselves at night, not by day', () => {
+    expect(World.forSession(config(2)).cars[0]!.headlights).toBe(true);
+    const day = {
+      ...config(2),
+      conditions: { time: 'midday' as const, weather: 'clear' as const },
+    };
+    expect(World.forSession(day).cars[0]!.headlights).toBe(false);
+  });
+});
+
 describe('traffic', () => {
   it('fills its slots from the everyday fleet with plain paints', () => {
     for (let i = 0; i < 20; i++) {

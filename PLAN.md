@@ -937,3 +937,10 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **Festival totals:** the map screen's subtitle reads the events with a result and the races' medals (`festivalTotals`).
 - **Tests:** the other-engine curves fall and muffle with distance and stay finite on bad input, and `updateOthers` is safe without Web Audio; `festivalTotals` counts results and medals; the hints flag defaults off and repairs a bad value.
 - **Honest limits:** the other voices are a single exhaust wave each (no rasp, limiter or squeal) and mono (no panning by direction); the hints are notices, not a guided drive; the totals don't count wins or a festival level.
+
+### Push 19: Free roam on touch (v0.19.0)
+- **Touch row for the city:** in free roam the on-screen controls show a row at the top left (above the steering zone, clear of the skill panel): LIGHTS, ◄ and ► indicators, ▲ hazards, and HORN held; the presses ride into the driver input with the keyboard's and the pad's (`TouchControls.take`), so an iPad can drive at night and use the horn.
+- **Headlights after dark:** the player's headlights start on at dusk and at night (the switch still works either way).
+- **Stereo for the other cars:** each of the other cars' engine voices goes through a stereo panner (where the browser has one), panned by the car's bearing from the focused car's heading (`bearingPan`): a car on your right sits right, one straight ahead or behind is centred, and one right beside you is centred rather than snapping to a side.
+- **Tests:** the headlights come on at night and not by day; the pan follows the bearing in both headings, centres close by and stays finite on bad input.
+- **Honest limits:** the touch row has no quick menu (TC, ABS, gearbox) and no camera button yet; there is no touch button for the festival map beyond the pause menu; the pan is by bearing only (no distance-based width or Doppler).

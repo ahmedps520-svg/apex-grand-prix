@@ -102,6 +102,34 @@
   font-size: 14px;
 }
 
+/* Free roam: lights, indicators, hazards and the horn, top left above the steering zone. */
+.tc-roam {
+  position: absolute;
+  top: calc(12px + var(--safe-top));
+  left: calc(18px + var(--safe-left));
+  display: flex;
+  gap: 8px;
+}
+
+.tc-roam[hidden] {
+  display: none;
+}
+
+.tc-roam-btn {
+  width: 58px;
+  height: 44px;
+  font-size: 13px;
+}
+
+.tc-hazards {
+  color: #ffb02e;
+  border-color: rgba(255, 176, 46, 0.7);
+}
+
+.tc-horn {
+  width: 66px;
+}
+
 .tc-pause {
   position: absolute;
   top: calc(12px + var(--safe-top));
