@@ -217,6 +217,19 @@ export function isDayLength(value: unknown): value is DayLength {
   return DAY_LENGTHS.some((option) => option.value === value);
 }
 
+/** Whether the weather stays as chosen or moves over the drive. */
+export type WeatherMotion = 'fixed' | 'moving';
+
+/** Choices for the weather-motion setting. */
+export const WEATHER_MOTIONS: ReadonlyArray<{ value: WeatherMotion; text: string }> = [
+  { value: 'fixed', text: 'Off: as chosen' },
+  { value: 'moving', text: 'On: it moves every few minutes' },
+];
+
+export function isWeatherMotion(value: unknown): value is WeatherMotion {
+  return WEATHER_MOTIONS.some((option) => option.value === value);
+}
+
 /** The clock's rate for a day that takes this many real minutes: hours per real second (0 still). */
 export function dayRate(minutes: number): number {
   return Number.isFinite(minutes) && minutes > 0 ? 24 / (minutes * 60) : 0;

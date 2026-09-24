@@ -35,7 +35,14 @@ import {
 } from '../content/city/terrain';
 import { signalState } from '../content/city/lanes';
 import { CITY_SUN_AZIMUTH, CITY_SUN_ELEVATION, citySunAt } from '../content/city/day';
-import { DEFAULT_CONDITIONS, type Conditions, darkness, darknessAt } from '../content/conditions';
+import {
+  DEFAULT_CONDITIONS,
+  type Conditions,
+  darkness,
+  darknessAt,
+  type Weather,
+} from '../content/conditions';
+import type { WeatherMix } from '../shared/protocol';
 import { mulberry32 } from '../shared/math';
 import type { TrackTheme } from '../sim/track/Track';
 import { Atmosphere } from './Atmosphere';
@@ -162,9 +169,12 @@ export class CityScene {
   private simTime = 0;
   /** Free roam's day: the hour its clock stands at, or null for the chosen time of day. */
   private clock: number | null = null;
-  /** The sun and the night the reflections were last rendered for. */
+  /** Weather moving: what the sky is changing to and how far along (null when fixed). */
+  private mix: { to: Weather; blend: number } | null = null;
+  /** The sun, the night and the cloud the reflections were last rendered for. */
   private envElevation = NaN;
   private envNight = NaN;
+  private envCloud = NaN;
   private renderer: THREE.WebGPURenderer | null = null;
   private pmrem: THREE.PMREMGenerator | null = null;
   private envTarget: THREE.RenderTarget | null = null;
@@ -247,11 +257,35 @@ export class CityScene {
   setClock(hour: number | null): void {
     if (hour === this.clock) return;
     this.clock = hour;
+    this.refreshLook();
+  }
+
+  /**
+   * Weather moving: the sky is changing from one weather to another; the look follows the
+   * change frame by frame. Null keeps the conditions' weather.
+   */
+  setWeather(mix: WeatherMix | null): void {
+    const same = mix
+      ? this.current.weather === mix.from && this.mix?.to === mix.to && this.mix.blend === mix.blend
+      : this.mix === null;
+    if (same) return;
+    if (mix) {
+      this.current.weather = mix.from;
+      this.mix = { to: mix.to, blend: mix.blend };
+    } else {
+      this.mix = null;
+    }
+    this.refreshLook();
+  }
+
+  /** The look again for a moved sun or sky; the reflections only as it changes enough. */
+  private refreshLook(): void {
     this.look = this.makeLook();
     this.applyLook();
     const moved = Math.abs(this.look.sunElevation - this.envElevation) > 1.5;
     const dimmed = Math.abs(this.night.value - this.envNight) > 0.06;
-    if (moved || dimmed) this.renderEnvironment();
+    const clouded = Math.abs(this.look.cloud - this.envCloud) > 0.12;
+    if (moved || dimmed || clouded) this.renderEnvironment();
   }
 
   /** Per frame: streams chunks around the followed point, lights the signals, moves the rain. */
@@ -285,7 +319,7 @@ export class CityScene {
 
   private makeLook(): SceneLook {
     const sun = this.clock === null ? undefined : citySunAt(this.clock);
-    const look = sceneLook(CITY_THEME, this.current, sun);
+    const look = sceneLook(CITY_THEME, this.current, sun, this.mix ?? undefined);
     // The fog closes in where the streaming stops.
     const reach = this.detail.chunks * CHUNK;
     look.fogNear = Math.min(look.fogNear, reach * 0.55);
@@ -340,6 +374,7 @@ export class CityScene {
       this.scene.environmentIntensity = this.look.environmentIntensity;
       this.envElevation = this.look.sunElevation;
       this.envNight = this.night.value;
+      this.envCloud = this.look.cloud;
     } catch (error) {
       console.warn('Environment map unavailable; continuing without reflections.', error);
     }

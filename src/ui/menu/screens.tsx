@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { VERSION_TEXT } from '../../app/version';
-import { DAY_LENGTHS, TIMES_OF_DAY, WEATHERS, clockText } from '../../content/conditions';
+import {
+  DAY_LENGTHS,
+  TIMES_OF_DAY,
+  WEATHERS,
+  WEATHER_MOTIONS,
+  clockText,
+} from '../../content/conditions';
 import { LIVERY_PATTERNS, colourName } from '../../content/livery';
 import { TRACKS } from '../../content/tracks';
 import {
@@ -715,6 +721,12 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
         value={setup.weather}
         options={WEATHERS}
         onChange={(weather) => store.update({ weather })}
+      />
+      <Choice
+        label="Changing weather"
+        value={roam ? setup.roamWeatherMotion : setup.weatherMotion}
+        options={WEATHER_MOTIONS}
+        onChange={(v) => store.update(roam ? { roamWeatherMotion: v } : { weatherMotion: v })}
       />
       <Choice
         label="The day"

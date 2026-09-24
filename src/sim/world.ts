@@ -29,6 +29,7 @@ import { Police } from './city/Police';
 import { Racers } from './city/Racers';
 import { Traffic } from './city/Traffic';
 import { Car, type Spawn } from './vehicle/car';
+import { MovingWeather } from './weather';
 import { carById, peakPower, topSpeed } from './vehicle/cars';
 import { TEST_MULE, type CarSpec } from './vehicle/spec';
 
@@ -83,6 +84,8 @@ export class World {
    * of 0 stands still), on a circuit only when the clock runs, null on the proving ground.
    */
   day: { hour: number; rate: number } | null = null;
+  /** Weather that moves (null when the weather chosen stays). */
+  weather: MovingWeather | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
   private readonly hints: number[] = [];
@@ -144,6 +147,7 @@ export class World {
         world.pedestrians = new Pedestrians(surface.map, config.pedestrians!, config.seed);
         if (world.traffic) world.traffic.pedestrians = world.pedestrians;
       }
+      world.startWeather(config);
       return world;
     }
     if (config.mode === 'free' || !config.trackId) {
@@ -194,6 +198,7 @@ export class World {
     const laps = config.mode === 'race' ? config.laps : 0;
     world.director = new RaceDirector(track, count, config.mode, laps, config.seed);
     world.director.restart(world.cars, Math.min(config.gridSlot, count - 1));
+    world.startWeather(config);
     return world;
   }
 
@@ -267,6 +272,7 @@ export class World {
     }
     if (cars.length > 1) resolveCarContacts(cars);
     this.tickDay(dt);
+    this.tickWeather(dt);
     this.traffic?.step(dt, cars[0]!);
     this.police?.step(dt, cars[0]!);
     this.racers?.step(dt, cars[0]!);
@@ -303,14 +309,35 @@ export class World {
   rubberBand(): void {
     const status = this.director?.status;
     const player = this.cars[0];
-    if (!status || !player?.arcade || status.mode !== 'race' || this.drivers[0]) return;
-    const mine = status.cars[0]?.progress ?? 0;
+    const banded =
+      !!status && player?.arcade === true && status.mode === 'race' && !this.drivers[0];
+    const mine = status?.cars[0]?.progress ?? 0;
+    // Moving weather: the pace their lines were planned for, scaled by the grip now.
+    const weather = this.weather?.pace ?? 1;
     for (let i = 1; i < this.drivers.length; i++) {
       const ai = this.drivers[i];
       if (!ai) continue;
-      const theirs = status.cars[i]?.progress ?? mine;
-      ai.paceScale = status.phase === 'racing' ? arcadePace(mine - theirs) : 1;
+      let band = 1;
+      if (banded && status.phase === 'racing') {
+        const theirs = status.cars[i]?.progress ?? mine;
+        band = arcadePace(mine - theirs);
+      }
+      ai.paceScale = band * weather;
     }
+  }
+
+  /** Weather that moves, from the weather chosen (never on the proving ground). */
+  private startWeather(config: SessionConfig): void {
+    if (!config.weatherMoves) return;
+    this.weather = new MovingWeather(config.conditions?.weather ?? 'clear', config.seed);
+  }
+
+  /** The sky moves on; the road's grip follows it. */
+  private tickWeather(dt: number): void {
+    const weather = this.weather;
+    if (!weather) return;
+    weather.step(dt);
+    this.surface.gripScale = weather.grip;
   }
 
   /**

@@ -5,11 +5,12 @@ import { bearingPan } from '../audio/synth';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import {
-  DAY_MINUTES,
   darkness,
   darknessAt,
+  DAY_MINUTES,
   gripFactor,
   hourOf,
+  isRaining,
   isTimeOfDay,
   isWeather,
   sunElevationAt,
@@ -76,6 +77,7 @@ import {
   type SessionConfig,
   type RoamStart,
   type SpawnPoint,
+  type WeatherMix,
 } from '../shared/protocol';
 import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
@@ -190,6 +192,10 @@ export interface DebugApi {
   pedestrianSample: { dx: number; dz: number; y: number; state: number } | null;
   /** Free roam: the hour on the day's clock while it runs (null when the time stands still). */
   clock: number | null;
+  /** Moving weather: from, to and how far along (null when fixed). */
+  weather: WeatherMix | null;
+  /** Moving weather: starts a change to this weather now (for the checks). */
+  weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
     phase: string;
@@ -494,6 +500,8 @@ export class Game {
   /** The running session (null only before the first one starts). */
   private session: SessionConfig | null = null;
   private track: Track | null = null;
+  /** Moving weather: the change last announced ("from>to"). */
+  private weatherHeading = '';
   /** False while the menus show a car idling in the background. */
   private driving = false;
   private paused = false;
@@ -679,6 +687,10 @@ export class Game {
       pedestrians: 0,
       pedestrianSample: null,
       clock: null,
+      weather: null,
+      weatherTo: (to, blend) => {
+        if (isWeather(to)) this.sim.command({ kind: 'weather', to, blend });
+      },
       errors: [],
     };
     window.__apex = this.debug;
@@ -848,6 +860,10 @@ export class Game {
       conditions: { time: setup.time, weather: setup.weather },
       // The day's clock at the chosen rate (never in attract), from the spot's hour when continuing.
       dayCycle: attract ? undefined : dayMinutes || undefined,
+      weatherMoves:
+        !attract &&
+        setup.mode !== 'free' &&
+        (setup.mode === 'roam' ? setup.roamWeatherMotion : setup.weatherMotion) === 'moving',
       clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
     };
@@ -908,6 +924,7 @@ export class Game {
     this.policeStatus = null;
     this.hud.setHeat(null);
     this.hud.setClock(null);
+    this.weatherHeading = '';
     this.strips.clear();
     this.menuAudio.siren(0);
     this.helicopter.reset();
@@ -1679,11 +1696,13 @@ export class Game {
     if (scene instanceof CityScene) {
       scene.setTime(this.sim.latest?.simTime ?? 0);
       scene.setClock(this.dayClock());
+      scene.setWeather(this.updateMovingWeather());
       scene.update(dt, this.camera.camera);
       return;
     }
     if (!(scene instanceof TrackScene)) return;
     scene.setClock(this.dayClock());
+    scene.setWeather(this.updateMovingWeather());
     scene.update(dt, this.camera.camera);
     for (let i = 0; i < this.cars.length; i++) {
       const s = this.states[i]!;
@@ -3043,7 +3062,7 @@ export class Game {
       yaw: yawOf(state.rot),
       carId: session.carId,
       time: session.conditions?.time ?? 'midday',
-      weather: session.conditions?.weather ?? 'clear',
+      weather: this.sim.latest?.weather?.from ?? session.conditions?.weather ?? 'clear',
       handling: session.handling ?? 'sim',
     };
     const clock = this.dayClock();
@@ -3065,6 +3084,25 @@ export class Game {
     const time = session.conditions?.time ?? 'track';
     if (session.mode === 'roam') return cityHourOf(time);
     return hourOf(time, this.track?.def.theme.sunElevation ?? CITY_SUN_ELEVATION);
+  }
+
+  /**
+   * Moving weather from the sim's latest snapshot (null when fixed), with a word as rain comes
+   * in or eases off.
+   */
+  private updateMovingWeather(): WeatherMix | null {
+    const mix = this.sim.latest?.weather ?? null;
+    this.debug.weather = mix;
+    const heading = mix ? `${mix.from}>${mix.to}` : '';
+    if (heading === this.weatherHeading) return mix;
+    this.weatherHeading = heading;
+    if (mix && mix.from !== mix.to && this.driving) {
+      if (isRaining(mix.to) && !isRaining(mix.from))
+        this.toasts.show('Rain coming in', { timeout: 6 });
+      else if (!isRaining(mix.to) && isRaining(mix.from))
+        this.toasts.show('The rain is easing off', { timeout: 6 });
+    }
+    return mix;
   }
 
   /** How dark it is now, 0 … 1: by the day's clock in free roam, else by the time of day. */
