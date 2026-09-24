@@ -233,6 +233,7 @@ export class World {
       config.seed,
       qualifying > 0 ? 0 : (config.elimination ?? 0),
       qualifying > 0,
+      config.rules === true,
     );
     world.gridOrder = config.gridOrder ? [...config.gridOrder] : null;
     world.director.restart(
@@ -374,7 +375,10 @@ export class World {
         band = arcadePace(mine - theirs);
       }
       // Worn tyres: the plan's corner speeds fall with the grip left (speed goes as its root).
-      ai.paceScale = band * weather * Math.sqrt(this.cars[i]?.gripFactor ?? 1);
+      // Flags: under a yellow the AI eases off; under a blue it lifts to let the lapping car by.
+      const flag = status?.cars[i]?.flag;
+      const flagged = flag === 'yellow' ? 0.8 : flag === 'blue' ? 0.9 : 1;
+      ai.paceScale = band * weather * Math.sqrt(this.cars[i]?.gripFactor ?? 1) * flagged;
     }
   }
 

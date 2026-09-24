@@ -144,6 +144,8 @@ export interface SessionConfig {
   tyreWear?: number;
   /** Pit stops: the lane is open for new tyres and repairs (races with tyre wear). */
   pitStops?: boolean;
+  /** Race rules: track limits enforced (warnings, penalties) and flags shown. */
+  rules?: boolean;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */

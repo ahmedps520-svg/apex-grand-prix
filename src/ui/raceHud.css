@@ -234,3 +234,42 @@
 .rh-pit[hidden] {
   display: none;
 }
+
+/* Race rules: the flag shown, and the notice for a warning or a penalty. */
+.rh-flag {
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #111;
+  animation: rh-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.rh-flag.blue {
+  background: #4cc9f0;
+}
+
+.rh-flag.yellow {
+  background: #ffd166;
+}
+
+.rh-flag[hidden] {
+  display: none;
+}
+
+.rh-notice {
+  margin-top: 2px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #111;
+  background: #ff9f1c;
+  animation: rh-pop 0.25s ease;
+}
+
+.rh-notice[hidden] {
+  display: none;
+}

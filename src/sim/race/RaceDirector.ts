@@ -1,10 +1,13 @@
 import { mulberry32 } from '../../shared/math';
+import { SURFACE } from '../track/surface';
 import type { Track } from '../track/Track';
 import type { Car } from '../vehicle/car';
 import { projectNear, trackPos, wrapDelta, type TrackPos } from './trackPos';
 
 export type RaceMode = 'race' | 'timeTrial' | 'free';
 export type RacePhase = 'grid' | 'countdown' | 'racing' | 'finished';
+/** What a car is shown: a blue flag (let the lapping car by) or a yellow (a car stopped ahead). */
+export type RaceFlag = 'none' | 'blue' | 'yellow';
 
 /** One car's race and timing state. Times are seconds; 0 means "none yet". */
 export interface CarRaceState {
@@ -30,6 +33,10 @@ export interface CarRaceState {
   bestSectors: number[];
   /** Time behind the leader at the last timing point passed (0 for the leader). */
   gapToLeader: number;
+  /** Race rules: track-limit warnings, the seconds of penalty they added, and the flag shown. */
+  warnings: number;
+  penalty: number;
+  flag: RaceFlag;
 }
 
 /** Everything the HUD needs about the session, updated in place every step. */
@@ -51,6 +58,10 @@ export interface RaceStatus {
   elimination: { every: number; next: number; out: number } | null;
   /** A qualifying session: positions by best lap, and every car runs its own laps. */
   qualifying: boolean;
+  /** Race rules on: track limits enforced, flags shown. */
+  rules: boolean;
+  /** The sector under a yellow flag (a car stopped in it), or -1. */
+  yellow: number;
 }
 
 /** Seconds on the grid before the first red light. */
@@ -65,6 +76,20 @@ const COOL_DOWN = 60;
 const QUALIFYING_COOL_DOWN = 20;
 /** Time trial: the car starts this far before the line on a flying lap. */
 const RUN_UP = 150;
+/**
+ * Track limits: all four wheels off the road and the kerbs for this far (but no further, and
+ * never slowly: that is a crash, and its own punishment) is a cut; every third cut is a penalty.
+ */
+const CUT_METRES = 12;
+const CUT_MAX_METRES = 90;
+const CUT_MIN_SPEED = 10;
+const WARNINGS_PER_PENALTY = 3;
+const PENALTY_SECONDS = 3;
+/** A car this slow on the track for this long puts its sector under a yellow. */
+const YELLOW_SPEED = 4;
+const YELLOW_AFTER = 2;
+/** A lapping car this close behind shows a blue flag. */
+const BLUE_DISTANCE = 30;
 
 interface Tracker {
   pos: TrackPos;
@@ -78,6 +103,11 @@ interface Tracker {
   sectorStart: number;
   /** Highest timing point passed (lap × GAP_POINTS + point). */
   point: number;
+  /** Track limits: metres of the excursion under way, and whether it slowed to a crash. */
+  offMetres: number;
+  offSlow: boolean;
+  /** Seconds stopped on the track (a yellow after a while). */
+  slowFor: number;
 }
 
 /**
@@ -105,6 +135,7 @@ export class RaceDirector {
     seed = 1,
     elimination = 0,
     qualifying = false,
+    rules = false,
   ) {
     this.rand = mulberry32(seed ^ 0x51f15e);
     this.status = {
@@ -121,6 +152,8 @@ export class RaceDirector {
           ? { every: elimination, next: elimination, out: 0 }
           : null,
       qualifying: mode === 'race' && qualifying,
+      rules: mode === 'race' && rules,
+      yellow: -1,
     };
     for (let i = 0; i < carCount; i++) {
       this.status.cars.push(freshState());
@@ -183,6 +216,7 @@ export class RaceDirector {
       status.elimination.next = status.elimination.every;
       status.elimination.out = 0;
     }
+    status.yellow = -1;
     for (let i = 0; i < this.trackers.length; i++) {
       Object.assign(this.status.cars[i]!, freshState());
       this.status.cars[i]!.position = i + 1;
@@ -234,6 +268,7 @@ export class RaceDirector {
     status.time += dt;
     const n = Math.min(cars.length, this.trackers.length);
     for (let i = 0; i < n; i++) this.advance(i, cars[i]!, start, dt);
+    if (status.rules && status.phase === 'racing') this.enforce(cars, dt);
     this.updateOrder();
 
     if (status.mode === 'race' && status.phase === 'racing') {
@@ -270,12 +305,79 @@ export class RaceDirector {
     if (running.length === 2) this.finishHere(running[0]!, false);
   }
 
+  /**
+   * Race rules. Track limits: an excursion with all four wheels off the road and the kerbs is a
+   * cut when it is short and quick (a warning, a penalty every third). A car stopped on the track
+   * puts its sector under a yellow, and a car about to be lapped is shown a blue.
+   */
+  private enforce(cars: readonly Car[], dt: number): void {
+    const status = this.status;
+    const n = Math.min(cars.length, this.trackers.length);
+    let yellow = -1;
+    for (let i = 0; i < n; i++) {
+      const car = cars[i]!;
+      const t = this.trackers[i]!;
+      const state = status.cars[i]!;
+      state.flag = 'none';
+      if (state.finished || car.retired || car.onRails) {
+        t.offMetres = 0;
+        t.slowFor = 0;
+        continue;
+      }
+      const speed = Math.hypot(car.vel.x, car.vel.z);
+      const off = car.wheels.every(
+        (w) => w.surface !== SURFACE.ASPHALT && w.surface !== SURFACE.KERB,
+      );
+      if (off) {
+        t.offMetres += speed * dt;
+        if (speed < CUT_MIN_SPEED) t.offSlow = true;
+      } else {
+        if (t.offMetres >= CUT_METRES && t.offMetres <= CUT_MAX_METRES && !t.offSlow) {
+          state.warnings++;
+          if (state.warnings % WARNINGS_PER_PENALTY === 0) state.penalty += PENALTY_SECONDS;
+        }
+        t.offMetres = 0;
+        t.offSlow = false;
+      }
+      if (!off && speed < YELLOW_SPEED) {
+        t.slowFor += dt;
+        if (t.slowFor > YELLOW_AFTER) yellow = state.sector;
+      } else {
+        t.slowFor = 0;
+      }
+    }
+    status.yellow = yellow;
+    for (let i = 0; i < n; i++) {
+      const state = status.cars[i]!;
+      if (state.finished || cars[i]!.retired || cars[i]!.onRails) continue;
+      if (yellow >= 0 && state.sector === yellow && this.trackers[i]!.slowFor <= YELLOW_AFTER) {
+        state.flag = 'yellow';
+      }
+    }
+    // Blue flags: a car a lap or more up, close behind.
+    const length = this.track.length;
+    for (let j = 0; j < n; j++) {
+      const slow = status.cars[j]!;
+      if (slow.finished || slow.flag !== 'none') continue;
+      for (let i = 0; i < n; i++) {
+        if (i === j) continue;
+        const fast = status.cars[i]!;
+        if (fast.finished || fast.lap - slow.lap < 1) continue;
+        const behind = wrapDelta(this.trackers[j]!.pos.s - this.trackers[i]!.pos.s, length);
+        if (behind > 0 && behind < BLUE_DISTANCE) {
+          slow.flag = 'blue';
+          break;
+        }
+      }
+    }
+  }
+
   /** Ends a car's race where it stands: put out, or the winner of an elimination race. */
   private finishHere(i: number, out: boolean): void {
     const state = this.status.cars[i]!;
     state.finished = true;
     state.eliminated = out;
-    state.finishTime = this.status.time;
+    state.finishTime = this.status.time + state.penalty;
     state.currentLap = 0;
     if (!out) this.leaderFinished = true;
     if (i === 0 && this.playerFinishedAt < 0) this.playerFinishedAt = this.status.time;
@@ -360,7 +462,8 @@ export class RaceDirector {
     if ((this.leaderFinished && !status.qualifying) || state.lap >= status.laps) {
       this.leaderFinished = true;
       state.finished = true;
-      state.finishTime = crossing;
+      // The flag, plus any penalty the race rules added.
+      state.finishTime = crossing + state.penalty;
       state.progress = state.lap;
       state.currentLap = 0;
       if (i === 0 && this.playerFinishedAt < 0) this.playerFinishedAt = crossing;
@@ -475,6 +578,9 @@ const freshState = (): CarRaceState => ({
   sectorTimes: [0, 0, 0],
   bestSectors: [0, 0, 0],
   gapToLeader: 0,
+  warnings: 0,
+  penalty: 0,
+  flag: 'none',
 });
 
 const freshTracker = (): Tracker => ({
@@ -486,4 +592,7 @@ const freshTracker = (): Tracker => ({
   lapStart: 0,
   sectorStart: 0,
   point: -1_000_000,
+  offMetres: 0,
+  offSlow: false,
+  slowFor: 0,
 });

@@ -79,6 +79,8 @@ export interface SessionSetup {
   raceType: RaceType;
   /** Races and championships: whether the tyres wear, and how fast. */
   tyreWear: TyreWear;
+  /** Races and championships: track limits and flags enforced. */
+  rules: boolean;
   /** Races and championship rounds: laps of qualifying before the race (0: the grid is chosen). */
   qualifying: number;
   /** Time trials: against the clock, or a drift trial (arcade handling, the drifts score). */
@@ -108,6 +110,8 @@ export interface ResultRow {
   gap: number;
   /** Elimination race: put out before the end. */
   out?: boolean;
+  /** Race rules: seconds of penalty added to the time. */
+  penalty?: number;
 }
 
 /** A championship in progress: a fixed series of circuits with points after each race. */
@@ -340,6 +344,7 @@ export class MenuStore {
     handling: 'sim',
     raceType: 'standard',
     tyreWear: 'off',
+    rules: true,
     qualifying: 0,
     trial: 'time',
     driftLaps: 2,

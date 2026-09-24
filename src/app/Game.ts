@@ -926,6 +926,7 @@ export class Game {
         TYRE_WEAR_RATES[setup.tyreWear ?? 'off'] > 0
           ? true
           : undefined,
+      rules: setup.mode === 'race' && !attract && !qualifying && setup.rules !== false,
       aids: { ...this.settings.aids },
       seed,
       // `?autopilot`: the AI drives the player's car in races and time trials (browser tests).
@@ -2664,6 +2665,10 @@ export class Game {
       : 0;
     let rivalBest = 0;
     r.pit = this.pit?.phase ?? 'none';
+    r.warnings = me.warnings;
+    r.penalty = me.penalty;
+    r.flag = me.flag;
+    r.yellow = race.yellow;
     for (let i = 1; i < race.cars.length; i++) {
       const best = race.cars[i]!.bestLap;
       if (best > 0 && (rivalBest === 0 || best < rivalBest)) rivalBest = best;
@@ -2701,6 +2706,7 @@ export class Game {
           time: c.finished && !c.eliminated ? c.finishTime : NaN,
           gap: c.finished && !c.eliminated ? c.finishTime - leaderTime : NaN,
           out: c.eliminated,
+          penalty: c.penalty,
         };
       }),
     };
