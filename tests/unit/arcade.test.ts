@@ -11,6 +11,7 @@ import {
   type HandlingMode,
   type SessionConfig,
 } from '../../src/shared/protocol';
+import { arcadePace } from '../../src/sim/race/AiDriver';
 import type { Car } from '../../src/sim/vehicle/car';
 import { World } from '../../src/sim/world';
 
@@ -101,5 +102,53 @@ describe('arcade handling', () => {
     expect(results[1]).toBeGreaterThan(results[0]!);
     // Two seconds of hard steering never spins the arcade car round.
     expect(results[1]).toBeLessThan(Math.PI);
+  });
+});
+
+describe('the arcade rubber band', () => {
+  it("bends a rival's pace by its gap to the player, within limits", () => {
+    expect(arcadePace(0)).toBe(1);
+    expect(arcadePace(0.1)).toBeCloseTo(1.035, 6);
+    expect(arcadePace(-0.1)).toBeCloseTo(0.965, 6);
+    expect(arcadePace(2)).toBe(1.1);
+    expect(arcadePace(-2)).toBe(0.9);
+    expect(arcadePace(Number.NaN)).toBe(1);
+  });
+
+  it('pulls the rivals in an arcade race and leaves a sim race alone', () => {
+    const race = (handling: 'sim' | 'arcade'): World => {
+      const world = World.forSession({
+        mode: 'race',
+        trackId: 'merriford-park',
+        carId: 'gt',
+        location: 'loop',
+        opponents: 2,
+        laps: 2,
+        difficulty: 'medium',
+        gridSlot: 0,
+        aids: defaultAids(),
+        seed: 3,
+        handling,
+      });
+      world.setHandling(handling);
+      return world;
+    };
+    for (const handling of ['sim', 'arcade'] as const) {
+      const world = race(handling);
+      const status = world.director!.status;
+      // Racing, with the player half a lap up the road.
+      status.phase = 'racing';
+      status.cars[0]!.progress = 1.5;
+      status.cars[1]!.progress = 1.0;
+      status.cars[2]!.progress = 1.7;
+      world.rubberBand();
+      const scales = [1, 2].map((i) => world.drivers[i]!.paceScale);
+      if (handling === 'arcade') {
+        expect(scales[0]).toBeGreaterThan(1);
+        expect(scales[1]).toBeLessThan(1);
+      } else {
+        expect(scales).toEqual([1, 1]);
+      }
+    }
   });
 });

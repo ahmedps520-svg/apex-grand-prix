@@ -400,6 +400,13 @@ export class InputManager {
       const presses = touch.take();
       d.shiftUp += presses.shiftUp;
       d.shiftDown += presses.shiftDown;
+      d.lights += presses.lights;
+      d.hazards += presses.hazards;
+      d.indicatorLeft += presses.indicatorLeft;
+      d.indicatorRight += presses.indicatorRight;
+      if (touch.horn) d.horn = true;
+      for (let i = 0; i < presses.camera; i++) this.actions.push('camera');
+      for (let i = 0; i < presses.reset; i++) this.actions.push('reset');
       if (presses.pause) this.actions.push('pause');
       throttle = Math.max(throttle, touch.throttle);
       brake = Math.max(brake, touch.brake);

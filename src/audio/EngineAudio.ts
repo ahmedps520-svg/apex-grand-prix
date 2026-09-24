@@ -72,11 +72,13 @@ const LEVEL = {
 /** Other cars heard at once (the nearest). */
 export const OTHER_VOICES = 3;
 
-/** Another car's engine as heard from the player's: its state and how far away it is. */
+/** Another car's engine as heard from the player's: its state, how far away and which side. */
 export interface OtherEngine {
   rpm: number;
   throttle: number;
   distance: number;
+  /** -1 (left) … 1 (right). */
+  pan: number;
 }
 
 // Short pulses in both: real blowdown pulses stay short at idle, and the lowpass sets brightness.
@@ -176,8 +178,8 @@ interface Graph {
   windCutoff: Knob;
   wind: Knob;
   grass: Knob;
-  /** The other cars' voices: pitch, brightness and level each. */
-  others: Array<{ pitch: Knob; cutoff: Knob; level: Knob }>;
+  /** The other cars' voices: pitch, brightness, level and (where the browser has it) pan each. */
+  others: Array<{ pitch: Knob; cutoff: Knob; level: Knob; pan: Knob | null }>;
 }
 
 /**
@@ -283,6 +285,8 @@ export class EngineAudio {
         voice.pitch.set(cycleFrequency(o.rpm), now, tone);
         voice.cutoff.set(otherEngineCutoff(o.rpm, o.throttle, o.distance), now, tone);
         voice.level.set(otherEngineLevel(o.rpm, o.throttle, o.distance) * LEVEL.others, now, tone);
+        const pan = Number.isFinite(o.pan) ? Math.max(-1, Math.min(1, o.pan)) : 0;
+        voice.pan?.set(pan, now, tone);
       });
     } catch {
       // Sound must never take the game loop down with it.
@@ -573,12 +577,16 @@ function buildGraph(ctx: BaseAudioContext): Graph {
     osc.detune.value = 5 + (i - 1) * 9;
     const filter = filterNode(ctx, 'lowpass', 500, 1);
     const gain = gainNode(ctx, 0);
-    osc.connect(filter).connect(gain).connect(stallGuard);
+    // Panned by the car's bearing where the browser has a stereo panner.
+    const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+    if (panner) osc.connect(filter).connect(gain).connect(panner).connect(stallGuard);
+    else osc.connect(filter).connect(gain).connect(stallGuard);
     otherOscs.push(osc);
     others.push({
       pitch: new Knob(osc.frequency),
       cutoff: new Knob(filter.frequency),
       level: new Knob(gain.gain),
+      pan: panner ? new Knob(panner.pan) : null,
     });
   }
 

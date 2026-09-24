@@ -72,6 +72,11 @@ export class AiDriver {
   private readonly lane: Float32Array;
   /** This driver's speed plan: corner speeds × skill, braking at its own pace. */
   private readonly plan: Float32Array;
+  /**
+   * A scale on the plan set from outside each step (arcade races: the rubber band to the
+   * player), 1 when nothing is pulling.
+   */
+  paceScale = 1;
   private readonly aggression: number;
   private readonly edge: number;
   private readonly pos = trackPos();
@@ -339,13 +344,13 @@ export class AiDriver {
   private pedals(car: Car, v: number, held: boolean): void {
     const out = this.out;
     const s = this.pos.s + Math.max(v, 0) * ANTICIPATION;
-    let target = this.planAt(s);
+    let target = this.planAt(s) * this.paceScale;
     // Off the line on the inside of a corner the radius is tighter: slow down to suit.
     const k = this.line.curvature[this.indexAt(s + Math.max(v, 0) * 0.5)]!;
     const tighter = 1 + k * this.offset;
     if (tighter < 1) target *= Math.sqrt(Math.max(tighter, 0.5));
     target = Math.min(target, this.speedCap);
-    const ahead = this.planAt(s + 6);
+    const ahead = this.planAt(s + 6) * this.paceScale;
     const need = ahead < target ? ((target - ahead) / 6) * target : 0;
     const err = v - target;
     if (!held && err > -0.5 && (need > 1 || err > 0.25)) {
@@ -516,4 +521,19 @@ export class AiDriver {
     const j = i + 1 === n ? 0 : i + 1;
     return samples[i]!.z + (samples[j]!.z - samples[i]!.z) * (f - base);
   }
+}
+
+/** Arcade races: how far a rival's pace bends per lap it trails the player; and its limits. */
+const ARCADE_BAND = 0.35;
+const ARCADE_BAND_MIN = 0.9;
+const ARCADE_BAND_MAX = 1.1;
+
+/**
+ * The arcade rubber band: a rival's pace scale from how far ahead of it the player is, in
+ * laps (negative when the rival leads). Behind the player it pushes on, ahead it eases off,
+ * within limits so it never looks like cheating.
+ */
+export function arcadePace(gapLaps: number): number {
+  if (!Number.isFinite(gapLaps)) return 1;
+  return Math.min(Math.max(1 + gapLaps * ARCADE_BAND, ARCADE_BAND_MIN), ARCADE_BAND_MAX);
 }

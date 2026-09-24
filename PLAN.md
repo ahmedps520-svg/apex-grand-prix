@@ -937,3 +937,16 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **Festival totals:** the map screen's subtitle reads the events with a result and the races' medals (`festivalTotals`).
 - **Tests:** the other-engine curves fall and muffle with distance and stay finite on bad input, and `updateOthers` is safe without Web Audio; `festivalTotals` counts results and medals; the hints flag defaults off and repairs a bad value.
 - **Honest limits:** the other voices are a single exhaust wave each (no rasp, limiter or squeal) and mono (no panning by direction); the hints are notices, not a guided drive; the totals don't count wins or a festival level.
+
+### Push 19: Free roam on touch (v0.19.0)
+- **Touch row for the city:** in free roam the on-screen controls show a row at the top left (above the steering zone, clear of the skill panel): LIGHTS, ◄ and ► indicators, ▲ hazards, and HORN held; the presses ride into the driver input with the keyboard's and the pad's (`TouchControls.take`), so an iPad can drive at night and use the horn.
+- **Headlights after dark:** the player's headlights start on at dusk and at night (the switch still works either way).
+- **Stereo for the other cars:** each of the other cars' engine voices goes through a stereo panner (where the browser has one), panned by the car's bearing from the focused car's heading (`bearingPan`): a car on your right sits right, one straight ahead or behind is centred, and one right beside you is centred rather than snapping to a side.
+- **Tests:** the headlights come on at night and not by day; the pan follows the bearing in both headings, centres close by and stays finite on bad input.
+- **Honest limits:** the touch row has no quick menu (TC, ABS, gearbox) and no camera button yet; there is no touch button for the festival map beyond the pause menu; the pan is by bearing only (no distance-based width or Doppler).
+
+### Push 20: Touch completeness and the arcade rubber band (v0.20.0)
+- **CAM and RESET on touch:** two buttons beside the pause button in every mode (`TouchControls.take` counts the taps; the input manager turns them into the `camera` and `reset` actions the keys and pads already raise), so an iPad can change camera and reset or repair the car.
+- **The arcade rubber band** (`AiDriver.paceScale`, `arcadePace`, `World.rubberBand`): in an arcade race each rival's speed plan is scaled by its gap to the player in laps (0.35 per lap, between 0.9 and 1.1): rivals behind push on, rivals ahead ease off; sim races keep their honest pace, and nothing pulls before the lights go out.
+- **Tests:** the band's curve and limits; an arcade race pulls the rivals by their progress and a sim race leaves them at 1.
+- **Honest limits:** the touch row still has no quick menu (TC, ABS, gearbox); the band scales the whole plan rather than only the straights, so a trailing rival also corners a little quicker.

@@ -15,8 +15,9 @@ function screenAngle(): number {
 
 /**
  * On-screen controls for touch screens: drag anywhere on the left half to steer (or tilt the
- * device), pedals and paddles on the right, and a pause button. Each control follows its own
- * finger, so steering, throttle and brake work at the same time.
+ * device), pedals and paddles on the right, a pause button, and in free roam a row for the
+ * lights, the indicators, the hazards and the horn. Each control follows its own finger, so
+ * steering, throttle and brake work at the same time.
  */
 export class TouchControls {
   readonly root = document.createElement('div');
@@ -24,12 +25,20 @@ export class TouchControls {
   throttle = 0;
   brake = 0;
   handbrake = 0;
+  /** Free roam: the horn, while held. */
+  horn = false;
   /** True while a finger is steering (or tilt is on). */
   steering = false;
   steeringMode: TouchSteering = 'drag';
   private pendingUp = 0;
   private pendingDown = 0;
   private pendingPause = false;
+  private pendingCamera = 0;
+  private pendingReset = 0;
+  private pendingLights = 0;
+  private pendingHazards = 0;
+  private pendingIndicatorLeft = 0;
+  private pendingIndicatorRight = 0;
   private steerPointer = -1;
   private steerOrigin = 0;
   private tilt = 0;
@@ -37,6 +46,7 @@ export class TouchControls {
   private tiltPending = false;
   private readonly knob = document.createElement('div');
   private readonly zone = document.createElement('div');
+  private readonly roam = document.createElement('div');
 
   constructor(parent: HTMLElement) {
     this.root.className = 'touch-controls';
@@ -61,7 +71,24 @@ export class TouchControls {
       this.hold('tc-small tc-hb', 'HB', (v) => (this.handbrake = v)),
     );
     const pause = this.tap('tc-pause', 'II', () => (this.pendingPause = true));
-    this.root.append(pedals, paddles, pause);
+    // Beside the pause button: the camera and the reset, in every mode.
+    const extras = document.createElement('div');
+    extras.className = 'tc-extras';
+    extras.append(
+      this.tap('tc-small tc-extra', 'CAM', () => this.pendingCamera++),
+      this.tap('tc-small tc-extra', 'RESET', () => this.pendingReset++),
+    );
+    // Free roam: lights, indicators, hazards and the horn, top left (shown by setRoam).
+    this.roam.className = 'tc-roam';
+    this.roam.hidden = true;
+    this.roam.append(
+      this.tap('tc-small tc-roam-btn', 'LIGHTS', () => this.pendingLights++),
+      this.tap('tc-small tc-roam-btn', '◄', () => this.pendingIndicatorLeft++),
+      this.tap('tc-small tc-roam-btn', '►', () => this.pendingIndicatorRight++),
+      this.tap('tc-small tc-roam-btn tc-hazards', '▲', () => this.pendingHazards++),
+      this.hold('tc-small tc-roam-btn tc-horn', 'HORN', (v) => (this.horn = v > 0)),
+    );
+    this.root.append(pedals, paddles, pause, extras, this.roam);
     parent.appendChild(this.root);
     window.addEventListener('deviceorientation', (e) => this.onTilt(e));
     // iOS: motion access asked for outside a tap fails; ask again on the first tap.
@@ -87,9 +114,16 @@ export class TouchControls {
       this.throttle = 0;
       this.brake = 0;
       this.handbrake = 0;
+      this.horn = false;
       this.steer = 0;
       this.steerPointer = -1;
     }
+  }
+
+  /** Free roam: shows the lights, indicators, hazards and horn row. */
+  setRoam(on: boolean): void {
+    this.roam.hidden = !on;
+    if (!on) this.horn = false;
   }
 
   /**
@@ -113,12 +147,38 @@ export class TouchControls {
     }
   }
 
-  /** Gear and pause presses since the last call. */
-  take(): { shiftUp: number; shiftDown: number; pause: boolean } {
-    const out = { shiftUp: this.pendingUp, shiftDown: this.pendingDown, pause: this.pendingPause };
+  /** Gear, pause and free-roam presses since the last call. */
+  take(): {
+    shiftUp: number;
+    shiftDown: number;
+    pause: boolean;
+    camera: number;
+    reset: number;
+    lights: number;
+    hazards: number;
+    indicatorLeft: number;
+    indicatorRight: number;
+  } {
+    const out = {
+      shiftUp: this.pendingUp,
+      shiftDown: this.pendingDown,
+      pause: this.pendingPause,
+      camera: this.pendingCamera,
+      reset: this.pendingReset,
+      lights: this.pendingLights,
+      hazards: this.pendingHazards,
+      indicatorLeft: this.pendingIndicatorLeft,
+      indicatorRight: this.pendingIndicatorRight,
+    };
     this.pendingUp = 0;
     this.pendingDown = 0;
     this.pendingPause = false;
+    this.pendingCamera = 0;
+    this.pendingReset = 0;
+    this.pendingLights = 0;
+    this.pendingHazards = 0;
+    this.pendingIndicatorLeft = 0;
+    this.pendingIndicatorRight = 0;
     return out;
   }
 
