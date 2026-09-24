@@ -2,6 +2,7 @@ import { signal } from '@preact/signals';
 import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
 import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
+import type { LadderStanding } from '../../content/ladder';
 import type {
   Difficulty,
   GameMode,
@@ -177,6 +178,9 @@ export interface FestivalInfo {
   destinations: FestivalDestination[];
   /** Events with a result, and the races' medals. */
   totals: { events: number; done: number; gold: number; silver: number; bronze: number };
+  /** The festival's ladder: lifetime skill points, the level and its title, and races won. */
+  ladder: LadderStanding;
+  wins: number;
   roads: ReadonlyArray<{ points: number[]; loop: boolean; elevated: boolean; kind: string }>;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   player: { x: number; z: number };

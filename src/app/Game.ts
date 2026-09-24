@@ -18,6 +18,7 @@ import {
   type Weather,
 } from '../content/conditions';
 import { rivalName } from '../content/drivers';
+import { ladderStanding } from '../content/ladder';
 import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
 import { TRACKS, trackById } from '../content/tracks';
@@ -123,6 +124,8 @@ import {
 import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from './ghost';
 import {
   loadFestivalRecords,
+  loadProgress,
+  saveProgress,
   loadRecords,
   loadRoamSpot,
   loadSeason,
@@ -571,6 +574,10 @@ export class Game {
   /** Free roam: the pedestrians' figures, placed from the snapshot. */
   private pedestrianView: PedestrianView | null = null;
   private festivalRecords = loadFestivalRecords();
+  /** The festival's ladder: lifetime skill points and wins, banked as the drive scores them. */
+  private progress = loadProgress();
+  private bankedSkill = 0;
+  private progressDirty = false;
   private festivalMarkers: MinimapMarker[] = [];
   /** Whether the police have been told an event is on (speeding is sanctioned). */
   private sanctioned = false;
@@ -930,6 +937,8 @@ export class Game {
     this.debug.soft = null;
     // Arcade: skill points, with smashed cones counting too.
     this.skill = config.handling === 'arcade' && !idle && !attract ? new Skill() : null;
+    this.bankedSkill = 0;
+    this.skillHud.setLadder(ladderStanding(this.progress.skill));
     this.skillHud.reset();
     if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
     if (this.props) {
@@ -1387,6 +1396,7 @@ export class Game {
         if (this.skill) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
+          this.bankSkill();
         }
         if (this.festival) {
           this.updateRoamRace(snapshot.roamRace ?? null);
@@ -1400,7 +1410,10 @@ export class Game {
             }
             if (n.position === 1) this.startWinner(n.event.name);
             if (n.position === 1 && this.skill) this.skill.award('race', 1000, 'WIN');
-            else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
+            if (n.position === 1) {
+              this.progress.wins++;
+              this.progressDirty = true;
+            } else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
           }
           this.festivalScene?.setNextCheckpoint(this.festival.nextCheckpoint(), dt);
           // An event on, or close ahead, is sanctioned: the police let the speed go.
@@ -3076,6 +3089,7 @@ export class Game {
     const clock = this.dayClock();
     if (clock !== null) spot.hour = Math.round(clock * 1000) / 1000;
     saveRoamSpot(spot);
+    this.keepProgress();
     this.menus.roamSpot.value = spot;
   }
 
@@ -3118,6 +3132,35 @@ export class Game {
     const clock = this.dayClock();
     if (clock !== null) return darknessAt(sunElevationAt(clock));
     return darkness(this.session?.conditions?.time ?? 'track');
+  }
+
+  /**
+   * Banks the drive's skill points on the festival's ladder as they are scored; a level
+   * climbed brings a word, a jingle and the HUD's new line, and is kept at once.
+   */
+  private bankSkill(): void {
+    const skill = this.skill;
+    if (!skill) return;
+    const gained = skill.score - this.bankedSkill;
+    if (gained <= 0) return;
+    this.bankedSkill = skill.score;
+    const before = ladderStanding(this.progress.skill);
+    this.progress.skill += gained;
+    this.progressDirty = true;
+    const after = ladderStanding(this.progress.skill);
+    this.skillHud.setLadder(after);
+    if (after.level > before.level) {
+      this.toasts.show(`Festival level ${after.level}: ${after.title}`, { timeout: 8 });
+      this.menuAudio.play('start');
+      this.keepProgress();
+    }
+  }
+
+  /** Writes the festival's tallies when they have changed (with the spot, and on a level). */
+  private keepProgress(): void {
+    if (!this.progressDirty) return;
+    this.progressDirty = false;
+    saveProgress(this.progress);
   }
 
   /** Free roam: the first-drive hints, spaced out over the first minute, once per browser. */
@@ -3176,6 +3219,8 @@ export class Game {
     return {
       destinations,
       totals: festivalTotals(festivalEvents(map), this.festivalRecords),
+      ladder: ladderStanding(this.progress.skill),
+      wins: this.progress.wins,
       roads: map.roads.map((r) => ({
         points: r.points,
         loop: r.loop,

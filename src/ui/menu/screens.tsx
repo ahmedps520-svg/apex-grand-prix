@@ -846,13 +846,14 @@ export function MapScreen({ store }: ScreenProps) {
       </div>
     );
   }
-  const { bounds, roads, destinations, player, totals } = info;
+  const { bounds, roads, destinations, player, totals, ladder, wins } = info;
   const medals = [
     totals.gold ? `${totals.gold} gold` : '',
     totals.silver ? `${totals.silver} silver` : '',
     totals.bronze ? `${totals.bronze} bronze` : '',
   ].filter((m) => m);
-  const progress = `${totals.done} of ${totals.events} events done${medals.length ? ` · ${medals.join(' · ')}` : ''}`;
+  const standing = `Level ${ladder.level} ${ladder.title} · ${ladder.points.toLocaleString('en-US')} pts${wins ? ` · ${wins} ${wins === 1 ? 'win' : 'wins'}` : ''}`;
+  const progress = `${standing} · ${totals.done} of ${totals.events} events done${medals.length ? ` · ${medals.join(' · ')}` : ''}`;
   const w = bounds.maxX - bounds.minX;
   const h = bounds.maxZ - bounds.minZ;
   const points = (road: (typeof roads)[number]) => {

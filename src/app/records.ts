@@ -128,3 +128,31 @@ export function saveRoamSpot(spot: RoamSpot | null): void {
     // Storage blocked: the spot lasts for this session only.
   }
 }
+
+const PROGRESS_KEY = 'apex-gp.progress';
+
+/** The festival's lifetime tallies: skill points banked over every drive, and races won. */
+export interface FestivalProgress {
+  skill: number;
+  wins: number;
+}
+
+export function loadProgress(): FestivalProgress {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? 'null');
+    const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const count = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+    return { skill: count(r.skill), wins: count(r.wins) };
+  } catch {
+    return { skill: 0, wins: 0 };
+  }
+}
+
+export function saveProgress(progress: FestivalProgress): void {
+  try {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  } catch {
+    // Storage blocked: the tallies last for this session only.
+  }
+}

@@ -1,4 +1,5 @@
 import type { Skill, SkillEvent } from '../app/Skill';
+import type { LadderStanding } from '../content/ladder';
 import { el, setText } from './dom';
 
 /** Arcade: the skill score, the chain's multiplier, and pop-ups for each scored event. */
@@ -7,10 +8,22 @@ export class SkillHud {
   private readonly score = el('div', 'skill-score', '0');
   private readonly combo = el('div', 'skill-combo');
   private readonly pops = el('div', 'skill-pops');
+  private readonly level = el('div', 'skill-level');
+  private readonly levelFill = el('span');
   private shown = '';
+  private levelShown = '';
 
   constructor(parent: HTMLElement) {
-    this.root.append(el('div', 'skill-label', 'SKILL'), this.score, this.combo, this.pops);
+    const bar = el('div', 'skill-level-bar');
+    bar.appendChild(this.levelFill);
+    this.root.append(
+      el('div', 'skill-label', 'SKILL'),
+      this.score,
+      this.combo,
+      this.level,
+      bar,
+      this.pops,
+    );
     this.root.hidden = true;
     this.combo.hidden = true;
     parent.appendChild(this.root);
@@ -25,6 +38,18 @@ export class SkillHud {
     this.shown = '';
     setText(this.score, '0');
     this.combo.hidden = true;
+  }
+
+  /** The festival's ladder: the level, its title and the points to the next. */
+  setLadder(standing: LadderStanding): void {
+    const text =
+      standing.toNext === null
+        ? `LV ${standing.level} · ${standing.title.toUpperCase()}`
+        : `LV ${standing.level} · ${standing.title.toUpperCase()} · ${standing.toNext.toLocaleString('en-US')} TO GO`;
+    if (text === this.levelShown) return;
+    this.levelShown = text;
+    setText(this.level, text);
+    this.levelFill.style.width = `${Math.round(standing.share * 100)}%`;
   }
 
   update(skill: Skill): void {
