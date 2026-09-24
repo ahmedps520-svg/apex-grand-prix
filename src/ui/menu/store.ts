@@ -31,6 +31,7 @@ export type ScreenId =
   | 'freeSetup'
   | 'roamSetup'
   | 'map'
+  | 'board'
   | 'pause'
   | 'results'
   | 'replay'
@@ -175,6 +176,8 @@ export interface FestivalDestination {
   kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump' | 'getaway';
   name: string;
   best: string | null;
+  /** Races and getaways: the best's medal. */
+  medal: 'gold' | 'silver' | 'bronze' | null;
   x: number;
   z: number;
 }

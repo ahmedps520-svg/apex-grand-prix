@@ -138,7 +138,7 @@ import {
   saveSeason,
   type RoamSpot,
 } from './records';
-import { Festival, festivalTotals } from './Festival';
+import { Festival, festivalTotals, medalFor } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
@@ -704,6 +704,8 @@ export class Game {
       errors: [],
     };
     window.__apex = this.debug;
+    // The festival board reads this from the main menu too.
+    this.menus.festival.value = this.festivalInfo();
     this.sim.onError = (message) => {
       this.debug.errors.push(message);
       this.toasts.show(`Simulation error: ${message}`, { timeout: 0 });
@@ -986,7 +988,7 @@ export class Game {
         : null;
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
-    this.menus.festival.value = roam ? this.festivalInfo() : null;
+    this.menus.festival.value = this.festivalInfo();
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -1247,6 +1249,7 @@ export class Game {
   private quitToMenu(): void {
     this.seasonRound = -1;
     if (this.session?.mode === 'roam') this.keepRoamSpot();
+    this.menus.festival.value = this.festivalInfo();
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
@@ -3237,7 +3240,15 @@ export class Game {
     const destinations: FestivalInfo['destinations'] = [];
     for (const [id, name] of SPAWN_NAMES) {
       const s = map.spawns[id];
-      destinations.push({ id: `spawn-${id}`, kind: 'spawn', name, best: null, x: s.x, z: s.z });
+      destinations.push({
+        id: `spawn-${id}`,
+        kind: 'spawn',
+        name,
+        best: null,
+        medal: null,
+        x: s.x,
+        z: s.z,
+      });
     }
     for (const e of festivalEvents(map)) {
       const best = this.festivalRecords[e.id];
@@ -3246,6 +3257,10 @@ export class Game {
         kind: e.kind,
         name: e.name,
         best: best === undefined ? null : Festival.format(e.kind, best),
+        medal:
+          best !== undefined && (e.kind === 'race' || e.kind === 'getaway')
+            ? medalFor(e, best)
+            : null,
         x: e.x,
         z: e.z,
       });
