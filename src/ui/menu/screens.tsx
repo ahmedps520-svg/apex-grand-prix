@@ -21,7 +21,7 @@ import {
   type PadAction,
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
-import type { Detail } from '../../app/settings';
+import type { Detail, Palette } from '../../app/settings';
 import type { AidLevel, HandlingMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
@@ -796,6 +796,12 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
     </>
   );
 }
+
+/** The HUD's colours: as designed, or safe for eyes that can't tell red from green. */
+const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
+  { value: 'standard', text: 'Standard' },
+  { value: 'colourSafe', text: 'Colour-safe: blue and orange' },
+];
 
 /** Laps of qualifying before a race: the best lap sets the grid. */
 const QUALIFYING: ReadonlyArray<{ value: number; text: string }> = [
@@ -1588,6 +1594,21 @@ export function SettingsScreen({ store }: ScreenProps) {
               label="Performance overlay"
               value={s.overlay}
               onChange={(v) => ((s.overlay = v), changed())}
+            />
+            <Slider
+              label="HUD size"
+              value={s.hudScale}
+              min={0.8}
+              max={1.4}
+              step={0.05}
+              format={percent}
+              onChange={(v) => ((s.hudScale = v), changed())}
+            />
+            <Choice
+              label="Colours"
+              value={s.palette}
+              options={PALETTES}
+              onChange={(v) => ((s.palette = v), changed())}
             />
           </Section>
         )}

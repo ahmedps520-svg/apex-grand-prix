@@ -1061,3 +1061,9 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **The best** (`apex-gp.daily` {key, best}; `Game.dailyBest`): the day's best lap is kept apart from the track record (which a daily lap still sets), shown as the record line on the HUD and on the tile, with a New daily best toast when beaten; a new day starts from nothing.
 - **Tests:** the challenge is the same all day and drawn from every circuit and car, and moves around over a month. 401 unit tests.
 - **Honest limits:** the day is UTC; nobody else's times to compare with (no server); the ghost is the circuit's, not the day's.
+
+### Push 37: HUD size and a colour-safe palette (v0.37.0)
+- **HUD size** (`Settings.hudScale`, 0.8–1.4 on the Graphics tab; `--hud-scale` on the UI root): every driving panel (speedo, race times, lights, minimap, skill, festival, radio, race card, toasts, the police stars) zooms by the setting, its position with it, for tablets held far away and small laptops alike.
+- **Colours** (`Settings.palette` standard / colour-safe; `data-palette` on `<html>`): the HUD's status colours are variables now (`--good`, `--bad`, `--lit`, `--go`, and the menus' `--ok`), and the colour-safe palette turns the greens blue and the reds orange: the start lights, the shift lights, DRS, the damage bars, the crash pop-up, the elimination warning, the radio box and the menu toggles.
+- **Tests:** the settings keep the HUD size within 0.7–1.5 and know the palettes, defaulting to standard. 402 unit tests.
+- **Honest limits:** the touch controls and the menus keep their size (the HUD size is for the driving panels); the minimap's event markers keep their colours; the palette is one alternative rather than a per-type choice.

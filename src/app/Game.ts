@@ -3047,6 +3047,9 @@ export class Game {
     this.input.bindings = s.bindings;
     this.input.wheelProfiles = s.wheels;
     this.hud.setUnits(s.units);
+    // The HUD's size and the colour palette are CSS: a variable on the UI root, a flag on <html>.
+    this.ui.style.setProperty('--hud-scale', String(s.hudScale));
+    document.documentElement.dataset.palette = s.palette;
     this.audio.setVolume(s.audio.volume * this.audioDuck);
     this.menuAudio.setLevels(s.audio.music, s.audio.sfx, s.audio.muted);
     this.audio.setMuted(s.audio.muted);

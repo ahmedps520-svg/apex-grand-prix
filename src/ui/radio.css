@@ -6,7 +6,7 @@
   padding: 10px 14px 12px;
   border-radius: 12px;
   background: rgba(10, 13, 20, 0.72);
-  border-left: 4px solid #39d98a;
+  border-left: 4px solid var(--good);
   color: #fff;
   font: 600 15px/1.35 var(--font);
   pointer-events: none;
@@ -26,7 +26,7 @@
 .radio-label {
   font: 800 10px var(--font);
   letter-spacing: 0.16em;
-  color: #39d98a;
+  color: var(--good);
   margin-bottom: 4px;
 }
 
@@ -37,7 +37,7 @@
   height: 7px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #39d98a;
+  background: var(--good);
   animation: radio-pulse 0.9s ease-in-out infinite;
 }
 
