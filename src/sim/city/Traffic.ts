@@ -338,7 +338,7 @@ export class Traffic {
       ? behind
         ? kmh(link.speedLimit || 60)
         : Math.max(
-            kmh(link.speedLimit || 60) * 2.2,
+            kmh(link.speedLimit || 60) * 2.2 * this.wetPace,
             Math.hypot(player.vel.x, player.vel.z) * 1.15 + 5,
             22,
           )

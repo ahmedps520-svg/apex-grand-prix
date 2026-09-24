@@ -284,6 +284,7 @@ describe("the festival's rules", () => {
     expect(fest.notices[0]!.text).toContain('Getaway · Downtown Getaway');
     expect(fest.notices[0]!.medal).toBe('gold');
     expect(fest.notices[0]!.best).toBe(true);
+    expect(fest.notices[0]!.results).toEqual([]);
     // A slower escape is no new best; a bust ends it with nothing.
     fest.notices.length = 0;
     fest.update(0.5, p, null, police('clear', 0));

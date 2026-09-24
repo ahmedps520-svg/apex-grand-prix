@@ -350,11 +350,14 @@ export class Festival {
       this.active = null;
       const best = this.record(a.event, a.time);
       const medal = medalFor(a.event, a.time);
+      // On the race card, as a race's result is (no field to list).
       this.notice(
         a.event,
         `Getaway · ${a.event.name}: ${formatTime(a.time)}${medal ? ` · ${medal.toUpperCase()}` : ''}`,
         best,
         medal,
+        undefined,
+        [],
       );
     } else if (police?.state === 'busted') {
       this.active = null;
