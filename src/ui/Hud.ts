@@ -40,6 +40,11 @@ export class Hud {
   private readonly limit = el('div', 'hud-limit');
   /** Free roam: the time on the day's clock, above the readout. */
   private readonly clock = el('div', 'hud-clock');
+  /** Tyre wear: the tread left on each tyre, in races with wear. */
+  private readonly tyres = el('div', 'hud-tyres');
+  private readonly tyreBars: HTMLElement[] = [];
+  private tyresOn = false;
+  private tyresShown = '';
   private clockShown = '';
   private limitShown = -1;
   /** Free roam: the wanted level, the state of the pursuit and the fine, at the top. */
@@ -108,6 +113,16 @@ export class Hud {
       this.damageBars.push(fill);
     }
     this.damage.hidden = true;
+    for (const name of ['FL', 'FR', 'RL', 'RR']) {
+      const cell = el('div', 'hud-tyre');
+      const bar = el('span', 'hud-tyre-bar');
+      const fill = el('span');
+      bar.appendChild(fill);
+      cell.append(el('span', 'hud-tyre-name', name), bar);
+      this.tyres.appendChild(cell);
+      this.tyreBars.push(fill);
+    }
+    this.tyres.hidden = true;
     const nitroBar = el('span', 'hud-nitro-bar');
     nitroBar.appendChild(this.nitroFill);
     this.nitro.append(el('span', 'hud-nitro-label', 'NITRO'), nitroBar);
@@ -135,6 +150,7 @@ export class Hud {
     this.heat.hidden = true;
     this.root.append(
       this.badge,
+      this.tyres,
       this.damage,
       this.nitro,
       this.hybrid,
@@ -265,6 +281,7 @@ export class Hud {
     this.abs.classList.toggle('active', (car.flags & FLAG_ABS) !== 0);
     this.tc.classList.toggle('active', (car.flags & FLAG_TC) !== 0);
     this.updateDamage(car);
+    if (this.tyresOn) this.updateTyres(car);
     this.updateHybrid(car);
   }
 
@@ -289,6 +306,25 @@ export class Hud {
     this.drs.classList.toggle('open', car.drs === 2);
     this.ersFill.style.width = `${Math.round(car.ers * 100)}%`;
     this.ers.classList.toggle('boost', car.ersBoost);
+  }
+
+  /** Shows the tyres' tread (races with tyre wear). */
+  setTyres(on: boolean): void {
+    this.tyresOn = on;
+    this.tyres.hidden = !on;
+    this.tyresShown = '';
+  }
+
+  private updateTyres(car: CarRenderState): void {
+    const levels = car.wheels.map((w) => w.wear);
+    const key = levels.map((v) => Math.round(v * 50)).join(',');
+    if (key === this.tyresShown) return;
+    this.tyresShown = key;
+    levels.forEach((v, i) => {
+      const fill = this.tyreBars[i]!;
+      fill.style.width = `${Math.round((1 - Math.min(v, 1)) * 100)}%`;
+      fill.className = v > 0.8 ? 'bad' : v > 0.5 ? 'warn' : '';
+    });
   }
 
   private updateDamage(car: CarRenderState): void {

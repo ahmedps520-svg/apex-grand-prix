@@ -39,6 +39,7 @@ import type {
   ReplayCommand,
   TrialKind,
   Championship,
+  TyreWear,
 } from './store';
 import {
   Button,
@@ -532,6 +533,12 @@ export function ChampionshipScreen({ store }: ScreenProps) {
           onChange={(laps) => store.update({ laps })}
         />
         <Choice
+          label="Tyre wear"
+          value={setup.tyreWear ?? 'off'}
+          options={TYRE_WEAR}
+          onChange={(tyreWear) => store.update({ tyreWear })}
+        />
+        <Choice
           label="Difficulty"
           value={setup.difficulty}
           options={DIFFICULTY}
@@ -808,6 +815,12 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(difficulty) => store.update({ difficulty })}
             />
             <Choice
+              label="Tyre wear"
+              value={setup.tyreWear ?? 'off'}
+              options={TYRE_WEAR}
+              onChange={(tyreWear) => store.update({ tyreWear })}
+            />
+            <Choice
               label="Qualifying"
               value={setup.qualifying ?? 0}
               options={QUALIFYING}
@@ -917,6 +930,13 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
 const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
   { value: 'standard', text: 'Standard' },
   { value: 'colourSafe', text: 'Colour-safe: blue and orange' },
+];
+
+/** Whether the tyres wear over a race, and how fast. */
+const TYRE_WEAR: ReadonlyArray<{ value: TyreWear; text: string }> = [
+  { value: 'off', text: 'Off' },
+  { value: 'normal', text: 'Normal: a few per cent a lap' },
+  { value: 'fast', text: 'Fast' },
 ];
 
 /** Laps of qualifying before a race: the best lap sets the grid. */

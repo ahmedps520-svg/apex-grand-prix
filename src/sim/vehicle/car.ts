@@ -102,6 +102,17 @@ const WALL_FRICTION = 0.35;
  * yaw damping (1/s) and the steering's turning authority (rad/s²)).
  */
 const ARCADE_GRIP = 1.3;
+/**
+ * Tyre wear: tread goes with the sliding done under load at speed (a few per cent a lap at the
+ * normal rate), and the grip falls away with it, faster towards the end.
+ */
+const WEAR_RATE = 0.0035;
+const WEAR_GRIP_LOSS = 0.18;
+
+/** The grip left in a tyre with this much of its tread gone. */
+export function wearGrip(wear: number): number {
+  return 1 - WEAR_GRIP_LOSS * Math.pow(Math.min(Math.max(wear, 0), 1), 1.5);
+}
 const ARCADE_DRAG = 0.85;
 const ARCADE_SLIDE_GRIP = 0.85;
 const ARCADE_NITRO_TORQUE = 0.6;
@@ -182,6 +193,8 @@ class Wheel {
   contact = false;
   /** Grip left in the tyre: 1 whole, 0.3 burst on a spike strip. */
   burst = 1;
+  /** Tread gone: 0 new … 1 worn out (the grip falls with it). */
+  wear = 0;
   /** This corner's suspension, 0 as new … 1 wrecked (from the soft body's crush). */
   damage = 0;
   load = 0;
@@ -303,6 +316,8 @@ export class Car {
   soft: SoftBody | null = null;
   /** Arcade handling: more grip, slides that hold, nitro, air control. */
   arcade = false;
+  /** Tyre wear rate: 0 none, 1 a few per cent a lap at racing pace, more for faster wear. */
+  wearRate = 0;
   /** Arcade: nitro in the tank, 0 … 1, and whether it is burning. */
   nitro = 1;
   nitroOn = false;
@@ -674,7 +689,12 @@ export class Car {
       addScaledV(this.t1, this.t1, this.vel, 1);
       w.lengthRate = dotV(this.t1, w.normal) / w.cosAngle;
       const props = SURFACE_PROPS[hit.surface];
-      w.grip = props.grip * (surface.gripScale ?? 1) * w.burst * (this.arcade ? ARCADE_GRIP : 1);
+      w.grip =
+        props.grip *
+        (surface.gripScale ?? 1) *
+        w.burst *
+        wearGrip(w.wear) *
+        (this.arcade ? ARCADE_GRIP : 1);
       w.rollingResistance = props.rollingResistance;
       w.surface = hit.surface;
     } else {
@@ -1015,6 +1035,19 @@ export class Car {
     w.slip = out.slip;
     w.slipRatio = kappa;
     w.slipAngle = alpha;
+    // Tyre wear: the sliding done under load at speed takes the tread.
+    if (this.wearRate > 0 && w.wear < 1) {
+      w.wear = Math.min(
+        1,
+        w.wear +
+          this.wearRate *
+            WEAR_RATE *
+            Math.min(out.slip, 2) *
+            Math.min(w.load / w.staticLoad, 2) *
+            Math.min(Math.abs(vLong) / 40, 1.5) *
+            dt,
+      );
+    }
 
     // Slow tyres get extra sideways damping so a parked car settles instead of rocking.
     let fy = out.fy;
@@ -1298,6 +1331,26 @@ export class Car {
       w.damage = 0;
       w.burst = 1;
     }
+    this.freshTyres();
+  }
+
+  /** A new set of tyres (a restart, or a pit stop). */
+  freshTyres(): void {
+    for (const w of this.wheels) w.wear = 0;
+  }
+
+  /** Tread gone across the four tyres, 0 new … 1 worn out. */
+  get tyreWear(): number {
+    let sum = 0;
+    for (const w of this.wheels) sum += w.wear;
+    return sum / this.wheels.length;
+  }
+
+  /** The grip left in the tyres for their wear, 1 as new (the AI's pace follows it). */
+  get gripFactor(): number {
+    let sum = 0;
+    for (const w of this.wheels) sum += wearGrip(w.wear);
+    return sum / this.wheels.length;
   }
 
   /** Acceleration the driver feels (everything but gravity), in the car's frame, smoothed. */
@@ -1494,6 +1547,7 @@ export class Car {
       out[o + W.SLIP_ANGLE] = w.slipAngle;
       out[o + W.SURFACE] = w.surface;
       out[o + W.CAMBER] = w.camber;
+      out[o + W.WEAR] = w.wear;
     }
   }
 }

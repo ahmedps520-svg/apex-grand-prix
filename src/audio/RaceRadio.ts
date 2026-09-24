@@ -11,6 +11,8 @@ export interface RadioInput {
   mode: GameMode;
   /** A qualifying session: the best lap sets the grid. */
   qualifying?: boolean;
+  /** Tread gone across the tyres, 0 new … 1 worn out (races with tyre wear). */
+  tyreWear?: number;
   phase: 'grid' | 'countdown' | 'racing' | 'finished';
   /** Laps completed by the player. */
   lapsDone: number;
@@ -74,6 +76,8 @@ export class RaceEngineer {
   private aeroSaid = false;
   private engineSaid = false;
   private steerSaid = false;
+  private tyresHalfSaid = false;
+  private tyresGoneSaid = false;
 
   reset(): void {
     this.lastPhase = null;
@@ -89,6 +93,8 @@ export class RaceEngineer {
     this.aeroSaid = false;
     this.engineSaid = false;
     this.steerSaid = false;
+    this.tyresHalfSaid = false;
+    this.tyresGoneSaid = false;
   }
 
   update(dt: number, r: RadioInput): RadioMessage[] {
@@ -191,6 +197,12 @@ export class RaceEngineer {
       } else if (!this.engineSaid && r.damageEngine > 0.25) {
         this.engineSaid = true;
         out.push({ text: 'Engine damage. We are down on power.', priority: 2 });
+      } else if (!this.tyresGoneSaid && (r.tyreWear ?? 0) > 0.8) {
+        this.tyresGoneSaid = true;
+        out.push({ text: 'Tyres are going off badly. Look after them.', priority: 2 });
+      } else if (!this.tyresHalfSaid && (r.tyreWear ?? 0) > 0.5) {
+        this.tyresHalfSaid = true;
+        out.push({ text: 'Tyres are half worn. Smooth inputs from here.', priority: 1 });
       }
     }
 

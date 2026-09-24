@@ -77,6 +77,8 @@ export interface SessionSetup {
   handling: HandlingMode;
   /** Quick races: a standard race, or an elimination (the last car out every so often). */
   raceType: RaceType;
+  /** Races and championships: whether the tyres wear, and how fast. */
+  tyreWear: TyreWear;
   /** Races and championship rounds: laps of qualifying before the race (0: the grid is chosen). */
   qualifying: number;
   /** Time trials: against the clock, or a drift trial (arcade handling, the drifts score). */
@@ -92,6 +94,7 @@ export interface SessionSetup {
 export type FieldMode = 'same' | 'class' | 'multi';
 export type RaceType = 'standard' | 'elimination';
 export type TrialKind = 'time' | 'drift';
+export type TyreWear = 'off' | 'normal' | 'fast';
 
 export interface ResultRow {
   position: number;
@@ -336,6 +339,7 @@ export class MenuStore {
     secondClass: 'Touring',
     handling: 'sim',
     raceType: 'standard',
+    tyreWear: 'off',
     qualifying: 0,
     trial: 'time',
     driftLaps: 2,

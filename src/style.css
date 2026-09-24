@@ -978,6 +978,52 @@ body.fatal #loading-text {
   background: var(--bad);
 }
 
+/* Tyre wear: the tread left on each tyre, two by two. */
+.hud-tyres {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  width: 100%;
+  margin-bottom: 6px;
+  font: 700 10px var(--font);
+  letter-spacing: 0.08em;
+}
+
+.hud-tyres[hidden] {
+  display: none;
+}
+
+.hud-tyre {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hud-tyre-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-tyre-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--good);
+  transition: width 0.3s ease;
+}
+
+.hud-tyre-bar span.warn {
+  background: #f2b705;
+}
+
+.hud-tyre-bar span.bad {
+  background: var(--bad);
+}
+
 /* Hybrid cars: DRS lamp and ERS battery above the speedo. */
 .hud-hybrid {
   display: flex;

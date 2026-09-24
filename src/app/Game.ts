@@ -155,7 +155,7 @@ import { FestivalScene } from '../render/FestivalScene';
 import { Helicopter } from '../render/Helicopter';
 import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
-import type { FestivalInfo, DailyInfo, CareerInfo } from '../ui/menu/store';
+import type { FestivalInfo, DailyInfo, CareerInfo, TyreWear } from '../ui/menu/store';
 import { ReplayRecorder, type Replay } from './replay';
 import {
   DAMAGE_SCALE,
@@ -268,6 +268,8 @@ type Scenery = TestGroundScene | TrackScene | CityScene;
 const STATS_INTERVAL = 0.5;
 /** Elimination races: seconds between the last car going out. */
 const ELIMINATION_EVERY = 20;
+/** Tyre wear setting → the rate the simulation wears them at. */
+const TYRE_WEAR_RATES: Record<TyreWear, number> = { off: 0, normal: 1, fast: 2.5 };
 
 /** What a race takes over from its qualifying: the field, and the grid the times set. */
 interface RaceCarry {
@@ -910,6 +912,10 @@ export class Game {
       qualifying: qualifying ? setup.qualifying : undefined,
       drift,
       daily: setup.mode === 'timeTrial' && !attract && setup.daily ? setup.daily : undefined,
+      tyreWear:
+        setup.mode === 'race' && !attract
+          ? TYRE_WEAR_RATES[setup.tyreWear ?? 'off'] || undefined
+          : undefined,
       aids: { ...this.settings.aids },
       seed,
       // `?autopilot`: the AI drives the player's car in races and time trials (browser tests).
@@ -993,6 +999,7 @@ export class Game {
     this.policeStatus = null;
     this.hud.setHeat(null);
     this.hud.setClock(null);
+    this.hud.setTyres((config.tyreWear ?? 0) > 0);
     this.weatherHeading = '';
     this.strips.clear();
     this.menuAudio.siren(0);
@@ -2640,6 +2647,9 @@ export class Game {
     r.damageAero = player?.damageAero ?? 0;
     r.damageEngine = player?.damageEngine ?? 0;
     r.damageSteer = player?.damageSteer ?? 0;
+    r.tyreWear = player
+      ? player.wheels.reduce((sum, w) => sum + w.wear, 0) / player.wheels.length
+      : 0;
     let rivalBest = 0;
     for (let i = 1; i < race.cars.length; i++) {
       const best = race.cars[i]!.bestLap;
