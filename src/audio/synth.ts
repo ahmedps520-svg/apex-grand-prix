@@ -265,3 +265,20 @@ export function fillWander(
 /** Frame-rate-aware smoothing time constant: at low frame rates, glide over more of a frame. */
 export const glideTime = (dt: number, min: number, max: number): number =>
   clamp(dt > 0 ? dt * 0.5 : 0, min, max);
+
+/** Another car's engine, `distance` m away: the knee of its fall-off. */
+const OTHER_KNEE = 12;
+
+/** Another car's engine level at a distance: its gain, falling off with the inverse square past the knee. */
+export function otherEngineLevel(rpm: number, throttle: number, distance: number): number {
+  const d = Number.isFinite(distance) ? Math.max(distance, 0) : 1e9;
+  const gain = engineGain(rpm, throttle);
+  return (Number.isFinite(gain) ? gain : 0) / (1 + (d / OTHER_KNEE) * (d / OTHER_KNEE));
+}
+
+/** Its brightness: the same cutoff as the player's engine, muffled with distance. */
+export function otherEngineCutoff(rpm: number, throttle: number, distance: number): number {
+  const d = Number.isFinite(distance) ? Math.max(distance, 0) : 1e9;
+  const cutoff = engineCutoff(rpm, throttle);
+  return (Number.isFinite(cutoff) ? cutoff : 700) * Math.max(0.25, 1 - d / 90);
+}

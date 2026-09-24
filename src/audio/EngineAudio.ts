@@ -23,6 +23,8 @@ import {
   fillWander,
   fillWhiteNoise,
   glideTime,
+  otherEngineCutoff,
+  otherEngineLevel,
   grassGain,
   IDLE_RPM,
   raspFrequency,
@@ -64,7 +66,18 @@ const LEVEL = {
   squeal: 0.7,
   wind: 0.25,
   grass: 0.9,
+  others: 0.3,
 } as const;
+
+/** Other cars heard at once (the nearest). */
+export const OTHER_VOICES = 3;
+
+/** Another car's engine as heard from the player's: its state and how far away it is. */
+export interface OtherEngine {
+  rpm: number;
+  throttle: number;
+  distance: number;
+}
 
 // Short pulses in both: real blowdown pulses stay short at idle, and the lowpass sets brightness.
 const LOAD_SHAPE: ExhaustShape = {
@@ -163,6 +176,8 @@ interface Graph {
   windCutoff: Knob;
   wind: Knob;
   grass: Knob;
+  /** The other cars' voices: pitch, brightness and level each. */
+  others: Array<{ pitch: Knob; cutoff: Knob; level: Knob }>;
 }
 
 /**
@@ -242,6 +257,33 @@ export class EngineAudio {
     if (!ctx || !graph || ctx.state !== 'running') return;
     try {
       this.steer(graph, ctx.currentTime, dt, frame);
+    } catch {
+      // Sound must never take the game loop down with it.
+    }
+  }
+
+  /**
+   * The nearest other cars, once per frame with the player's update: each gets a voice (an
+   * exhaust wave, muffled and faded by distance); voices without a car fall silent.
+   */
+  updateOthers(dt: number, others: readonly OtherEngine[]): void {
+    const ctx = this.ctx;
+    const graph = this.graph;
+    if (!ctx || !graph || ctx.state !== 'running') return;
+    try {
+      const now = ctx.currentTime;
+      const step = dt > 0 ? Math.min(dt, 0.25) : 0;
+      const tone = glideTime(step * 2, 0.015, 0.05);
+      graph.others.forEach((voice, i) => {
+        const o = others[i];
+        if (!o) {
+          voice.level.set(0, now, tone);
+          return;
+        }
+        voice.pitch.set(cycleFrequency(o.rpm), now, tone);
+        voice.cutoff.set(otherEngineCutoff(o.rpm, o.throttle, o.distance), now, tone);
+        voice.level.set(otherEngineLevel(o.rpm, o.throttle, o.distance) * LEVEL.others, now, tone);
+      });
     } catch {
       // Sound must never take the game loop down with it.
     }
@@ -522,10 +564,29 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   const grass = gainNode(ctx, 0);
   roadNoise.connect(grassFilter).connect(grass).connect(stallGuard);
 
+  // Other cars' engines: one exhaust wave each, muffled and faded with distance, each detuned
+  // a little from the player's and from each other so they don't phase.
+  const others: Graph['others'] = [];
+  const otherOscs: OscillatorNode[] = [];
+  for (let i = 0; i < OTHER_VOICES; i++) {
+    const osc = oscillator(ctx, loadWave, f0);
+    osc.detune.value = 5 + (i - 1) * 9;
+    const filter = filterNode(ctx, 'lowpass', 500, 1);
+    const gain = gainNode(ctx, 0);
+    osc.connect(filter).connect(gain).connect(stallGuard);
+    otherOscs.push(osc);
+    others.push({
+      pitch: new Knob(osc.frequency),
+      cutoff: new Knob(filter.frequency),
+      level: new Knob(gain.gain),
+    });
+  }
+
   const now = ctx.currentTime;
   loadOsc.start(now);
   idleOsc.start(now);
   limiterOsc.start(now);
+  for (const osc of otherOscs) osc.start(now);
   squealOscA.start(now);
   squealOscB.start(now);
   squealVibrato.start(now);
@@ -538,6 +599,7 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   return {
     master,
     stallGuard,
+    others,
     pitchLoad: new Knob(loadOsc.frequency),
     pitchIdle: new Knob(idleOsc.frequency),
     loadMix: new Knob(loadMix.gain),

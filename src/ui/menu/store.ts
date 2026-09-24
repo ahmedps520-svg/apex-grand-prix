@@ -166,6 +166,8 @@ export interface FestivalDestination {
 
 export interface FestivalInfo {
   destinations: FestivalDestination[];
+  /** Events with a result, and the races' medals. */
+  totals: { events: number; done: number; gold: number; silver: number; bronze: number };
   roads: ReadonlyArray<{ points: number[]; loop: boolean; elevated: boolean; kind: string }>;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   player: { x: number; z: number };

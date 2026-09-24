@@ -827,7 +827,13 @@ export function MapScreen({ store }: ScreenProps) {
       </div>
     );
   }
-  const { bounds, roads, destinations, player } = info;
+  const { bounds, roads, destinations, player, totals } = info;
+  const medals = [
+    totals.gold ? `${totals.gold} gold` : '',
+    totals.silver ? `${totals.silver} silver` : '',
+    totals.bronze ? `${totals.bronze} bronze` : '',
+  ].filter((m) => m);
+  const progress = `${totals.done} of ${totals.events} events done${medals.length ? ` · ${medals.join(' · ')}` : ''}`;
   const w = bounds.maxX - bounds.minX;
   const h = bounds.maxZ - bounds.minZ;
   const points = (road: (typeof roads)[number]) => {
@@ -839,7 +845,7 @@ export function MapScreen({ store }: ScreenProps) {
   };
   return (
     <div class="mn-panel mn-wide mn-map">
-      <Header title="Festival map" subtitle="Pick a place to fast-travel to" />
+      <Header title="Festival map" subtitle={`${progress} · pick a place to fast-travel to`} />
       <div class="mn-map-body">
         <svg
           class="mn-map-svg"
