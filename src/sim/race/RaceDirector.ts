@@ -49,6 +49,8 @@ export interface RaceStatus {
   order: number[];
   /** Elimination race: seconds between eliminations, seconds to the next, and cars put out. */
   elimination: { every: number; next: number; out: number } | null;
+  /** A qualifying session: positions by best lap, and every car runs its own laps. */
+  qualifying: boolean;
 }
 
 /** Seconds on the grid before the first red light. */
@@ -59,6 +61,8 @@ const GAP_POINTS = 16;
 const JUMP = 30;
 /** After the player finishes, the session ends this long after (unless everyone is in). */
 const COOL_DOWN = 60;
+/** Qualifying: after the player's laps, the rest get this long to finish theirs. */
+const QUALIFYING_COOL_DOWN = 20;
 /** Time trial: the car starts this far before the line on a flying lap. */
 const RUN_UP = 150;
 
@@ -100,6 +104,7 @@ export class RaceDirector {
     laps: number,
     seed = 1,
     elimination = 0,
+    qualifying = false,
   ) {
     this.rand = mulberry32(seed ^ 0x51f15e);
     this.status = {
@@ -112,9 +117,10 @@ export class RaceDirector {
       cars: [],
       order: [],
       elimination:
-        mode === 'race' && elimination > 0
+        mode === 'race' && elimination > 0 && !qualifying
           ? { every: elimination, next: elimination, out: 0 }
           : null,
+      qualifying: mode === 'race' && qualifying,
     };
     for (let i = 0; i < carCount; i++) {
       this.status.cars.push(freshState());
@@ -135,14 +141,19 @@ export class RaceDirector {
   }
 
   /**
-   * Puts all cars on the grid (player in slot `playerSlot`, the others in order) and restarts
-   * the countdown. Time trial: the player starts a run-up before the line.
+   * Puts all cars on the grid (player in slot `playerSlot`, the others in order, or every car
+   * in its place in `gridOrder`, a qualifying's grid) and restarts the countdown. Time trial:
+   * the player starts a run-up before the line.
    */
-  restart(cars: readonly Car[], playerSlot: number): void {
+  restart(cars: readonly Car[], playerSlot: number, gridOrder?: readonly number[]): void {
     const status = this.status;
     const track = this.track;
     const race = status.mode === 'race';
     const slot = Math.max(0, Math.min(playerSlot, cars.length - 1));
+    const byOrder =
+      gridOrder && gridOrder.length === cars.length && cars.every((_, i) => gridOrder.includes(i))
+        ? gridOrder
+        : null;
     let next = 0;
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i]!;
@@ -151,7 +162,8 @@ export class RaceDirector {
         car.teleport({ x: p.x, z: p.z, yaw: Math.atan2(-p.tx, -p.tz) });
       } else {
         let gridSlot = slot;
-        if (i > 0) {
+        if (byOrder) gridSlot = byOrder.indexOf(i);
+        else if (i > 0) {
           if (next === slot) next++;
           gridSlot = next++;
         }
@@ -230,7 +242,8 @@ export class RaceDirector {
       if (player?.finished && this.playerFinishedAt < 0) this.playerFinishedAt = status.time;
       let all = true;
       for (let i = 0; i < n; i++) all &&= status.cars[i]!.finished;
-      if (all || (this.playerFinishedAt >= 0 && status.time - this.playerFinishedAt > COOL_DOWN)) {
+      const coolDown = status.qualifying ? QUALIFYING_COOL_DOWN : COOL_DOWN;
+      if (all || (this.playerFinishedAt >= 0 && status.time - this.playerFinishedAt > coolDown)) {
         status.phase = 'finished';
       }
     }
@@ -342,7 +355,9 @@ export class RaceDirector {
     t.sectorStart = crossing;
     t.armed = false;
     if (status.mode !== 'race') return;
-    if (this.leaderFinished || state.lap >= status.laps) {
+    // The flag comes out for everyone once the leader has taken it; in a qualifying each car
+    // runs its own laps.
+    if ((this.leaderFinished && !status.qualifying) || state.lap >= status.laps) {
       this.leaderFinished = true;
       state.finished = true;
       state.finishTime = crossing;
@@ -370,14 +385,25 @@ export class RaceDirector {
     }
   }
 
-  /** Positions: finished cars by laps then finish time, the rest by progress. */
+  /**
+   * Positions: finished cars by laps then finish time, the rest by progress. Qualifying: by
+   * best lap, the cars without one below them by progress.
+   */
   private updateOrder(): void {
-    const { cars, order } = this.status;
+    const { cars, order, qualifying } = this.status;
     const keys = this.keys;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i]!;
       // Cars put out rank below everyone, the last out highest.
-      keys[i] = c.eliminated ? -1000 + c.finishTime : c.finished ? c.lap : c.progress;
+      keys[i] = c.eliminated
+        ? -1000 + c.finishTime
+        : qualifying
+          ? c.bestLap > 0
+            ? 1e6 - c.bestLap
+            : c.progress
+          : c.finished
+            ? c.lap
+            : c.progress;
     }
     // Insertion sort: the order barely changes from one step to the next.
     for (let a = 1; a < order.length; a++) {

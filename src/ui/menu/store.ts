@@ -75,6 +75,8 @@ export interface SessionSetup {
   handling: HandlingMode;
   /** Quick races: a standard race, or an elimination (the last car out every so often). */
   raceType: RaceType;
+  /** Races and championship rounds: laps of qualifying before the race (0: the grid is chosen). */
+  qualifying: number;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
@@ -168,6 +170,8 @@ export interface SessionResults {
   newRecord?: boolean;
   /** A championship round: results lead on to the standings. */
   championship?: boolean;
+  /** A qualifying: the rows are the grid, the times best laps, and the race follows. */
+  qualifying?: boolean;
 }
 
 /** A place to fast-travel to: a spawn, or a festival event with its best result. */
@@ -198,6 +202,8 @@ export interface FestivalInfo {
 export interface MenuActions {
   startSession(setup: SessionSetup): void;
   restartSession(): void;
+  /** After a qualifying: the race, on the grid it set. */
+  startRace(): void;
   resume(): void;
   /** A tap on a menu prompt (touch): the same as the key or button for it. */
   tap(event: 'back' | 'pause' | 'confirm' | 'tabNext'): void;
@@ -270,6 +276,7 @@ export class MenuStore {
     secondClass: 'Touring',
     handling: 'sim',
     raceType: 'standard',
+    qualifying: 0,
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

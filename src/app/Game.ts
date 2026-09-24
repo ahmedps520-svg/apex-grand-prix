@@ -258,6 +258,13 @@ type Scenery = TestGroundScene | TrackScene | CityScene;
 const STATS_INTERVAL = 0.5;
 /** Elimination races: seconds between the last car going out. */
 const ELIMINATION_EVERY = 20;
+
+/** What a race takes over from its qualifying: the field, and the grid the times set. */
+interface RaceCarry {
+  seed: number;
+  fieldCars: string[] | undefined;
+  gridOrder: number[];
+}
 /** The first shift light comes on this far below the shift point. */
 const SHIFT_LIGHT_RANGE = 1900;
 /** Rival colours: every paint the player can pick, plus a few more. */
@@ -510,6 +517,8 @@ export class Game {
   private paused = false;
   private race: RaceStatus | null = null;
   private resultsShown = false;
+  /** The grid a qualifying set (for the race, and its restarts); null when the grid is chosen. */
+  private carry: RaceCarry | null = null;
   /** Championship round being raced, or -1. */
   private seasonRound = -1;
   /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
@@ -807,7 +816,11 @@ export class Game {
     };
   }
 
-  private configFor(given: SessionSetup, attract = false): SessionConfig {
+  private configFor(
+    given: SessionSetup,
+    attract = false,
+    carry: RaceCarry | null = null,
+  ): SessionConfig {
     // Free roam, continuing: the car, the day and the weather the drive was left with (the
     // spot in hand, which outlives blocked storage).
     const spot = given.mode === 'roam' && given.resume ? this.menus.roamSpot.value : null;
@@ -820,8 +833,10 @@ export class Game {
           handling: spot.handling === 'arcade' ? 'arcade' : 'sim',
         }
       : given;
-    const seed = (Math.random() * 1e9) | 0;
+    // A race after a qualifying keeps its field: the same seed, cars and liveries.
+    const seed = carry?.seed ?? (Math.random() * 1e9) | 0;
     const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
+    const qualifying = setup.mode === 'race' && !attract && !carry && (setup.qualifying ?? 0) > 0;
     const dayMinutes =
       setup.mode === 'roam'
         ? DAY_MINUTES[setup.roamDayLength]
@@ -840,7 +855,7 @@ export class Game {
     return {
       fieldCars:
         setup.mode === 'race'
-          ? this.pickField(setup, count, seed)
+          ? (carry?.fieldCars ?? this.pickField(setup, count, seed))
           : traffic > 0
             ? [
                 setup.carId,
@@ -863,7 +878,11 @@ export class Game {
       opponents: setup.opponents,
       laps: setup.laps,
       difficulty: setup.difficulty,
-      gridSlot: Math.min(setup.gridSlot, setup.opponents),
+      gridSlot: carry
+        ? Math.max(carry.gridOrder.indexOf(0), 0)
+        : Math.min(setup.gridSlot, setup.opponents),
+      gridOrder: carry?.gridOrder,
+      qualifying: qualifying ? setup.qualifying : undefined,
       aids: { ...this.settings.aids },
       seed,
       attract: attract || (this.autopilot && setup.mode === 'race'),
@@ -879,15 +898,21 @@ export class Game {
       clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
       elimination:
-        setup.mode === 'race' && !attract && setup.raceType === 'elimination'
+        setup.mode === 'race' && !attract && !qualifying && setup.raceType === 'elimination'
           ? ELIMINATION_EVERY
           : undefined,
     };
   }
 
   /** Builds the scene and cars for a session and starts it in the worker. */
-  private async startSession(setup: SessionSetup, idle = false, attract = false): Promise<void> {
-    const config = this.configFor(setup, attract);
+  private async startSession(
+    setup: SessionSetup,
+    idle = false,
+    attract = false,
+    carry: RaceCarry | null = null,
+  ): Promise<void> {
+    const config = this.configFor(setup, attract, carry);
+    this.carry = carry;
     this.endSchool();
     this.endPodium();
     this.endFlyover();
@@ -1881,7 +1906,8 @@ export class Game {
     setText(name, def.name);
     const sub = el('div', 'flyover-sub');
     const weather = WEATHER_NAMES[config.conditions?.weather ?? 'clear'];
-    const laps = `${config.laps} ${config.laps === 1 ? 'lap' : 'laps'}`;
+    const n = config.qualifying || config.laps;
+    const laps = `${config.qualifying ? 'Qualifying · ' : ''}${n} ${n === 1 ? 'lap' : 'laps'}`;
     setText(sub, `${def.location} · ${laps} · ${weather}`);
     const skip = el('div', 'flyover-skip');
     setText(skip, 'Skip');
@@ -2468,6 +2494,7 @@ export class Game {
     if (!me || race.mode === 'free' || this.school) return;
     const r = this.radioInput;
     r.mode = race.mode;
+    r.qualifying = race.qualifying;
     r.phase = race.phase;
     r.lapsDone = me.lap;
     r.laps = race.laps;
@@ -2496,6 +2523,10 @@ export class Game {
   private showResults(race: RaceStatus): void {
     this.resultsShown = true;
     const def = this.session ? trackById(this.session.trackId) : undefined;
+    if (this.session?.qualifying) {
+      this.showGrid(race, def?.name ?? '');
+      return;
+    }
     const leaderTime = race.cars[race.order[0] ?? 0]?.finishTime ?? 0;
     const season = this.menus.championship.value;
     const inSeason = season !== null && this.seasonRound >= 0 && season.round === this.seasonRound;
@@ -2521,6 +2552,34 @@ export class Game {
     this.menus.replayAvailable.value =
       this.lastReplay !== null || (this.replayRecorder?.duration ?? 0) > 5;
     if (!this.startPodium(race)) this.menus.set(['results']);
+    this.applyHudVisibility();
+  }
+
+  /** After a qualifying: the grid it set, each best lap against pole; the race starts from it. */
+  private showGrid(race: RaceStatus, trackName: string): void {
+    const session = this.session!;
+    const pole = race.cars[race.order[0] ?? 0]?.bestLap ?? 0;
+    this.menus.results.value = {
+      mode: 'race',
+      trackName,
+      qualifying: true,
+      rows: race.order.map((car, i) => {
+        const c = race.cars[car]!;
+        return {
+          position: i + 1,
+          name: this.driverName(car),
+          car: this.carModels[car]?.name ?? '',
+          player: car === 0,
+          bestLap: c.bestLap,
+          time: c.bestLap > 0 ? c.bestLap : NaN,
+          gap: c.bestLap > 0 ? c.bestLap - pole : NaN,
+        };
+      }),
+    };
+    this.carry = { seed: session.seed, fieldCars: session.fieldCars, gridOrder: [...race.order] };
+    this.menus.replayAvailable.value =
+      this.lastReplay !== null || (this.replayRecorder?.duration ?? 0) > 5;
+    this.menus.set(['results']);
     this.applyHudVisibility();
   }
 
@@ -2793,14 +2852,29 @@ export class Game {
         this.menus.set([]);
         const mode = this.session?.mode;
         if (mode === 'race' || mode === 'timeTrial') {
-          void this.startSession({ ...this.menus.setup.value, mode }).then(() => {
-            this.endFlyover();
-            this.resume();
-          });
+          // A race from a qualifying restarts on the grid it set; a qualifying runs again.
+          const carry = mode === 'race' && !this.session?.qualifying ? this.carry : null;
+          void this.startSession({ ...this.menus.setup.value, mode }, false, false, carry).then(
+            () => {
+              this.endFlyover();
+              this.resume();
+            },
+          );
         } else {
           this.resume();
           this.resetCar();
         }
+      },
+      startRace: () => {
+        const carry = this.carry;
+        if (!carry) return;
+        this.menus.set([]);
+        void this.startSession(
+          { ...this.menus.setup.value, mode: 'race' },
+          false,
+          false,
+          carry,
+        ).then(() => this.resume());
       },
       resume: () => this.resume(),
       tap: (event) => this.input.tap(event),

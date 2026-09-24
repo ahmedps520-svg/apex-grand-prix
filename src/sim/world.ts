@@ -76,6 +76,8 @@ export class World {
   /** Set for race and time-trial sessions. */
   track: Track | null = null;
   director: RaceDirector | null = null;
+  /** The grid from a qualifying (car indices by position, pole first), kept for restarts. */
+  gridOrder: number[] | null = null;
   /** AI driver per car (null for the player). */
   drivers: Array<AiDriver | null> = [];
   /** Free roam: the traffic sharing the world, written after the cars in the snapshot. */
@@ -203,16 +205,24 @@ export class World {
     );
     if ((config.dayCycle ?? 0) > 0) world.day = { hour, rate: dayRate(config.dayCycle!) };
     if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
-    const laps = config.mode === 'race' ? config.laps : 0;
+    // A qualifying: the field runs its laps for the grid (nobody is put out in one).
+    const qualifying = config.mode === 'race' ? Math.max(0, Math.floor(config.qualifying ?? 0)) : 0;
+    const laps = config.mode === 'race' ? qualifying || config.laps : 0;
     world.director = new RaceDirector(
       track,
       count,
       config.mode,
       laps,
       config.seed,
-      config.elimination ?? 0,
+      qualifying > 0 ? 0 : (config.elimination ?? 0),
+      qualifying > 0,
     );
-    world.director.restart(world.cars, Math.min(config.gridSlot, count - 1));
+    world.gridOrder = config.gridOrder ? [...config.gridOrder] : null;
+    world.director.restart(
+      world.cars,
+      Math.min(config.gridSlot, count - 1),
+      world.gridOrder ?? undefined,
+    );
     world.startWeather(config);
     return world;
   }
@@ -257,7 +267,7 @@ export class World {
       car.repair();
       car.retired = false;
     }
-    this.director?.restart(this.cars, playerSlot);
+    this.director?.restart(this.cars, playerSlot, this.gridOrder ?? undefined);
     if (!this.director) this.cars[0]?.reset();
   }
 

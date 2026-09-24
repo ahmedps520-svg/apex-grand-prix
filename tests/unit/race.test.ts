@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SIM_DT } from '../../src/shared/protocol';
+import { SIM_DT, neutralInput } from '../../src/shared/protocol';
 import { AiDriver } from '../../src/sim/race/AiDriver';
 import { resolveCarContacts } from '../../src/sim/race/collisions';
-import { RaceDirector } from '../../src/sim/race/RaceDirector';
+import { RaceDirector, type CarRaceState } from '../../src/sim/race/RaceDirector';
 import { computeRacingLine } from '../../src/sim/race/racingLine';
 import { SURFACE } from '../../src/sim/track/surface';
 import { Track, type TrackDef } from '../../src/sim/track/Track';
@@ -185,6 +185,105 @@ describe('race director', () => {
     }
     expect(finish[0]!.finishTime).toBeLessThan(finish[1]!.finishTime);
     expect(finish[1]!.finishTime).toBeLessThan(finish[2]!.finishTime);
+  });
+});
+
+describe('qualifying', () => {
+  /**
+   * Three cars, two laps; car 0 (the quickest) waits 20 s after the lights before it drives, so
+   * it is last home with the best lap (its second, flying). The grid is the one given: car 2 on
+   * pole, car 0 next.
+   */
+  const session = (qualifying: boolean) => {
+    const cars: Car[] = [];
+    const drivers: AiDriver[] = [];
+    for (let i = 0; i < 3; i++) {
+      cars.push(new Car(TEST_MULE, track.gridSlot(i), track));
+      drivers.push(new AiDriver(track, line, { skill: 0.97 - i * 0.04, seed: 100 + i }));
+    }
+    const director = new RaceDirector(track, 3, 'race', 2, 5, 0, qualifying);
+    director.restart(cars, 0, [2, 0, 1]);
+    const status = director.status;
+    expect(status.order).toEqual([2, 0, 1]);
+    const held = { ...neutralInput(), brake: 1 };
+    let goAt = -1;
+    for (let step = 0, t = 0; step < 220 / SIM_DT; step++, t += SIM_DT) {
+      if (goAt < 0 && status.go) goAt = t;
+      for (let i = 0; i < cars.length; i++) {
+        const car = cars[i]!;
+        const waiting = i === 0 && (goAt < 0 || t < goAt + 20);
+        car.setInput(waiting ? held : drivers[i]!.drive(car, cars, SIM_DT));
+        car.holdForStart = director.holding(i);
+        car.step(SIM_DT, track);
+      }
+      resolveCarContacts(cars);
+      director.update(SIM_DT, cars);
+      if (status.phase === 'finished') break;
+    }
+    return status;
+  };
+
+  it('ranks the field by best lap, whatever the finish order', () => {
+    const status = session(true);
+    expect(status.qualifying).toBe(true);
+    expect(status.elimination).toBeNull();
+    expect(status.phase).toBe('finished');
+    const [me, a, b] = status.cars as [CarRaceState, CarRaceState, CarRaceState];
+    for (const c of [me, a, b]) {
+      expect(c.finished).toBe(true);
+      expect(c.lap).toBe(2);
+      expect(c.bestLap).toBeGreaterThan(0);
+    }
+    expect(me.finishTime).toBeGreaterThan(Math.max(a.finishTime, b.finishTime));
+    expect(me.bestLap).toBeLessThan(Math.min(a.bestLap, b.bestLap));
+    const byBest = [0, 1, 2].sort((x, y) => status.cars[x]!.bestLap - status.cars[y]!.bestLap);
+    expect(status.order).toEqual(byBest);
+    expect(me.position).toBe(1);
+  });
+
+  it('is a race otherwise: the same drive is last', () => {
+    const status = session(false);
+    expect(status.qualifying).toBe(false);
+    expect(status.cars[0]!.position).toBe(3);
+  });
+
+  /** Cars moved along the track by hand (the director only reads where they are). */
+  const walk = (car: Car, s: number) => {
+    const p = track.at(((s % track.length) + track.length) % track.length);
+    car.teleport({ x: p.x, z: p.z, yaw: Math.atan2(-p.tx, -p.tz) });
+  };
+
+  it('lets a lapped car run its own laps, where a race flags it with the leader', () => {
+    for (const qualifying of [true, false]) {
+      const cars = [0, 1].map((i) => new Car(TEST_MULE, track.gridSlot(i), track));
+      const director = new RaceDirector(track, 2, 'race', 2, 5, 0, qualifying);
+      director.restart(cars, 0);
+      const status = director.status;
+      const dt = 0.05;
+      for (let i = 0; i < 400 && !status.go; i++) director.update(dt, cars);
+      expect(status.go).toBe(true);
+      // Both start just before the line; car 1 covers 25 m a step (under a teleport), car 0 only 5.
+      const s = [track.length - 50, track.length - 50];
+      const step = () => {
+        s[0]! += 5;
+        s[1]! += 25;
+        walk(cars[0]!, s[0]!);
+        walk(cars[1]!, s[1]!);
+        director.update(dt, cars);
+      };
+      for (let i = 0; i < 2000 && !status.cars[1]!.finished; i++) step();
+      expect(status.cars[1]!.lap).toBe(2);
+      expect(status.cars[0]!.lap).toBe(0);
+      // Car 0 comes round to complete its first lap after the leader has finished.
+      for (let i = 0; i < 2000 && status.cars[0]!.lap < 1; i++) step();
+      expect(status.cars[0]!.lap).toBe(1);
+      expect(status.cars[0]!.finished).toBe(!qualifying);
+      if (qualifying) {
+        for (let i = 0; i < 2000 && !status.cars[0]!.finished; i++) step();
+        expect(status.cars[0]!.lap).toBe(2);
+        expect(status.phase).toBe('finished');
+      }
+    }
   });
 });
 

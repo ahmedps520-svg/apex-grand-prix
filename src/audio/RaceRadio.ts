@@ -9,6 +9,8 @@ import type { GameMode } from '../shared/protocol';
 /** What the engineer knows about the player's race, every frame. */
 export interface RadioInput {
   mode: GameMode;
+  /** A qualifying session: the best lap sets the grid. */
+  qualifying?: boolean;
   phase: 'grid' | 'countdown' | 'racing' | 'finished';
   /** Laps completed by the player. */
   lapsDone: number;
@@ -105,8 +107,11 @@ export class RaceEngineer {
     }
     if (first) {
       if (race && r.phase !== 'racing') {
+        const laps = `${r.laps} ${r.laps === 1 ? 'lap' : 'laps'}`;
         out.push({
-          text: `Radio check. You start ${ordinal(r.position)} of ${r.cars}. ${r.laps} ${r.laps === 1 ? 'lap' : 'laps'} today.`,
+          text: r.qualifying
+            ? `Radio check. Qualifying: ${laps}, and your best one sets the grid.`
+            : `Radio check. You start ${ordinal(r.position)} of ${r.cars}. ${laps} today.`,
           priority: 1,
         });
       } else if (r.mode === 'timeTrial') {
@@ -123,8 +128,13 @@ export class RaceEngineer {
     if (r.finished && !this.finishedSaid && race) {
       this.finishedSaid = true;
       const p = r.position;
-      const text =
-        p === 1
+      const text = r.qualifying
+        ? p === 1
+          ? 'Pole position! Superb lap.'
+          : p <= 3
+            ? `That's ${ordinal(p)} on the grid. Good lap.`
+            : `${ordinal(p)} on the grid. We can race from there.`
+        : p === 1
           ? 'Chequered flag! You won it! Fantastic drive.'
           : p <= 3
             ? `Chequered flag. ${ordinal(p)}, that's a podium. Great job.`

@@ -131,6 +131,10 @@ export interface SessionConfig {
   weatherMoves?: boolean;
   /** Elimination race: every this many seconds the last car is out (unset: a standard race). */
   elimination?: number;
+  /** Qualifying: every car runs this many laps and the best lap sets the grid (unset: a race). */
+  qualifying?: number;
+  /** The grid from a qualifying: car indices by position, pole first (unset: `gridSlot`, then index order). */
+  gridOrder?: number[];
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
