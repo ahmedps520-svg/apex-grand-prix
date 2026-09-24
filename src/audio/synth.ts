@@ -300,3 +300,14 @@ export function bearingPan(dx: number, dz: number, fx: number, fz: number): numb
   const side = (dx * rx + dz * rz) / Math.max(d, 2);
   return Math.max(-1, Math.min(1, side * 0.85));
 }
+
+/** Rain on the car: the patter's level for a rainfall (0 … 1), most of it by light rain. */
+export function rainGain(rain: number): number {
+  return Math.pow(clamp01(rain), 0.7);
+}
+
+/** Spray off a wet road: rises with the wetness and with speed, full from 30 m/s. */
+export function sprayGain(wet: number, speed: number): number {
+  const v = clamp01(speedOf(speed) / 30);
+  return clamp01(wet) * v * v;
+}

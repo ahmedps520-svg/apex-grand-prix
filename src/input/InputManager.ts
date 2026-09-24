@@ -39,7 +39,7 @@ export type PadFamily = 'playstation' | 'xbox' | 'generic';
 /** A menu event and where it came from (some screens treat controller buttons specially). */
 export interface UiInput {
   event: UiEvent;
-  source: 'pad' | 'key' | 'wheel';
+  source: 'pad' | 'key' | 'wheel' | 'touch';
 }
 
 // Standard Gamepad mapping indices (https://w3c.github.io/gamepad/#remapping).
@@ -186,6 +186,11 @@ export class InputManager {
   private readonly keys = new Set<string>();
   private readonly pendingKeyActions: Action[] = [];
   private readonly pendingUi: UiInput[] = [];
+
+  /** A tap on a menu prompt or the touch Back button: a menu event like a key's, next frame. */
+  tap(event: UiEvent): void {
+    this.pendingUi.push({ event, source: 'touch' });
+  }
   private pendingShiftUp = 0;
   private pendingDrs = 0;
   private pendingBoost = 0;

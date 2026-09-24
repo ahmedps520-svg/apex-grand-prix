@@ -61,6 +61,19 @@ const GRIP: Readonly<Record<Weather, number>> = {
   heavyRain: 0.72,
 };
 
+const RAINFALL: Readonly<Record<Weather, number>> = {
+  clear: 0,
+  cloudy: 0,
+  overcast: 0,
+  lightRain: 0.45,
+  heavyRain: 1,
+};
+
+/** How hard it rains in this weather: 0 none … 1 heavy (the streaks and the patter follow it). */
+export function rainfall(weather: Weather): number {
+  return RAINFALL[weather];
+}
+
 /** How wet the track is in this weather: 0 dry … 1 soaked (standing water). */
 export function wetness(weather: Weather): number {
   return WETNESS[weather];

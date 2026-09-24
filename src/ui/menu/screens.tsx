@@ -27,7 +27,7 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, FestivalDestination, MenuStore, ReplayCommand } from './store';
+import type { Difficulty, FestivalDestination, MenuStore, RaceType, ReplayCommand } from './store';
 import {
   Button,
   Choice,
@@ -643,6 +643,12 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(laps) => store.update({ laps })}
             />
             <Choice
+              label="Race type"
+              value={setup.raceType}
+              options={RACE_TYPES}
+              onChange={(raceType) => store.update({ raceType })}
+            />
+            <Choice
               label="Difficulty"
               value={setup.difficulty}
               options={DIFFICULTY}
@@ -738,6 +744,11 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
   );
 }
 
+const RACE_TYPES: ReadonlyArray<{ value: RaceType; text: string }> = [
+  { value: 'standard', text: 'Standard' },
+  { value: 'elimination', text: 'Elimination: last place out every 20 s' },
+];
+
 const HANDLING: ReadonlyArray<{ value: HandlingMode; text: string }> = [
   { value: 'sim', text: 'Sim' },
   { value: 'arcade', text: 'Arcade: grip, drifts, nitro, skill points' },
@@ -827,6 +838,7 @@ const DESTINATION_COLOUR: Record<FestivalDestination['kind'], string> = {
   drift: '#37d4ff',
   camera: '#ffd166',
   jump: '#ff8a5b',
+  getaway: '#c77dff',
 };
 const DESTINATION_LABEL: Record<FestivalDestination['kind'], string> = {
   spawn: 'Start',
@@ -834,6 +846,7 @@ const DESTINATION_LABEL: Record<FestivalDestination['kind'], string> = {
   drift: 'Drift zone',
   camera: 'Speed trap',
   jump: 'Jump',
+  getaway: 'Getaway',
 };
 
 /** Free roam: the festival map (roads, events, the car) and the places to fast-travel to. */
@@ -846,13 +859,14 @@ export function MapScreen({ store }: ScreenProps) {
       </div>
     );
   }
-  const { bounds, roads, destinations, player, totals } = info;
+  const { bounds, roads, destinations, player, totals, ladder, wins } = info;
   const medals = [
     totals.gold ? `${totals.gold} gold` : '',
     totals.silver ? `${totals.silver} silver` : '',
     totals.bronze ? `${totals.bronze} bronze` : '',
   ].filter((m) => m);
-  const progress = `${totals.done} of ${totals.events} events done${medals.length ? ` · ${medals.join(' · ')}` : ''}`;
+  const standing = `Level ${ladder.level} ${ladder.title} · ${ladder.points.toLocaleString('en-US')} pts${wins ? ` · ${wins} ${wins === 1 ? 'win' : 'wins'}` : ''}`;
+  const progress = `${standing} · ${totals.done} of ${totals.events} events done${medals.length ? ` · ${medals.join(' · ')}` : ''}`;
   const w = bounds.maxX - bounds.minX;
   const h = bounds.maxZ - bounds.minZ;
   const points = (road: (typeof roads)[number]) => {
@@ -955,8 +969,84 @@ export function RoamSetupScreen({ store }: ScreenProps) {
             }
           />
         )}
+        <Button label="Festival board" onPress={() => store.push('board')} />
         <Button label="Proving ground" onPress={() => store.push('freeSetup')} />
       </div>
+    </div>
+  );
+}
+
+const BOARD_GROUPS: ReadonlyArray<[FestivalDestination['kind'], string]> = [
+  ['race', 'Races'],
+  ['getaway', 'Getaways'],
+  ['drift', 'Drift zones'],
+  ['camera', 'Speed traps'],
+  ['jump', 'Jumps'],
+];
+
+/** The festival board: the ladder, the totals, and every event's best and medal. */
+export function BoardScreen({ store }: ScreenProps) {
+  const info = store.festival.value;
+  if (!info) {
+    return (
+      <div class="mn-panel">
+        <Header title="Festival board" subtitle="Nothing yet" />
+      </div>
+    );
+  }
+  const { totals, ladder, wins, destinations } = info;
+  const inRoam = store.inSession.value && store.setup.value.mode === 'roam';
+  const next =
+    ladder.toNext === null
+      ? 'The top of the ladder'
+      : `${ladder.toNext.toLocaleString('en-US')} pts to level ${ladder.level + 1}`;
+  const medals = `${totals.gold} gold · ${totals.silver} silver · ${totals.bronze} bronze`;
+  return (
+    <div class="mn-panel mn-wide mn-board">
+      <Header
+        title="Festival board"
+        subtitle={`Level ${ladder.level} ${ladder.title} · ${ladder.points.toLocaleString('en-US')} pts · ${wins} ${wins === 1 ? 'win' : 'wins'}`}
+      />
+      <div class="mn-board-ladder">
+        <div class="mn-board-bar">
+          <span style={{ width: `${Math.round(ladder.share * 100)}%` }} />
+        </div>
+        <div class="mn-board-next">{next}</div>
+      </div>
+      <div class="mn-board-totals">
+        {totals.done} of {totals.events} events done · {medals}
+      </div>
+      <div class="mn-board-groups">
+        {BOARD_GROUPS.map(([kind, title]) => {
+          const rows = destinations.filter((d) => d.kind === kind);
+          if (rows.length === 0) return null;
+          return (
+            <section class="mn-board-group" key={kind}>
+              <h3>{title}</h3>
+              <div class="mn-list">
+                {rows.map((d) => {
+                  const result = d.best ?? '—';
+                  const medal = d.medal ? ` · ${d.medal}` : '';
+                  return inRoam ? (
+                    <Button
+                      key={d.id}
+                      label={d.name}
+                      hint={`${result}${medal}`}
+                      onPress={() => store.actions.fastTravel(d.id)}
+                    />
+                  ) : (
+                    <div class={`mn-board-row${d.medal ? ` ${d.medal}` : ''}`} key={d.id}>
+                      <span>{d.name}</span>
+                      <span class="mn-dim">{`${result}${medal}`}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      {inRoam && <p class="mn-board-hint">Pick an event to fast-travel to it.</p>}
     </div>
   );
 }
@@ -979,6 +1069,7 @@ export function PauseScreen({ store }: ScreenProps) {
         <Button label="Reset car" onPress={() => store.actions.resetCar()} />
         <Button label="Photo mode" onPress={() => store.actions.photoMode()} />
         {mode === 'roam' && <Button label="Festival map" onPress={() => store.push('map')} />}
+        {mode === 'roam' && <Button label="Festival board" onPress={() => store.push('board')} />}
         <Button label="Settings" onPress={() => store.push('settings')} />
         <Button label="Controls" onPress={() => store.push('controls')} />
         <Button label="Quit to main menu" onPress={() => store.actions.quitToMenu()} />
@@ -1025,11 +1116,13 @@ export function ResultsScreen({ store }: ScreenProps) {
                 <td class="mn-dim">{r.car}</td>
                 <td>{formatTime(r.bestLap)}</td>
                 <td>
-                  {!Number.isFinite(r.time)
-                    ? '—'
-                    : i === 0
-                      ? formatTime(r.time)
-                      : `+${r.gap.toFixed(3)}`}
+                  {r.out
+                    ? 'OUT'
+                    : !Number.isFinite(r.time)
+                      ? '—'
+                      : i === 0
+                        ? formatTime(r.time)
+                        : `+${r.gap.toFixed(3)}`}
                 </td>
               </tr>
             ))}

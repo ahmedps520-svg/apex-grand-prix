@@ -163,7 +163,7 @@ export class Cones {
 }
 
 /** Orange cone with a white reflective band on a square base, origin at the bottom. */
-function coneGeometry(): THREE.BufferGeometry {
+export function coneGeometry(): THREE.BufferGeometry {
   const base = new THREE.BoxGeometry(0.4, 0.04, 0.4).translate(0, 0.02, 0);
   const lower = new THREE.CylinderGeometry(0.1, CONE_RADIUS - 0.03, 0.26, 16, 1, true).translate(
     0,
@@ -172,14 +172,6 @@ function coneGeometry(): THREE.BufferGeometry {
   );
   const band = new THREE.CylinderGeometry(0.075, 0.1, 0.1, 16, 1, true).translate(0, 0.35, 0);
   const top = new THREE.CylinderGeometry(0.02, 0.075, 0.18, 16, 1).translate(0, 0.49, 0);
-  const paint = (g: THREE.BufferGeometry, color: number) => {
-    const c = new THREE.Color(color);
-    const count = g.getAttribute('position').count;
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) colors.set([c.r, c.g, c.b], i * 3);
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    return g.index ? g.toNonIndexed() : g;
-  };
   const merged = mergeGeometries([
     paint(base, 0x222222),
     paint(lower, 0xff5a0a),
@@ -188,4 +180,14 @@ function coneGeometry(): THREE.BufferGeometry {
   ]);
   if (!merged) throw new Error('Could not build the cone geometry');
   return merged;
+}
+
+/** A geometry in one flat colour (vertex colours), un-indexed so pieces can be merged. */
+export function paint(g: THREE.BufferGeometry, color: number): THREE.BufferGeometry {
+  const c = new THREE.Color(color);
+  const count = g.getAttribute('position').count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) colors.set([c.r, c.g, c.b], i * 3);
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return g.index ? g.toNonIndexed() : g;
 }

@@ -548,6 +548,45 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+/* A prompt that works as a tap (Back, Pause, Tabs). */
+.menu-prompt.tappable {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.menu-prompt.tappable:active {
+  opacity: 0.6;
+}
+
+/* Touch screens: the way back, in the top corner of every screen that has one. */
+.menu-back {
+  position: absolute;
+  top: calc(14px + var(--safe-top));
+  right: calc(16px + var(--safe-right));
+  z-index: 2;
+  padding: 10px 18px 10px 14px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(20, 24, 34, 0.7);
+  color: #fff;
+  font: 700 15px var(--font);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: manipulation;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: rise 0.4s ease both;
+}
+
+.menu-back:active {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .glyph {
@@ -1308,4 +1347,74 @@
 .mn-offer-title {
   margin: 0;
   font: italic 900 30px var(--font);
+}
+
+/* The festival board: the ladder's bar, the totals, and the events in groups. */
+.mn-board-ladder {
+  margin: 4px 0 10px;
+}
+
+.mn-board-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.mn-board-bar span {
+  display: block;
+  height: 100%;
+  background: #ffd166;
+}
+
+.mn-board-next,
+.mn-board-totals,
+.mn-board-hint {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.mn-board-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px 20px;
+  margin-top: 14px;
+}
+
+.mn-board-group h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mn-board-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.mn-board-row .mn-dim,
+.mn-board .mn-hint {
+  white-space: nowrap;
+}
+
+.mn-board-row.gold .mn-dim {
+  color: #ffd166;
+}
+
+.mn-board-row.silver .mn-dim {
+  color: #d9dde3;
+}
+
+.mn-board-row.bronze .mn-dim {
+  color: #d99a5b;
 }

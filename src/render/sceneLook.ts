@@ -44,9 +44,11 @@ export interface SceneLook {
   sunAzimuth: number;
   /**
    * Where the shadow-casting light shines from: the sun, but never grazing the ground, and from
-   * high overhead under a closed cloud deck (soft light from the whole sky).
+   * high overhead under a closed cloud deck (soft light from the whole sky); at night the moon,
+   * opposite the sun's bearing and 25° up.
    */
   lightElevation: number;
+  lightAzimuth: number;
   /** 0 for a high sun, up to 1 for a low golden-hour one. */
   lowSun: number;
   sky: SkyLook;
@@ -163,6 +165,8 @@ const STORM_HORIZON = 0x8e959c;
 const STORM_ZENITH = 0x767e87;
 /** Lowest the shadow-casting light goes, degrees (grazing shadows smear and streak). */
 const MIN_LIGHT_ELEVATION = 6;
+/** The moon's height at night, degrees (where the night sky hangs it). */
+const MOON_ELEVATION = 25;
 
 const color = (hex: number) => new THREE.Color(hex);
 
@@ -268,16 +272,20 @@ export function sceneLook(
   hemiSky.lerp(color(0x141c3a), night);
   hemiGround.multiplyScalar(1 - 0.85 * night);
 
+  const sunAzimuth = sun ? sun.azimuth : theme.sunAzimuth;
   const lightElevation = THREE.MathUtils.lerp(
-    Math.max(elevation, MIN_LIGHT_ELEVATION),
-    72,
-    closed * 0.85,
+    THREE.MathUtils.lerp(Math.max(elevation, MIN_LIGHT_ELEVATION), 72, closed * 0.85),
+    MOON_ELEVATION,
+    night,
   );
+  // Round to the moon's side as the night comes: its light is faint, so the swing is not seen.
+  const lightAzimuth = sunAzimuth + 180 * night;
 
   return {
     sunElevation: elevation,
-    sunAzimuth: sun ? sun.azimuth : theme.sunAzimuth,
+    sunAzimuth,
     lightElevation,
+    lightAzimuth,
     lowSun,
     sky: {
       turbidity: 3.2 + lowSun * 4 + twilight * 2 + style.haze,

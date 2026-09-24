@@ -47,6 +47,7 @@ import {
   type DriverInput,
   type SteerSmoothing,
   SIM_DT,
+  FLAG_RETIRED,
 } from '../../shared/protocol';
 import { SURFACE, SURFACE_PROPS, rayHit, type Surface, type SurfaceId } from '../track/surface';
 import type { AxleSpec, CarSpec } from './spec';
@@ -284,6 +285,8 @@ export class Car {
   /** Energy in the battery, J, and whether the boost is on. */
   ersEnergy = 0;
   ersBoost = false;
+  /** Out of the race and off the track (an elimination): the world leaves it be, unseen. */
+  retired = false;
   /** Lights (free roam): headlights, indicator (-1 left, 0, 1 right), hazards, and the horn. */
   headlights = false;
   indicator = 0;
@@ -1457,7 +1460,8 @@ export class Car {
       (this.indicator > 0 ? FLAG_INDICATOR_RIGHT : 0) |
       (this.hazards ? FLAG_HAZARDS : 0) |
       (this.horn ? FLAG_HORN : 0) |
-      (this.nitroOn ? FLAG_NITRO : 0);
+      (this.nitroOn ? FLAG_NITRO : 0) |
+      (this.retired ? FLAG_RETIRED : 0);
     out[base + C.ACCEL_LONG] = this.accelLong;
     out[base + C.ACCEL_LAT] = this.accelLat;
     out[base + C.STEER_ANGLE] = (this.wheels[0]!.steer + this.wheels[1]!.steer) / 2;

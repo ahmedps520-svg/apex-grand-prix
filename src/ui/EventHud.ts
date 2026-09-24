@@ -7,6 +7,7 @@ const KIND_LABEL: Record<EventKind, string> = {
   drift: 'DRIFT ZONE',
   camera: 'SPEED TRAP',
   jump: 'JUMP',
+  getaway: 'GETAWAY',
 };
 
 /** Free roam: the festival event under way (time, points, distance) or the nearest one to go for. */

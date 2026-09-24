@@ -1,7 +1,14 @@
 import { SPAWN, SPAWNS } from '../content/testGround';
 import { TRACKS, trackById } from '../content/tracks';
 import { mulberry32 } from '../shared/math';
-import { afterDark, dayRate, hourOf, sunElevationAt, wrapHour } from '../content/conditions';
+import {
+  afterDark,
+  dayRate,
+  hourOf,
+  sunElevationAt,
+  wetness,
+  wrapHour,
+} from '../content/conditions';
 import { cityHourOf } from '../content/city/day';
 import {
   CAR_STRIDE,
@@ -148,6 +155,7 @@ export class World {
         if (world.traffic) world.traffic.pedestrians = world.pedestrians;
       }
       world.startWeather(config);
+      if (world.traffic) world.traffic.wet = wetness(config.conditions?.weather ?? 'clear');
       return world;
     }
     if (config.mode === 'free' || !config.trackId) {
@@ -196,7 +204,14 @@ export class World {
     if ((config.dayCycle ?? 0) > 0) world.day = { hour, rate: dayRate(config.dayCycle!) };
     if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
     const laps = config.mode === 'race' ? config.laps : 0;
-    world.director = new RaceDirector(track, count, config.mode, laps, config.seed);
+    world.director = new RaceDirector(
+      track,
+      count,
+      config.mode,
+      laps,
+      config.seed,
+      config.elimination ?? 0,
+    );
     world.director.restart(world.cars, Math.min(config.gridSlot, count - 1));
     world.startWeather(config);
     return world;
@@ -238,7 +253,10 @@ export class World {
   }
 
   restartSession(playerSlot: number): void {
-    for (const car of this.cars) car.repair();
+    for (const car of this.cars) {
+      car.repair();
+      car.retired = false;
+    }
     this.director?.restart(this.cars, playerSlot);
     if (!this.director) this.cars[0]?.reset();
   }
@@ -253,6 +271,8 @@ export class World {
     const director = this.director;
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i]!;
+      // Out of the race: left where it stopped, unseen and untouched.
+      if (car.retired) continue;
       const ai = this.drivers[i];
       if (ai) {
         car.setInput(ai.drive(car, cars, dt));
@@ -278,6 +298,7 @@ export class World {
     this.racers?.step(dt, cars[0]!);
     this.pedestrians?.step(dt, cars[0]!, this.traffic);
     director?.update(dt, cars);
+    this.retireEliminated();
     this.rubberBand();
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {
@@ -326,6 +347,21 @@ export class World {
     }
   }
 
+  /** Elimination race: a car the director put out leaves the track (stops, unseen, no contacts). */
+  private retireEliminated(): void {
+    const status = this.director?.status;
+    if (!status?.elimination) return;
+    for (let i = 0; i < this.cars.length; i++) {
+      const car = this.cars[i]!;
+      if (status.cars[i]?.eliminated && !car.retired) {
+        car.retired = true;
+        car.vel.x = 0;
+        car.vel.y = 0;
+        car.vel.z = 0;
+      }
+    }
+  }
+
   /** Weather that moves, from the weather chosen (never on the proving ground). */
   private startWeather(config: SessionConfig): void {
     if (!config.weatherMoves) return;
@@ -338,6 +374,7 @@ export class World {
     if (!weather) return;
     weather.step(dt);
     this.surface.gripScale = weather.grip;
+    if (this.traffic) this.traffic.wet = weather.wetness;
   }
 
   /**

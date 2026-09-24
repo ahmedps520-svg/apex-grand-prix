@@ -1029,6 +1029,20 @@ body.fatal #loading-text {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
+/* With the on-screen pedals in the right corner (touch), the readout takes the left one, the
+   speed-limit sign on its right. */
+.hud.beside-touch {
+  right: auto;
+  left: calc(18px + var(--safe-left));
+}
+
+.hud.beside-touch .hud-limit {
+  right: auto;
+  left: 100%;
+  margin-right: 0;
+  margin-left: 14px;
+}
+
 /* Free roam: the time on the day's clock, over the gear and speed. */
 .hud-clock {
   font: 600 15px var(--font);
@@ -1230,6 +1244,30 @@ body.fatal #loading-text {
 
 .skill-combo[hidden] {
   display: none;
+}
+
+/* The festival's ladder under the score: the level and its title, and the way to the next. */
+.skill-level {
+  margin-top: 4px;
+  font: 700 10px var(--font);
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.skill-level-bar {
+  margin-top: 4px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.skill-level-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #ffd166;
+  transition: width 0.4s ease-out;
 }
 
 .skill-pops {

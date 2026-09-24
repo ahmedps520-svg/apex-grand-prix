@@ -23,6 +23,7 @@ describe('festival events', () => {
     expect(count('jump')).toBeGreaterThanOrEqual(2);
     expect(count('drift')).toBeGreaterThanOrEqual(3);
     expect(count('race')).toBeGreaterThanOrEqual(3);
+    expect(count('getaway')).toBeGreaterThanOrEqual(2);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
     // On a road: on the ground, or up on the orbital's deck.
     const onRoad = (x: number, z: number) => map.paved(x, z) || map.deckAt(x, z) !== null;
@@ -40,6 +41,11 @@ describe('festival events', () => {
         expect(e.zone!.pieces.length).toBeGreaterThan(0);
       }
       if (e.kind === 'jump') expect(e.ramp!.length).toBeGreaterThan(0);
+      if (e.kind === 'getaway') {
+        expect(e.heat).toBeGreaterThanOrEqual(1);
+        expect(e.heat).toBeLessThanOrEqual(5);
+        expect(e.par).toBeGreaterThan(0);
+      }
     }
   });
 });
@@ -237,6 +243,66 @@ describe("the festival's rules", () => {
     fest.update(0.05, p);
     expect(fest.records[jump.id]).toBeCloseTo(20, 0);
     expect(fest.notices.at(-1)!.text).toContain('Jump');
+  });
+
+  it('starts a getaway on its line, times the escape and takes a bust', () => {
+    const event = events.find((e) => e.id === 'getaway-avenue')!;
+    const started: number[] = [];
+    const fest = new Festival(events, {}, undefined, undefined, (heat) => started.push(heat));
+    const p = car();
+    p.speed = 20;
+    p.pos.y = event.y;
+    const police = (state: 'clear' | 'pursuit' | 'escaped' | 'busted', heat = 3) => ({
+      heat,
+      state,
+      evade: 0,
+      fine: 0,
+      fines: 0,
+      strips: [],
+      helicopter: false,
+    });
+    const cross = () => {
+      p.pos.x = event.x - event.tx * 8;
+      p.pos.z = event.z - event.tz * 8;
+      fest.update(0.05, p, null, police('clear', 0));
+      p.pos.x = event.x + event.tx * 8;
+      p.pos.z = event.z + event.tz * 8;
+      fest.update(0.05, p, null, police('clear', 0));
+    };
+    cross();
+    expect(started).toEqual([event.heat]);
+    expect(fest.view.active?.kind).toBe('getaway');
+    expect(fest.view.active?.detail).toBe('Here they come');
+    // The police arrive; 30 s later the player is away: a time and a medal, kept.
+    for (let i = 0; i < 60; i++) fest.update(0.5, p, null, police('pursuit'));
+    expect(fest.view.active?.detail).toContain('stars');
+    expect(fest.view.active?.line).toBe(formatTime(30));
+    fest.update(0.5, p, null, police('escaped', 0));
+    expect(fest.view.active).toBeNull();
+    expect(fest.records['getaway-avenue']).toBeCloseTo(30.5, 5);
+    expect(fest.notices.length).toBe(1);
+    expect(fest.notices[0]!.text).toContain('Getaway · Downtown Getaway');
+    expect(fest.notices[0]!.medal).toBe('gold');
+    expect(fest.notices[0]!.best).toBe(true);
+    expect(fest.notices[0]!.results).toEqual([]);
+    // A slower escape is no new best; a bust ends it with nothing.
+    fest.notices.length = 0;
+    fest.update(0.5, p, null, police('clear', 0));
+    cross();
+    expect(started.length).toBe(2);
+    for (let i = 0; i < 100; i++) fest.update(0.5, p, null, police('pursuit'));
+    fest.update(0.5, p, null, police('busted', 0));
+    expect(fest.view.active).toBeNull();
+    expect(fest.records['getaway-avenue']).toBeCloseTo(30.5, 5);
+    expect(fest.notices[0]!.text).toContain('busted');
+    expect(fest.notices[0]!.medal ?? null).toBeNull();
+    // Police that never come let it lapse.
+    fest.notices.length = 0;
+    fest.update(0.5, p, null, police('clear', 0));
+    cross();
+    for (let i = 0; i < 14; i++) fest.update(0.5, p, null, null);
+    expect(fest.view.active).toBeNull();
+    expect(fest.notices.length).toBe(0);
   });
 
   it('totals up the events done and the medals', () => {

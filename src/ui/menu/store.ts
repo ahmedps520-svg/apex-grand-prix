@@ -2,6 +2,7 @@ import { signal } from '@preact/signals';
 import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
 import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
+import type { LadderStanding } from '../../content/ladder';
 import type {
   Difficulty,
   GameMode,
@@ -30,6 +31,7 @@ export type ScreenId =
   | 'freeSetup'
   | 'roamSetup'
   | 'map'
+  | 'board'
   | 'pause'
   | 'results'
   | 'replay'
@@ -71,11 +73,14 @@ export interface SessionSetup {
   secondClass: string;
   /** Sim or arcade handling, for any mode. */
   handling: HandlingMode;
+  /** Quick races: a standard race, or an elimination (the last car out every so often). */
+  raceType: RaceType;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
+export type RaceType = 'standard' | 'elimination';
 
 export interface ResultRow {
   position: number;
@@ -87,6 +92,8 @@ export interface ResultRow {
   /** Race time, or NaN if the car didn't finish. */
   time: number;
   gap: number;
+  /** Elimination race: put out before the end. */
+  out?: boolean;
 }
 
 /** A championship in progress: a fixed series of circuits with points after each race. */
@@ -166,9 +173,11 @@ export interface SessionResults {
 /** A place to fast-travel to: a spawn, or a festival event with its best result. */
 export interface FestivalDestination {
   id: string;
-  kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump';
+  kind: 'spawn' | 'race' | 'drift' | 'camera' | 'jump' | 'getaway';
   name: string;
   best: string | null;
+  /** Races and getaways: the best's medal. */
+  medal: 'gold' | 'silver' | 'bronze' | null;
   x: number;
   z: number;
 }
@@ -177,6 +186,9 @@ export interface FestivalInfo {
   destinations: FestivalDestination[];
   /** Events with a result, and the races' medals. */
   totals: { events: number; done: number; gold: number; silver: number; bronze: number };
+  /** The festival's ladder: lifetime skill points, the level and its title, and races won. */
+  ladder: LadderStanding;
+  wins: number;
   roads: ReadonlyArray<{ points: number[]; loop: boolean; elevated: boolean; kind: string }>;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   player: { x: number; z: number };
@@ -187,6 +199,8 @@ export interface MenuActions {
   startSession(setup: SessionSetup): void;
   restartSession(): void;
   resume(): void;
+  /** A tap on a menu prompt (touch): the same as the key or button for it. */
+  tap(event: 'back' | 'pause' | 'confirm' | 'tabNext'): void;
   resetCar(): void;
   /** Leave driving for the main menu. */
   quitToMenu(): void;
@@ -255,6 +269,7 @@ export class MenuStore {
     field: 'same',
     secondClass: 'Touring',
     handling: 'sim',
+    raceType: 'standard',
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

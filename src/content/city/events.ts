@@ -10,7 +10,7 @@ import { RING_HALF, type CityMap, type Road, type RoadPiece } from './map';
  * - Races: point-to-point (or a lap) through checkpoints against the clock, with medal times.
  */
 
-export type EventKind = 'race' | 'drift' | 'camera' | 'jump';
+export type EventKind = 'race' | 'drift' | 'camera' | 'jump' | 'getaway';
 
 export interface Checkpoint {
   x: number;
@@ -40,6 +40,8 @@ export interface FestivalEvent {
   tz: number;
   /** Half the width of the line across the road. */
   halfWidth: number;
+  /** Getaways: the wanted stars the police come with when the line is crossed. */
+  heat?: number;
   /** Races: the checkpoints in order (the first is the start line, the last the finish). */
   checkpoints: Checkpoint[];
   /** Races and drift zones: the route's length, m. Races: the par time for gold, s. */
@@ -204,6 +206,21 @@ function build(map: CityMap): FestivalEvent[] {
     e.route = { road, s0: start, s1: end };
     e.length = length;
     e.par = length / pace;
+    events.push(e);
+  }
+  // Getaways: cross the line and the police are on you at this many stars; lose them, and
+  // the time it took is the result (par seconds for gold).
+  const getaways: Array<[string, string, Road | undefined, number, number, number]> = [
+    ['getaway-avenue', 'Downtown Getaway', avenue, 0.62, 3, 45],
+    ['getaway-dock', 'Port Getaway', dock, 0.5, 4, 55],
+    ['getaway-ridge', 'Ridge Getaway', ridge, 0.3, 5, 70],
+  ];
+  for (const [id, name, road, share, heat, par] of getaways) {
+    if (!road || road.length < 200) continue;
+    const e = marker(id, 'getaway', name, road, road.length * share + (road === dock ? 60 : 0));
+    if (!e) continue;
+    e.heat = heat;
+    e.par = par;
     events.push(e);
   }
   return events;

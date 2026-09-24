@@ -13,11 +13,14 @@ import {
   isRaining,
   isTimeOfDay,
   isWeather,
+  rainfall,
   sunElevationAt,
+  wetness,
   type Conditions,
   type Weather,
 } from '../content/conditions';
 import { rivalName } from '../content/drivers';
+import { ladderStanding } from '../content/ladder';
 import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
 import { TRACKS, trackById } from '../content/tracks';
@@ -27,14 +30,16 @@ import { TouchControls, hasTouch } from '../input/TouchControls';
 import { CarView } from '../render/CarView';
 import { ChaseCamera, type CameraMode } from '../render/ChaseCamera';
 import { Cones } from '../render/Cones';
+import { Props } from '../render/Props';
 import { createCarRenderState, interpolateCar, type CarRenderState } from '../render/interpolate';
 import type { RendererHost } from '../render/RendererHost';
-import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
+import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
 import { CITY_SUN_ELEVATION, cityHourOf } from '../content/city/day';
-import { cityMap, type CityMap } from '../content/city/map';
+import { cityMap } from '../content/city/map';
+import { PROP_SPECS, cityPropPlacements } from '../content/city/props';
 import {
   POLICE_PAINT,
   policeModel,
@@ -78,6 +83,7 @@ import {
   type RoamStart,
   type SpawnPoint,
   type WeatherMix,
+  FLAG_RETIRED,
 } from '../shared/protocol';
 import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
@@ -121,6 +127,8 @@ import {
 import { GhostRecorder, loadGhost, sampleGhost, saveGhost, type GhostLap } from './ghost';
 import {
   loadFestivalRecords,
+  loadProgress,
+  saveProgress,
   loadRecords,
   loadRoamSpot,
   loadSeason,
@@ -130,7 +138,7 @@ import {
   saveSeason,
   type RoamSpot,
 } from './records';
-import { Festival, festivalTotals } from './Festival';
+import { Festival, festivalTotals, medalFor } from './Festival';
 import { EventHud } from '../ui/EventHud';
 import { RaceCard } from '../ui/RaceCard';
 import { FestivalScene } from '../render/FestivalScene';
@@ -194,6 +202,11 @@ export interface DebugApi {
   clock: number | null;
   /** Moving weather: from, to and how far along (null when fixed). */
   weather: WeatherMix | null;
+  /** Arcade free roam: props flying or knocked over right now, and the nearest one standing. */
+  propsKnocked: number;
+  nearestProp: (x: number, z: number) => { kind: string; x: number; z: number } | null;
+  /** Free roam: puts the car down here (for the checks). */
+  place: (x: number, z: number, yaw: number) => void;
   /** Moving weather: starts a change to this weather now (for the checks). */
   weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
@@ -221,6 +234,7 @@ const EVENT_COLOURS: Record<EventKind, string> = {
   drift: '#37d4ff',
   camera: '#ffd166',
   jump: '#ff8a5b',
+  getaway: '#c77dff',
 };
 
 /** The free-roam starts, as fast-travel destinations. */
@@ -233,21 +247,6 @@ const SPAWN_NAMES: ReadonlyArray<[RoamStart, string]> = [
   ['circuit', 'Circuit'],
 ];
 
-/** Arcade: cones on the corners of the flat junctions (the cones lie on the ground plane). */
-function cityConePlacements(map: CityMap): ConePlacement[] {
-  const out: ConePlacement[] = [];
-  for (const j of map.junctions) {
-    if (j.control === 'none' || Math.abs(map.groundHeight(j.x, j.z)) > 0.05) continue;
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        out.push({ x: j.x + sx * 7.5, z: j.z + sz * 7.5 });
-      }
-    }
-    if (out.length >= 480) break;
-  }
-  return out;
-}
-
 declare global {
   interface Window {
     __apex?: DebugApi;
@@ -257,6 +256,8 @@ declare global {
 type Scenery = TestGroundScene | TrackScene | CityScene;
 
 const STATS_INTERVAL = 0.5;
+/** Elimination races: seconds between the last car going out. */
+const ELIMINATION_EVERY = 20;
 /** The first shift light comes on this far below the shift point. */
 const SHIFT_LIGHT_RANGE = 1900;
 /** Rival colours: every paint the player can pick, plus a few more. */
@@ -387,6 +388,8 @@ export class Game {
   private readonly input = new InputManager();
   private scenery: Scenery;
   private cones: Cones | null = null;
+  /** Arcade free roam: the street furniture the car sends flying. */
+  private props: Props | null = null;
   private readonly cars: CarView[] = [];
   private readonly states: CarRenderState[] = [];
   private readonly camera: ChaseCamera;
@@ -577,6 +580,10 @@ export class Game {
   /** Free roam: the pedestrians' figures, placed from the snapshot. */
   private pedestrianView: PedestrianView | null = null;
   private festivalRecords = loadFestivalRecords();
+  /** The festival's ladder: lifetime skill points and wins, banked as the drive scores them. */
+  private progress = loadProgress();
+  private bankedSkill = 0;
+  private progressDirty = false;
   private festivalMarkers: MinimapMarker[] = [];
   /** Whether the police have been told an event is on (speeding is sanctioned). */
   private sanctioned = false;
@@ -688,12 +695,17 @@ export class Game {
       pedestrianSample: null,
       clock: null,
       weather: null,
+      propsKnocked: 0,
+      nearestProp: (x, z) => this.props?.nearest(x, z) ?? null,
+      place: (x, z, yaw) => this.sim.command({ kind: 'place', car: 0, x, z, yaw }),
       weatherTo: (to, blend) => {
         if (isWeather(to)) this.sim.command({ kind: 'weather', to, blend });
       },
       errors: [],
     };
     window.__apex = this.debug;
+    // The festival board reads this from the main menu too.
+    this.menus.festival.value = this.festivalInfo();
     this.sim.onError = (message) => {
       this.debug.errors.push(message);
       this.toasts.show(`Simulation error: ${message}`, { timeout: 0 });
@@ -866,6 +878,10 @@ export class Game {
         (setup.mode === 'roam' ? setup.roamWeatherMotion : setup.weatherMotion) === 'moving',
       clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
+      elimination:
+        setup.mode === 'race' && !attract && setup.raceType === 'elimination'
+          ? ELIMINATION_EVERY
+          : undefined,
     };
   }
 
@@ -933,8 +949,17 @@ export class Game {
     this.debug.soft = null;
     // Arcade: skill points, with smashed cones counting too.
     this.skill = config.handling === 'arcade' && !idle && !attract ? new Skill() : null;
+    this.bankedSkill = 0;
+    this.skillHud.setLadder(ladderStanding(this.progress.skill));
     this.skillHud.reset();
     if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
+    if (this.props) {
+      this.props.onKnock = (kind) => {
+        const spec = PROP_SPECS[kind];
+        this.skill?.award('smash', spec.points, spec.label);
+        this.menuAudio.smash(spec.sound);
+      };
+    }
     // Free roam: the festival's events, with the bests kept in this browser.
     const events = roam ? festivalEvents(cityMap()) : [];
     this.festival =
@@ -946,6 +971,7 @@ export class Game {
               this.festivalRecords = saveFestivalRecord(id, value);
             },
             () => this.sim.command({ kind: 'endRace' }),
+            (heat) => this.sim.command({ kind: 'pursuit', heat }),
           )
         : null;
     this.roamRace = null;
@@ -962,7 +988,7 @@ export class Game {
         : null;
     this.sanctioned = false;
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
-    this.menus.festival.value = roam ? this.festivalInfo() : null;
+    this.menus.festival.value = this.festivalInfo();
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -1071,6 +1097,8 @@ export class Game {
     this.minimap?.dispose();
     this.minimap = null;
     this.cones = null;
+    this.props?.dispose();
+    this.props = null;
     this.festivalScene?.dispose();
     this.festivalScene = null;
     this.pedestrianView?.dispose();
@@ -1088,9 +1116,9 @@ export class Game {
       this.pedestrianView = new PedestrianView(config.pedestrians ?? 0);
       this.scenery.scene.add(this.pedestrianView.root);
       if (config.handling === 'arcade') {
-        // Festival cones on the junction corners, to send flying for points.
-        this.cones = new Cones(cityConePlacements(map), TEST_MULE.body);
-        this.scenery.scene.add(this.cones.mesh);
+        // Street furniture and cones to send flying for points.
+        this.props = new Props(cityPropPlacements(map), TEST_MULE.body);
+        this.scenery.scene.add(this.props.root);
       }
       this.minimap = new CityMinimap(this.ui, map, {
         minX: MAP_MIN_X,
@@ -1221,6 +1249,7 @@ export class Game {
   private quitToMenu(): void {
     this.seasonRound = -1;
     if (this.session?.mode === 'roam') this.keepRoamSpot();
+    this.menus.festival.value = this.festivalInfo();
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
@@ -1250,7 +1279,10 @@ export class Game {
     if (this.school) this.school.root.hidden = !driving;
     this.perf.setVisible(this.settings.overlay);
     const device = this.input.lastDevice;
-    this.touch.setVisible(driving && hasTouch() && (device === 'touch' || device === 'none'));
+    const touchShown = driving && hasTouch() && (device === 'touch' || device === 'none');
+    this.touch.setVisible(touchShown);
+    // The readout moves out from under the pedals (to the left corner) while they are shown.
+    this.hud.setBesideTouch(touchShown);
   }
 
   // ---------------------------------------------------------------- frame
@@ -1333,6 +1365,8 @@ export class Game {
         }
       }
       this.cones?.update(dt, player);
+      this.props?.update(dt, player);
+      this.debug.propsKnocked = this.props?.knocked ?? 0;
       const top = this.menus.top;
       const showroom = top === 'livery' || top === 'carSelect' || top === 'title';
       if (showroom !== this.showroom) {
@@ -1379,10 +1413,11 @@ export class Game {
         if (this.skill) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
+          this.bankSkill();
         }
         if (this.festival) {
           this.updateRoamRace(snapshot.roamRace ?? null);
-          this.festival.update(dt, player, snapshot.roamRace ?? null);
+          this.festival.update(dt, player, snapshot.roamRace ?? null, snapshot.police ?? null);
           this.eventHud.update(this.festival.view);
           for (const n of this.festival.notices.splice(0)) {
             if (n.results) {
@@ -1392,7 +1427,13 @@ export class Game {
             }
             if (n.position === 1) this.startWinner(n.event.name);
             if (n.position === 1 && this.skill) this.skill.award('race', 1000, 'WIN');
-            else if (n.medal && this.skill) this.skill.award('race', 500, 'RACE');
+            if (n.position === 1) {
+              this.progress.wins++;
+              this.progressDirty = true;
+            } else if (n.medal && this.skill) {
+              const getaway = n.event.kind === 'getaway';
+              this.skill.award('race', getaway ? 800 : 500, getaway ? 'GETAWAY' : 'RACE');
+            }
           }
           this.festivalScene?.setNextCheckpoint(this.festival.nextCheckpoint(), dt);
           // An event on, or close ahead, is sanctioned: the police let the speed go.
@@ -2470,8 +2511,9 @@ export class Game {
           car: this.carModels[car]?.name ?? '',
           player: car === 0,
           bestLap: c.bestLap,
-          time: c.finished ? c.finishTime : NaN,
-          gap: c.finished ? c.finishTime - leaderTime : NaN,
+          time: c.finished && !c.eliminated ? c.finishTime : NaN,
+          gap: c.finished && !c.eliminated ? c.finishTime - leaderTime : NaN,
+          out: c.eliminated,
         };
       }),
     };
@@ -2761,6 +2803,7 @@ export class Game {
         }
       },
       resume: () => this.resume(),
+      tap: (event) => this.input.tap(event),
       fastTravel: (id) => this.fastTravel(id),
       resetCar: () => {
         this.resume();
@@ -3011,6 +3054,9 @@ export class Game {
     frame.speed = Math.abs(state.speed);
     frame.slip = slip;
     frame.offRoad = contacts > 0 ? offRoad / contacts : 0;
+    const sky = this.skyNow();
+    frame.rain = sky.rain;
+    frame.wet = sky.wet;
     this.audio.update(dt, frame);
     this.audio.updateOthers(dt, this.nearestEngines(state));
   }
@@ -3022,7 +3068,7 @@ export class Game {
     const count = Math.min(this.sim.latest?.carCount ?? 0, this.states.length);
     for (let i = 0; i < count; i++) {
       const s = this.states[i]!;
-      if (s === focus) continue;
+      if (s === focus || (s.flags & FLAG_RETIRED) !== 0) continue;
       const d = Math.hypot(s.pos.x - focus.pos.x, s.pos.y - focus.pos.y, s.pos.z - focus.pos.z);
       if (d > OTHER_EARSHOT) continue;
       // Keep the nearest few, in order.
@@ -3068,6 +3114,7 @@ export class Game {
     const clock = this.dayClock();
     if (clock !== null) spot.hour = Math.round(clock * 1000) / 1000;
     saveRoamSpot(spot);
+    this.keepProgress();
     this.menus.roamSpot.value = spot;
   }
 
@@ -3105,11 +3152,52 @@ export class Game {
     return mix;
   }
 
+  /** The rain falling and the road's wetness now, 0 … 1: the moving weather's mix, or the conditions'. */
+  private skyNow(): { rain: number; wet: number } {
+    const chosen = this.session?.conditions?.weather ?? 'clear';
+    const mix = this.sim.latest?.weather;
+    if (!mix) return { rain: rainfall(chosen), wet: wetness(chosen) };
+    const t = Math.max(0, Math.min(mix.blend, 1));
+    return {
+      rain: rainfall(mix.from) + (rainfall(mix.to) - rainfall(mix.from)) * t,
+      wet: wetness(mix.from) + (wetness(mix.to) - wetness(mix.from)) * t,
+    };
+  }
+
   /** How dark it is now, 0 … 1: by the day's clock in free roam, else by the time of day. */
   private nightNow(): number {
     const clock = this.dayClock();
     if (clock !== null) return darknessAt(sunElevationAt(clock));
     return darkness(this.session?.conditions?.time ?? 'track');
+  }
+
+  /**
+   * Banks the drive's skill points on the festival's ladder as they are scored; a level
+   * climbed brings a word, a jingle and the HUD's new line, and is kept at once.
+   */
+  private bankSkill(): void {
+    const skill = this.skill;
+    if (!skill) return;
+    const gained = skill.score - this.bankedSkill;
+    if (gained <= 0) return;
+    this.bankedSkill = skill.score;
+    const before = ladderStanding(this.progress.skill);
+    this.progress.skill += gained;
+    this.progressDirty = true;
+    const after = ladderStanding(this.progress.skill);
+    this.skillHud.setLadder(after);
+    if (after.level > before.level) {
+      this.toasts.show(`Festival level ${after.level}: ${after.title}`, { timeout: 8 });
+      this.menuAudio.play('start');
+      this.keepProgress();
+    }
+  }
+
+  /** Writes the festival's tallies when they have changed (with the spot, and on a level). */
+  private keepProgress(): void {
+    if (!this.progressDirty) return;
+    this.progressDirty = false;
+    saveProgress(this.progress);
   }
 
   /** Free roam: the first-drive hints, spaced out over the first minute, once per browser. */
@@ -3152,7 +3240,15 @@ export class Game {
     const destinations: FestivalInfo['destinations'] = [];
     for (const [id, name] of SPAWN_NAMES) {
       const s = map.spawns[id];
-      destinations.push({ id: `spawn-${id}`, kind: 'spawn', name, best: null, x: s.x, z: s.z });
+      destinations.push({
+        id: `spawn-${id}`,
+        kind: 'spawn',
+        name,
+        best: null,
+        medal: null,
+        x: s.x,
+        z: s.z,
+      });
     }
     for (const e of festivalEvents(map)) {
       const best = this.festivalRecords[e.id];
@@ -3161,6 +3257,10 @@ export class Game {
         kind: e.kind,
         name: e.name,
         best: best === undefined ? null : Festival.format(e.kind, best),
+        medal:
+          best !== undefined && (e.kind === 'race' || e.kind === 'getaway')
+            ? medalFor(e, best)
+            : null,
         x: e.x,
         z: e.z,
       });
@@ -3168,6 +3268,8 @@ export class Game {
     return {
       destinations,
       totals: festivalTotals(festivalEvents(map), this.festivalRecords),
+      ladder: ladderStanding(this.progress.skill),
+      wins: this.progress.wins,
       roads: map.roads.map((r) => ({
         points: r.points,
         loop: r.loop,

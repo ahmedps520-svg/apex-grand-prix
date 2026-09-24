@@ -17,6 +17,7 @@ import {
   PART_HOOD,
   PART_WING,
   SOFT_NODES,
+  FLAG_RETIRED,
 } from '../shared/protocol';
 import type { Vec3 } from '../shared/math';
 import { SOFT_NZ, latticeAxes, nodeIndex } from '../sim/vehicle/softbody';
@@ -347,12 +348,20 @@ export class CarView {
     this.paint.setPrimary(hex);
   }
 
+  private retired = false;
+
   update(state: CarRenderState): void {
     this.root.position.set(state.pos.x, state.pos.y, state.pos.z);
     if (state.dentFront !== this.dents.front || state.dentRear !== this.dents.rear) {
       this.setDents(state.dentFront, state.dentRear);
     }
     const flags = state.flags;
+    // Out of the race: gone from the track (and back when the race restarts).
+    const retired = (flags & FLAG_RETIRED) !== 0;
+    if (retired !== this.retired) {
+      this.retired = retired;
+      this.root.visible = !retired;
+    }
     const blink = performance.now() % 800 < 400;
     const left = (flags & (FLAG_INDICATOR_LEFT | FLAG_HAZARDS)) !== 0 && blink;
     const right = (flags & (FLAG_INDICATOR_RIGHT | FLAG_HAZARDS)) !== 0 && blink;

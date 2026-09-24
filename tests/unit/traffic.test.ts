@@ -176,3 +176,36 @@ describe('traffic', () => {
     expect(Math.hypot(player.vel.x, player.vel.z)).toBeGreaterThan(0);
   });
 });
+
+describe('in the wet', () => {
+  it('keeps the traffic below the limits by the wetness of the road', () => {
+    const dry = World.forSession({
+      ...config(6),
+      conditions: { time: 'midday', weather: 'clear' },
+    });
+    const wet = World.forSession({
+      ...config(6),
+      conditions: { time: 'midday', weather: 'heavyRain' },
+    });
+    expect(dry.traffic!.wetPace).toBe(1);
+    expect(wet.traffic!.wet).toBe(1);
+    expect(wet.traffic!.wetPace).toBeCloseTo(0.82, 9);
+    run(dry, 10);
+    run(wet, 10);
+    const fastest = (world: World) =>
+      Math.max(...world.traffic!.vehicles.filter((v) => v.active && !v.police).map((v) => v.v));
+    expect(fastest(dry)).toBeGreaterThan(10);
+    expect(fastest(wet)).toBeLessThan(fastest(dry) * 0.9);
+    expect(fastest(wet)).toBeGreaterThan(fastest(dry) * 0.7);
+    // Moving weather wets the road as the rain comes in.
+    const moving = World.forSession({
+      ...config(6),
+      conditions: { time: 'midday', weather: 'clear' },
+      weatherMoves: true,
+    });
+    moving.weather!.changeTo('heavyRain', 0.5);
+    run(moving, 0.1);
+    expect(moving.traffic!.wet).toBeGreaterThan(0.4);
+    expect(moving.traffic!.wet).toBeLessThan(0.6);
+  });
+});
