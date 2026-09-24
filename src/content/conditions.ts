@@ -99,3 +99,8 @@ export function sanitizeConditions(value: unknown): Conditions {
     weather: isWeather(raw.weather) ? raw.weather : DEFAULT_CONDITIONS.weather,
   };
 }
+
+/** How dark a time of day is, 0 (day) … 1 (night): the lamps, windows and searchlights follow it. */
+export function darkness(time: Conditions['time']): number {
+  return time === 'night' ? 1 : time === 'dusk' ? 0.7 : time === 'golden' ? 0.25 : 0;
+}

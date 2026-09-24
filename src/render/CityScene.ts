@@ -34,7 +34,7 @@ import {
   districtAt,
 } from '../content/city/terrain';
 import { signalState } from '../content/city/lanes';
-import { DEFAULT_CONDITIONS, type Conditions } from '../content/conditions';
+import { DEFAULT_CONDITIONS, type Conditions, darkness } from '../content/conditions';
 import { mulberry32 } from '../shared/math';
 import type { TrackTheme } from '../sim/track/Track';
 import { Atmosphere } from './Atmosphere';
@@ -293,7 +293,7 @@ export class CityScene {
     this.sun.shadow.intensity = look.shadowIntensity;
     this.scene.environmentIntensity = look.environmentIntensity;
     const time = this.current.time;
-    this.night.value = time === 'night' ? 1 : time === 'dusk' ? 0.7 : time === 'golden' ? 0.25 : 0;
+    this.night.value = darkness(time);
     this.rain.set(look.rain, look.waterColor, 1.4, 0.6);
     const wet = look.wetness;
     this.mat.road.roughness = THREE.MathUtils.lerp(0.92, 0.35, wet);

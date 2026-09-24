@@ -894,6 +894,9 @@ export function RoamSetupScreen({ store }: ScreenProps) {
   const setup = store.setup.value;
   const spot = store.roamSpot.value;
   const spotCar = spot ? CARS.find((c) => c.id === spot.carId) : undefined;
+  const spotTime =
+    spot && spot.time !== 'track' ? TIMES_OF_DAY.find((t) => t.value === spot.time)?.text : '';
+  const spotLabel = [spotCar?.name, spotTime].filter((s) => s).join(', ');
   return (
     <div class="mn-panel">
       <Header title="Free Roam" subtitle="The open world: city, orbital, port, ridge and circuit" />
@@ -922,7 +925,7 @@ export function RoamSetupScreen({ store }: ScreenProps) {
         />
         {spot && (
           <Button
-            label={`Continue where you left off${spotCar ? ` · ${spotCar.name}, ${spot.time}` : ''}`}
+            label={`Continue where you left off${spotLabel ? ` · ${spotLabel}` : ''}`}
             onPress={() =>
               store.actions.startSession({ ...store.setup.value, mode: 'roam', resume: true })
             }

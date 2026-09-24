@@ -4,6 +4,7 @@ import {
   SUN_ELEVATION,
   TIMES_OF_DAY,
   WEATHERS,
+  darkness,
   gripFactor,
   isRaining,
   sanitizeConditions,
@@ -43,5 +44,15 @@ describe('conditions', () => {
     });
     expect(sanitizeConditions({ time: 'midnight', weather: 'snow' })).toEqual(DEFAULT_CONDITIONS);
     expect(sanitizeConditions(null)).toEqual(DEFAULT_CONDITIONS);
+  });
+});
+
+describe('darkness', () => {
+  it('runs from day to night', () => {
+    expect(darkness('track')).toBe(0);
+    expect(darkness('midday')).toBe(0);
+    expect(darkness('golden')).toBeGreaterThan(0);
+    expect(darkness('dusk')).toBeGreaterThan(darkness('golden'));
+    expect(darkness('night')).toBe(1);
   });
 });

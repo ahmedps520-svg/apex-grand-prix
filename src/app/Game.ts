@@ -5,6 +5,7 @@ import { bearingPan } from '../audio/synth';
 import { MenuAudio } from '../audio/MenuAudio';
 import { RaceEngineer, RadioVoice, type RadioInput } from '../audio/RaceRadio';
 import {
+  darkness,
   gripFactor,
   isTimeOfDay,
   isWeather,
@@ -71,7 +72,7 @@ import {
   type RoamStart,
   type SpawnPoint,
 } from '../shared/protocol';
-import { mulberry32 } from '../shared/math';
+import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 import { computeRacingLine, type RacingLine } from '../sim/race/racingLine';
 import { lineOptionsFor } from '../sim/world';
@@ -540,6 +541,9 @@ export class Game {
   private roamRace: RoamRaceStatus | null = null;
   /** Free roam: the camera's sweep over a race's grid before the count. */
   private gridIntro: { time: number } | null = null;
+  /** The throttle has been released since the car was placed, so a press can skip the sweep. */
+  private introSkipArmed = false;
+  private readonly tmpForward = vec3();
   /** Free roam: the winner's moment after a race (the camera circles, confetti falls). */
   private winner: { time: number; overlay: HTMLElement } | null = null;
   private readonly strips = new SpikeStrips();
@@ -772,8 +776,9 @@ export class Game {
   }
 
   private configFor(given: SessionSetup, attract = false): SessionConfig {
-    // Free roam, continuing: the car, the day and the weather the drive was left with.
-    const spot = given.mode === 'roam' && given.resume ? loadRoamSpot() : null;
+    // Free roam, continuing: the car, the day and the weather the drive was left with (the
+    // spot in hand, which outlives blocked storage).
+    const spot = given.mode === 'roam' && given.resume ? this.menus.roamSpot.value : null;
     const setup: SessionSetup = spot
       ? {
           ...given,
@@ -887,6 +892,8 @@ export class Game {
     this.hud.setHeat(null);
     this.strips.clear();
     this.menuAudio.siren(0);
+    this.helicopter.reset();
+    this.menuAudio.rotor(0);
     this.cars[0]?.repairView();
     this.debug.soft = null;
     // Arcade: skill points, with smashed cones counting too.
@@ -1418,11 +1425,13 @@ export class Game {
       this.raceCard.hide();
       this.menuAudio.play('move');
     } else if (phase === 'countdown' && status && previous) {
-      // A press during the sweep skips it: straight to the count.
+      // A fresh press during the sweep skips it (a pedal still held from the line doesn't).
+      const throttle = this.input.driver.throttle;
+      if (throttle < 0.2) this.introSkipArmed = true;
       if (
         status.intro &&
         status.placed &&
-        (this.input.driver.throttle > 0.5 ||
+        ((this.introSkipArmed && throttle > 0.5) ||
           this.input.ui.some(({ event }) => event === 'confirm' || event === 'back'))
       ) {
         this.sim.command({ kind: 'skipIntro' });
@@ -1430,6 +1439,7 @@ export class Game {
       if (status.placed && !previous.placed) {
         this.camera.reset();
         this.fade.classList.remove('on');
+        this.introSkipArmed = throttle < 0.5;
         // The sweep over the grid, until the sim starts the count.
         if (status.intro) this.gridIntro = { time: 0 };
       }
@@ -1465,12 +1475,10 @@ export class Game {
     intro.time += dt;
     const t = Math.min(intro.time / GRID_INTRO_TIME, 1);
     const u = 1 - (1 - t) * (1 - t);
-    const q = player.rot;
-    let fx = -2 * (q.x * q.z + q.w * q.y);
-    let fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
-    const len = Math.hypot(fx, fz) || 1;
-    fx /= len;
-    fz /= len;
+    const fwd = forwardOf(this.tmpForward, player.rot);
+    const len = Math.hypot(fwd.x, fwd.z) || 1;
+    const fx = fwd.x / len;
+    const fz = fwd.z / len;
     const rx = -fz;
     const rz = fx;
     const p = player.pos;
@@ -1589,8 +1597,7 @@ export class Game {
     // The helicopter: over the car from four stars, its searchlight on after dark.
     if (this.helicopter.root.parent !== scene) scene.add(this.helicopter.root);
     const me = this.states[0]!;
-    const time = this.session?.conditions?.time;
-    const night = time === 'night' ? 1 : time === 'dusk' ? 0.7 : 0;
+    const night = darkness(this.session?.conditions?.time ?? 'track');
     const overhead = status?.helicopter === true && status.state === 'pursuit';
     this.helicopter.update(dt, me.pos.x, me.pos.y, me.pos.z, overhead, night);
     this.menuAudio.rotor(controls && overhead ? 0.7 : 0);
@@ -2984,9 +2991,9 @@ export class Game {
       if (picks.length > OTHER_VOICES) picks.length = OTHER_VOICES;
     }
     // Which side each one is on, in the listener's frame (the focused car's heading).
-    const q = focus.rot;
-    const fx = -2 * (q.x * q.z + q.w * q.y);
-    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const fwd = forwardOf(this.tmpForward, focus.rot);
+    const fx = fwd.x;
+    const fz = fwd.z;
     for (let k = 0; k < picks.length; k++) {
       const pick = picks[k]!;
       const s = this.states[pick.i]!;
@@ -3006,14 +3013,11 @@ export class Game {
     const session = this.session;
     const state = this.states[0];
     if (!session || session.mode !== 'roam' || !state || !this.driving) return;
-    const q = state.rot;
-    const fx = -2 * (q.x * q.z + q.w * q.y);
-    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
     const spot: RoamSpot = {
       x: Math.round(state.pos.x * 100) / 100,
       z: Math.round(state.pos.z * 100) / 100,
       y: Math.round(state.pos.y * 100) / 100,
-      yaw: Math.atan2(-fx, -fz),
+      yaw: yawOf(state.rot),
       carId: session.carId,
       time: session.conditions?.time ?? 'midday',
       weather: session.conditions?.weather ?? 'clear',

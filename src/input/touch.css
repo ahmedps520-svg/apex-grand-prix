@@ -107,7 +107,10 @@
   position: absolute;
   top: calc(12px + var(--safe-top));
   left: calc(18px + var(--safe-left));
+  /* Never under the pause button: wraps onto a second line on a phone. */
+  max-width: calc(50% - 64px - var(--safe-left));
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -162,7 +165,8 @@
 /* The quick menu's buttons, under the camera and the reset. */
 .tc-mfd {
   position: absolute;
-  top: calc(64px + var(--safe-top));
+  /* Below the quick menu's own panel and the wanted widget, which sit at the top centre. */
+  top: calc(118px + var(--safe-top));
   left: calc(50% + 40px);
   display: flex;
   gap: 8px;

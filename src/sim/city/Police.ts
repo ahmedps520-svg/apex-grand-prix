@@ -191,12 +191,6 @@ export class Police {
   }
 
   /** Straight line from a police car to the player with no building in the way. */
-  /** Whether the helicopter can see the player: anywhere but under the orbital's deck. */
-  helicopterSees(player: Car): boolean {
-    const deck = this.map.deckAt(player.pos.x, player.pos.z, 1);
-    return !(deck && player.pos.y < deck.height - 2);
-  }
-
   private lineOfSight(ax: number, az: number, bx: number, bz: number): boolean {
     for (let i = 1; i <= 6; i++) {
       const t = i / 7;
@@ -208,6 +202,12 @@ export class Police {
       }
     }
     return true;
+  }
+
+  /** Whether the helicopter can see the player: anywhere but under the orbital's deck. */
+  helicopterSees(player: Car): boolean {
+    const deck = this.map.deckAt(player.pos.x, player.pos.z, 1);
+    return !(deck && player.pos.y < deck.height - 2);
   }
 
   // ---------------------------------------------------------------- driving
