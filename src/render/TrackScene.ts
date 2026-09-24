@@ -1,4 +1,12 @@
 import type { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import {
+  PIT_BLEND,
+  PIT_ENTRY,
+  PIT_LANE_HALF_WIDTH,
+  PIT_LENGTH,
+  PIT_OFFSET,
+  laneShare,
+} from '../shared/pitLane';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as THREE from 'three/webgpu';
 import {
@@ -196,6 +204,7 @@ export class TrackScene {
     this.disposables.push(turf);
     this.buildGround(turf);
     this.buildSurfaces(meshes, turf);
+    this.buildPitLane();
     this.buildBarriers(meshes);
     [this.lamps, this.glows] = this.buildGantry();
     this.obstacles = this.buildGrandstands();
@@ -589,6 +598,59 @@ export class TrackScene {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
     this.scene.add(mesh);
+  }
+
+  /** The pit lane beside the start straight: a strip off the left of the track, and its wall. */
+  private buildPitLane(): void {
+    const track = this.track;
+    const lateral = -(track.halfWidth + PIT_OFFSET);
+    const positions: number[] = [];
+    const indices: number[] = [];
+    let n = 0;
+    for (let d = 0; d <= PIT_LENGTH; d += 4) {
+      const p = track.at(track.length - PIT_ENTRY + d);
+      const lat = lateral * laneShare(d);
+      for (const side of [-PIT_LANE_HALF_WIDTH, PIT_LANE_HALF_WIDTH]) {
+        const off = lat + side;
+        positions.push(p.x - p.tz * off, 0.02, p.z + p.tx * off);
+      }
+      if (n > 0) {
+        const b = n * 2;
+        indices.push(b - 2, b - 1, b, b - 1, b + 1, b);
+      }
+      n++;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    this.addFlat(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: 0x3b3e45,
+        roughness: 0.95,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        ...layer(2),
+      }),
+    );
+    // The wall along the lane's outer side, where the lane runs straight.
+    const a = track.at(track.length - PIT_ENTRY + PIT_BLEND);
+    const b = track.at(track.length - PIT_ENTRY + PIT_LENGTH - PIT_BLEND);
+    const off = lateral - PIT_LANE_HALF_WIDTH - 0.6;
+    const ax = a.x - a.tz * off;
+    const az = a.z + a.tx * off;
+    const bx = b.x - b.tz * off;
+    const bz = b.z + b.tx * off;
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(0.4, 1, Math.hypot(bx - ax, bz - az)),
+      new THREE.MeshStandardMaterial({ color: 0xdedede, roughness: 0.8, metalness: 0 }),
+    );
+    wall.position.set((ax + bx) / 2, 0.5, (az + bz) / 2);
+    wall.rotation.y = Math.atan2(bx - ax, bz - az);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    this.scene.add(wall);
   }
 
   private buildBarriers(meshes: TrackMeshBuilder): void {

@@ -35,7 +35,8 @@ export type KeyAction =
   | 'indicatorLeft'
   | 'indicatorRight'
   | 'hazards'
-  | 'horn';
+  | 'horn'
+  | 'pit';
 
 export interface Bindings {
   /** Standard-mapping button index for each controller action. */
@@ -112,6 +113,7 @@ export const defaultBindings = (): Bindings => ({
     indicatorRight: ['Period'],
     hazards: ['KeyX'],
     horn: ['KeyN'],
+    pit: ['KeyT'],
   },
 });
 

@@ -1,4 +1,5 @@
-import type { RaceStatus } from '../sim/race/RaceDirector';
+import type { CarRaceState, RaceStatus } from '../sim/race/RaceDirector';
+import type { PitInfo } from '../shared/pitLane';
 import { el, setText } from './dom';
 import './raceHud.css';
 
@@ -34,6 +35,15 @@ export class RaceHud {
   private readonly banner = el('div', 'rh-banner');
   /** Elimination race: the clock to the next car out, red when it would be the player. */
   private readonly elimination = el('div', 'rh-elimination');
+  private readonly pit = el('div', 'rh-pit');
+  private pitShown = '';
+  /** Race rules: the flag shown, and a short notice for a warning or a penalty. */
+  private readonly flag = el('div', 'rh-flag');
+  private flagShown = '';
+  private readonly notice = el('div', 'rh-notice');
+  private noticeTimer = 0;
+  private warningsShown = 0;
+  private penaltyShown = 0;
   private eliminationShown = '';
   private readonly wrongWay = el('div', 'rh-wrong', 'WRONG WAY');
   private shownSector = -1;
@@ -46,8 +56,11 @@ export class RaceHud {
     const left = el('div', 'rh-left');
     const pos = el('div', 'rh-pos-block');
     pos.append(this.position, this.positionTotal);
-    left.append(pos, this.lap, this.elimination);
+    left.append(pos, this.lap, this.elimination, this.pit, this.flag, this.notice);
     this.elimination.hidden = true;
+    this.pit.hidden = true;
+    this.flag.hidden = true;
+    this.notice.hidden = true;
     const times = el('div', 'rh-times');
     times.append(this.current, this.last, this.best, this.record, this.split);
     for (let i = 0; i < 5; i++) {
@@ -58,6 +71,62 @@ export class RaceHud {
     this.root.append(left, times, this.lights, this.banner, this.wrongWay);
     this.root.hidden = true;
     parent.appendChild(this.root);
+  }
+
+  /** Race rules: the flag shown, and a notice when a warning or a penalty lands. */
+  private updateRules(race: RaceStatus, me: CarRaceState, dt: number): void {
+    const flag =
+      me.flag === 'blue'
+        ? 'BLUE FLAG'
+        : me.flag === 'yellow'
+          ? `YELLOW FLAG · SECTOR ${race.yellow + 1}`
+          : '';
+    if (flag !== this.flagShown) {
+      this.flagShown = flag;
+      this.flag.hidden = flag === '';
+      setText(this.flag, flag);
+      this.flag.className = `rh-flag ${me.flag}`;
+    }
+    if (me.penalty > this.penaltyShown) {
+      this.penaltyShown = me.penalty;
+      this.warningsShown = me.warnings;
+      setText(this.notice, `+${me.penalty} s PENALTY · TRACK LIMITS`);
+      this.notice.hidden = false;
+      this.noticeTimer = 4;
+    } else if (me.warnings > this.warningsShown) {
+      this.warningsShown = me.warnings;
+      setText(this.notice, `TRACK LIMITS · WARNING ${me.warnings}`);
+      this.notice.hidden = false;
+      this.noticeTimer = 3;
+    } else if (me.warnings < this.warningsShown || me.penalty < this.penaltyShown) {
+      // A restart.
+      this.warningsShown = me.warnings;
+      this.penaltyShown = me.penalty;
+    }
+    if (this.noticeTimer > 0) {
+      this.noticeTimer -= dt;
+      if (this.noticeTimer <= 0) this.notice.hidden = true;
+    }
+  }
+
+  /** Pit stops: the call to box, the lane, the stop's clock, the exit. */
+  updatePit(info: PitInfo | null): void {
+    const phase = info?.phase ?? 'none';
+    const text =
+      phase === 'armed'
+        ? 'BOX THIS LAP'
+        : phase === 'in'
+          ? 'PIT LANE'
+          : phase === 'stop'
+            ? `PIT STOP · ${(info?.timer ?? 0).toFixed(1)}`
+            : phase === 'out'
+              ? 'PIT EXIT'
+              : '';
+    if (text === this.pitShown) return;
+    this.pitShown = text;
+    this.pit.hidden = text === '';
+    setText(this.pit, text);
+    this.pit.classList.toggle('stop', phase === 'stop');
   }
 
   /** Elimination race: OUT IN n, and LAST when the player is the one on the way out. */
@@ -115,6 +184,7 @@ export class RaceHud {
         : `LAP ${Math.max(me.lap + 1, 1)}`;
     setText(this.lap, me.finished ? 'FINISHED' : lapText);
     this.updateElimination(race, player);
+    this.updateRules(race, me, dt);
     setText(this.current, lapTime(me.currentLap));
     setText(this.last, `Last ${lapTime(me.lastLap)}`);
     setText(this.best, `Best ${lapTime(me.bestLap)}`);
@@ -169,6 +239,14 @@ export class RaceHud {
   }
 
   reset(): void {
+    this.pitShown = '';
+    this.pit.hidden = true;
+    this.flagShown = '';
+    this.flag.hidden = true;
+    this.notice.hidden = true;
+    this.noticeTimer = 0;
+    this.warningsShown = 0;
+    this.penaltyShown = 0;
     this.shownSector = -1;
     this.splitTimer = 0;
     this.bannerTimer = 0;

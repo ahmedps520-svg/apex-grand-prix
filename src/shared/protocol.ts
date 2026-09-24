@@ -1,4 +1,5 @@
 import type { Conditions, Weather } from '../content/conditions';
+import type { PitInfo } from './pitLane';
 import type { RaceStatus } from '../sim/race/RaceDirector';
 
 /**
@@ -141,6 +142,10 @@ export interface SessionConfig {
   daily?: string;
   /** Tyre wear rate: unset or 0 none, 1 a few per cent a lap, 2.5 fast (races only). */
   tyreWear?: number;
+  /** Pit stops: the lane is open for new tyres and repairs (races with tyre wear). */
+  pitStops?: boolean;
+  /** Race rules: track limits enforced (warnings, penalties) and flags shown. */
+  rules?: boolean;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -168,6 +173,8 @@ export interface SessionConfig {
   handling?: HandlingMode;
 }
 
+export type { PitInfo, PitPhase } from './pitLane';
+
 export type SimCommand =
   | { kind: 'resetCar'; car: number }
   | { kind: 'teleport'; car: number; to: SpawnPoint }
@@ -188,7 +195,9 @@ export type SimCommand =
   /** Free roam: a getaway starts, the police on the player at this many stars. */
   | { kind: 'pursuit'; heat: number }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
-  | { kind: 'holdStart'; hold: boolean };
+  | { kind: 'holdStart'; hold: boolean }
+  /** Pit stops: box this lap (or not), for a car not yet in the lane. */
+  | { kind: 'pit'; car: number; on: boolean };
 
 export type MainToWorker =
   | { type: 'init'; session: SessionConfig }
@@ -222,6 +231,8 @@ export interface SnapshotMessage {
   clock?: number | null;
   /** Moving weather: what the sky is changing from and to, and how far along (null when fixed). */
   weather?: WeatherMix | null;
+  /** Pit stops: the player's (null when the lane is closed). */
+  pit?: PitInfo | null;
 }
 
 /** A change of weather under way: `blend` runs 0 … 1 from one to the other. */

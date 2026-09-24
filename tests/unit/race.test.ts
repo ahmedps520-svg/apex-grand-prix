@@ -317,6 +317,85 @@ describe('tyre wear', () => {
   });
 });
 
+describe('race rules', () => {
+  const dt = 0.05;
+  /** Cars moved along the track by hand at `adv` metres a step (their speed to match). */
+  const mover = (cars: Car[], director: RaceDirector) => {
+    const s = cars.map(() => track.length - 50);
+    return (adv: number[]) => {
+      cars.forEach((car, i) => {
+        const at = (s[i] ?? 0) + adv[i]!;
+        s[i] = at;
+        const p = track.at(((at % track.length) + track.length) % track.length);
+        car.teleport({ x: p.x, z: p.z, yaw: Math.atan2(-p.tx, -p.tz) });
+        const v = adv[i]! / dt;
+        car.vel.x = p.tx * v;
+        car.vel.z = p.tz * v;
+      });
+      director.update(dt, cars);
+    };
+  };
+  const onto = (car: Car, surface: number) => {
+    for (const w of car.wheels) w.surface = surface as typeof w.surface;
+  };
+  const setUp = () => {
+    const cars = [0, 1].map((i) => new Car(TEST_MULE, track.gridSlot(i), track));
+    const director = new RaceDirector(track, 2, 'race', 2, 5, 0, false, true);
+    director.restart(cars, 0);
+    const status = director.status;
+    for (let i = 0; i < 400 && !status.go; i++) director.update(dt, cars);
+    expect(status.go).toBe(true);
+    return { cars, director, status, step: mover(cars, director) };
+  };
+
+  it('warns for a cut, penalises every third, and adds the penalty at the flag', () => {
+    const { cars, status, step } = setUp();
+    expect(status.rules).toBe(true);
+    const me = status.cars[0]!;
+    for (let k = 0; k < 3; k++) {
+      for (let i = 0; i < 10; i++) step([25, 20]);
+      // A quick 25 m over the grass and back.
+      onto(cars[0]!, SURFACE.GRASS);
+      step([25, 20]);
+      onto(cars[0]!, SURFACE.ASPHALT);
+      step([25, 20]);
+      expect(me.warnings).toBe(k + 1);
+    }
+    expect(me.penalty).toBe(3);
+    // A slow crawl across the grass is a crash, not a cut.
+    onto(cars[0]!, SURFACE.GRASS);
+    for (let i = 0; i < 40; i++) step([0.4, 20]);
+    onto(cars[0]!, SURFACE.ASPHALT);
+    step([25, 20]);
+    expect(me.warnings).toBe(3);
+    // Car 0 takes the flag first but its penalty puts it behind car 1.
+    for (let i = 0; i < 600 && !(me.finished && status.cars[1]!.finished); i++) step([25, 20]);
+    expect(me.finished).toBe(true);
+    expect(status.cars[1]!.finished).toBe(true);
+    expect(me.finishTime - status.cars[1]!.finishTime).toBeGreaterThan(0);
+    expect(status.order).toEqual([1, 0]);
+  });
+
+  it("puts a stopped car's sector under a yellow, and shows a blue to a car about to be lapped", () => {
+    const { status, step } = setUp();
+    for (let i = 0; i < 6; i++) step([25, 25]);
+    // Car 1 stops on the track; car 0 creeps along in the same sector.
+    for (let i = 0; i < 50; i++) step([2, 0]);
+    expect(status.yellow).toBe(status.cars[1]!.sector);
+    expect(status.cars[0]!.flag).toBe('yellow');
+    expect(status.cars[1]!.flag).toBe('none');
+    for (let i = 0; i < 5; i++) step([20, 20]);
+    expect(status.yellow).toBe(-1);
+    expect(status.cars[0]!.flag).toBe('none');
+    // Car 0 a lap up and 20 m behind car 1: the blue flag for car 1.
+    status.cars[0]!.lap = 1;
+    step([-120, 0]);
+    step([1, 1]);
+    expect(status.cars[1]!.flag).toBe('blue');
+    expect(status.cars[0]!.flag).toBe('none');
+  });
+});
+
 describe('car contacts', () => {
   it('pushes overlapping cars apart without invalid numbers', () => {
     const p = track.at(100);

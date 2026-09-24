@@ -32,10 +32,10 @@ const local = vec3();
 export function resolveCarContacts(cars: readonly Car[], dt = SIM_DT): void {
   for (let i = 0; i < cars.length; i++) {
     const a = cars[i]!;
-    if (a.retired) continue;
+    if (a.retired || a.onRails) continue;
     for (let j = i + 1; j < cars.length; j++) {
       const b = cars[j]!;
-      if (b.retired) continue;
+      if (b.retired || b.onRails) continue;
       const dx = b.pos.x - a.pos.x;
       const dz = b.pos.z - a.pos.z;
       if (dx * dx + dz * dz > BROAD_PHASE * BROAD_PHASE) continue;

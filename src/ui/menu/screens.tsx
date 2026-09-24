@@ -539,6 +539,12 @@ export function ChampionshipScreen({ store }: ScreenProps) {
           onChange={(tyreWear) => store.update({ tyreWear })}
         />
         <Choice
+          label="Race rules"
+          value={setup.rules !== false}
+          options={RULES}
+          onChange={(rules) => store.update({ rules })}
+        />
+        <Choice
           label="Difficulty"
           value={setup.difficulty}
           options={DIFFICULTY}
@@ -821,6 +827,12 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(tyreWear) => store.update({ tyreWear })}
             />
             <Choice
+              label="Race rules"
+              value={setup.rules !== false}
+              options={RULES}
+              onChange={(rules) => store.update({ rules })}
+            />
+            <Choice
               label="Qualifying"
               value={setup.qualifying ?? 0}
               options={QUALIFYING}
@@ -930,6 +942,12 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
 const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
   { value: 'standard', text: 'Standard' },
   { value: 'colourSafe', text: 'Colour-safe: blue and orange' },
+];
+
+/** Race rules: track limits (warnings, then penalties) and flags. */
+const RULES: ReadonlyArray<{ value: boolean; text: string }> = [
+  { value: true, text: 'Track limits and flags' },
+  { value: false, text: 'Off' },
 ];
 
 /** Whether the tyres wear over a race, and how fast. */
@@ -1351,6 +1369,7 @@ export function ResultsScreen({ store }: ScreenProps) {
                           ? 'Pole'
                           : formatTime(r.time)
                         : `+${r.gap.toFixed(3)}`}
+                  {r.penalty ? <span class="mn-dim"> · {r.penalty} s pen.</span> : null}
                 </td>
               </tr>
             ))}

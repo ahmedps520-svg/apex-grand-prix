@@ -300,6 +300,8 @@ export class Car {
   ersBoost = false;
   /** Out of the race and off the track (an elimination): the world leaves it be, unseen. */
   retired = false;
+  /** In the pit lane: driven on rails by the pits, physics and contacts aside. */
+  onRails = false;
   /** Lights (free roam): headlights, indicator (-1 left, 0, 1 right), hazards, and the horn. */
   headlights = false;
   indicator = 0;
@@ -490,6 +492,25 @@ export class Car {
     mulQ(this.rot, tilt, yaw);
     setV(this.pos, spawn.x, groundY, spawn.z);
     addScaledV(this.pos, this.pos, normal, this.spec.cogHeight);
+  }
+
+  /** On rails (the pit lane): put at `x, z` facing `yaw`, rolling at `speed`, physics aside. */
+  rideRails(x: number, z: number, yaw: number, speed: number, dt: number): void {
+    this.place({ x, z, yaw });
+    setV(this.vel, -Math.sin(yaw) * speed, 0, -Math.cos(yaw) * speed);
+    setV(this.angVel, 0, 0, 0);
+    for (const w of this.wheels) {
+      w.omega = speed / w.axle.wheelRadius;
+      w.spin = wrapAngle(w.spin + w.omega * dt);
+      w.steer = 0;
+      w.contact = true;
+      w.load = w.staticLoad;
+      w.slip = 0;
+      w.slipRatio = 0;
+      w.slipAngle = 0;
+      w.length = w.axle.staticLength;
+    }
+    this.steer = 0;
   }
 
   storePrevious(): void {

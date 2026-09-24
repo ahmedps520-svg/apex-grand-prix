@@ -5,6 +5,8 @@
  */
 
 import type { GameMode } from '../shared/protocol';
+import type { PitPhase } from '../shared/pitLane';
+import type { RaceFlag } from '../sim/race/RaceDirector';
 
 /** What the engineer knows about the player's race, every frame. */
 export interface RadioInput {
@@ -13,6 +15,13 @@ export interface RadioInput {
   qualifying?: boolean;
   /** Tread gone across the tyres, 0 new … 1 worn out (races with tyre wear). */
   tyreWear?: number;
+  /** Pit stops: where the player's is. */
+  pit?: PitPhase;
+  /** Race rules: the player's warnings and penalty seconds, the flag shown, the yellow's sector. */
+  warnings?: number;
+  penalty?: number;
+  flag?: RaceFlag;
+  yellow?: number;
   phase: 'grid' | 'countdown' | 'racing' | 'finished';
   /** Laps completed by the player. */
   lapsDone: number;
@@ -78,6 +87,10 @@ export class RaceEngineer {
   private steerSaid = false;
   private tyresHalfSaid = false;
   private tyresGoneSaid = false;
+  private pitPhase: PitPhase = 'none';
+  private warnings = 0;
+  private penalty = 0;
+  private flag: RaceFlag = 'none';
 
   reset(): void {
     this.lastPhase = null;
@@ -95,6 +108,10 @@ export class RaceEngineer {
     this.steerSaid = false;
     this.tyresHalfSaid = false;
     this.tyresGoneSaid = false;
+    this.pitPhase = 'none';
+    this.warnings = 0;
+    this.penalty = 0;
+    this.flag = 'none';
   }
 
   update(dt: number, r: RadioInput): RadioMessage[] {
@@ -203,6 +220,41 @@ export class RaceEngineer {
       } else if (!this.tyresHalfSaid && (r.tyreWear ?? 0) > 0.5) {
         this.tyresHalfSaid = true;
         out.push({ text: 'Tyres are half worn. Smooth inputs from here.', priority: 1 });
+      }
+    }
+
+    // Race rules: track limits, and the flags.
+    if ((r.penalty ?? 0) > this.penalty) {
+      this.penalty = r.penalty ?? 0;
+      this.warnings = r.warnings ?? 0;
+      out.push({
+        text: `${this.penalty}-second penalty for track limits. Keep it clean.`,
+        priority: 2,
+      });
+    } else if ((r.warnings ?? 0) > this.warnings) {
+      this.warnings = r.warnings ?? 0;
+      out.push({
+        text: `Track limits, that's warning ${this.warnings}. Keep it on the black stuff.`,
+        priority: 1,
+      });
+    }
+    const flag = r.flag ?? 'none';
+    if (flag !== this.flag) {
+      this.flag = flag;
+      if (flag === 'blue') out.push({ text: 'Blue flag. Let them through.', priority: 2 });
+      else if (flag === 'yellow') {
+        out.push({ text: `Yellow flag in sector ${(r.yellow ?? 0) + 1}. Ease off.`, priority: 2 });
+      }
+    }
+
+    // The pit stop: the call, and the send-off.
+    const pit = r.pit ?? 'none';
+    if (pit !== this.pitPhase) {
+      const was = this.pitPhase;
+      this.pitPhase = pit;
+      if (pit === 'armed') out.push({ text: 'Box this lap. Box, box.', priority: 2 });
+      else if (pit === 'out' && was === 'stop') {
+        out.push({ text: 'Pit stop done, new tyres on. Go, go, go.', priority: 2 });
       }
     }
 

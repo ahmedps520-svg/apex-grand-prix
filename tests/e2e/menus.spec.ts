@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 
 /** From the title screen to a running race with only the keyboard, then pause and resume. */
 test('starts a quick race from the menus and pauses it', async ({ page }) => {
+  // The menus render their 3D backdrop at a frame or two a second in software GL: the walk to
+  // a race takes a while on CI.
+  test.setTimeout(180_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
@@ -30,6 +33,10 @@ test('starts a quick race from the menus and pauses it', async ({ page }) => {
 
   await page.keyboard.press('Escape');
   await expect.poll(screen).toBe('pause');
+  // An Enter that lands while the screen is still coming in can be lost: the focus is checked first.
+  const focused = () =>
+    page.evaluate(() => document.querySelector('.nav-focus')?.textContent?.trim() ?? '');
+  await expect.poll(focused).toMatch(/Resume/);
   await page.keyboard.press('Enter'); // Resume
   await expect.poll(screen).toBe('');
   expect(errors).toEqual([]);
