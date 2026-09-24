@@ -114,10 +114,16 @@ describe('pedestrians', () => {
     run(world, 1);
     const ped = peds.list.find((p) => p.active && p.state === PED_WALKING)!;
     expect(ped).toBeDefined();
-    // The car 20 m from the pedestrian, aimed straight at it, at 54 km/h.
-    const yaw = Math.random() * Math.PI * 2;
-    const fx = -Math.sin(yaw);
-    const fz = -Math.cos(yaw);
+    // The car 20 m from the pedestrian along its road (so nothing stands in the way), aimed
+    // straight at it, at 54 km/h.
+    const road = world.traffic!.map.project(ped.x, ped.z, {
+      maxDist: 30,
+      kinds: ['street', 'avenue'],
+    })!;
+    expect(road).not.toBeNull();
+    const fx = road.piece.tx;
+    const fz = road.piece.tz;
+    const yaw = Math.atan2(-fx, -fz);
     player.teleport({ x: ped.x - fx * 20, z: ped.z - fz * 20, yaw, y: ped.y + 0.5 });
     let leapt = false;
     run(world, 0.8, () => {
