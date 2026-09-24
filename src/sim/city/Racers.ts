@@ -139,6 +139,12 @@ export class Racers {
     this.standDown();
   }
 
+  /** The sweep over the grid is skipped: the count starts now (once the car is on its slot). */
+  skipIntro(): void {
+    if (this.phase !== 'countdown' || !this.placed) return;
+    this.countdown = Math.min(this.countdown, COUNTDOWN);
+  }
+
   step(dt: number, player: Car): void {
     this.timer += dt;
     if (this.phase === 'countdown') {

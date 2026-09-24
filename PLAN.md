@@ -964,3 +964,9 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **MAP on touch:** the roam row gains MAP, which pauses into the festival map (a `festivalMap` action).
 - **Tests:** the spot round-trips through storage, repairs bad data and is nothing without storage; a world built with `roamSpawn` puts the car exactly there.
 - **Honest limits:** the spot doesn't keep the heat, the damage, a race under way or the festival event in progress; there is one spot, not a list of saves.
+
+### Push 23: The quick menu on touch, and a skippable sweep (v0.23.0)
+- **MENU ▲ ▼ on touch:** a second row under CAM and RESET raises the quick menu's `menuNext`, `menuUp` and `menuDown` actions, so TC, ABS, the gearbox, the curves, the steering and the volume can be changed on a touch screen as on a pad's D-pad.
+- **Skipping the sweep:** during the sweep over a street race's grid a throttle press or a confirm sends `skipIntro`; the sim brings the count forward to 3 s at once (`Racers.skipIntro`, only once the car is on its slot) and the camera drops behind the car.
+- **Tests:** the sweep skipped goes straight to the count and on to racing.
+- **Honest limits:** the quick menu's touch buttons are small on a phone; the count itself still can't be skipped.

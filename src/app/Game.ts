@@ -1418,6 +1418,15 @@ export class Game {
       this.raceCard.hide();
       this.menuAudio.play('move');
     } else if (phase === 'countdown' && status && previous) {
+      // A press during the sweep skips it: straight to the count.
+      if (
+        status.intro &&
+        status.placed &&
+        (this.input.driver.throttle > 0.5 ||
+          this.input.ui.some(({ event }) => event === 'confirm' || event === 'back'))
+      ) {
+        this.sim.command({ kind: 'skipIntro' });
+      }
       if (status.placed && !previous.placed) {
         this.camera.reset();
         this.fade.classList.remove('on');

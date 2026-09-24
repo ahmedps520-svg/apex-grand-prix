@@ -163,6 +163,8 @@ export type SimCommand =
   | { kind: 'sanction'; on: boolean }
   /** Free roam: the race under way is off (abandoned or reset): the rivals stand down. */
   | { kind: 'endRace' }
+  /** Free roam: skip the sweep over the grid, straight to the count. */
+  | { kind: 'skipIntro' }
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean };
 
