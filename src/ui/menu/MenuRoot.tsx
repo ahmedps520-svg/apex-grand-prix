@@ -1,4 +1,5 @@
 import type { FunctionComponent } from 'preact';
+import { hasTouch } from '../../input/TouchControls';
 import './menu.css';
 import { LiveryScreen } from './LiveryScreen';
 import { PROMPT_SETS, type PromptAction } from './prompts';
@@ -96,6 +97,13 @@ const PROMPT_TEXT: Record<PromptAction, string> = {
   pause: 'Pause',
 };
 
+/** Prompts that work as a tap (touch, or a click): what each sends. */
+const TAPS: Partial<Record<PromptAction, 'back' | 'pause' | 'confirm' | 'tabNext'>> = {
+  back: 'back',
+  pause: 'pause',
+  tabs: 'tabNext',
+};
+
 /** The menu layer: the screen on top of the stack plus the button prompts for it. */
 export function MenuRoot({ store }: Props) {
   const stack = store.stack.value;
@@ -107,6 +115,13 @@ export function MenuRoot({ store }: Props) {
   const Screen = SCREENS[top];
   const glyphs = PROMPT_SETS[store.prompts.value];
   const overGame = store.inSession.value;
+  // The screen's way back (Back, Exit, …), for the touch button in the corner.
+  const backEntry = FOOTER[top].find((e) => (typeof e === 'string' ? e : e[0]) === 'back');
+  const backText = backEntry
+    ? typeof backEntry === 'string'
+      ? PROMPT_TEXT.back
+      : backEntry[1]
+    : null;
   return (
     <div class={overGame ? 'menu over-game' : 'menu'} data-top={top}>
       <div
@@ -119,18 +134,39 @@ export function MenuRoot({ store }: Props) {
       >
         <Screen store={store} revision={revision} />
       </div>
+      {backText !== null && hasTouch() && (
+        <button
+          type="button"
+          class="menu-back"
+          data-touch-back
+          onClick={() => store.actions.tap('back')}
+        >
+          ‹ {backText}
+        </button>
+      )}
       <div class="menu-prompts">
         {FOOTER[top].map((entry) => {
           const [action, text] = typeof entry === 'string' ? [entry, PROMPT_TEXT[entry]] : entry;
           const set = glyphs[action];
           if (set.length === 0) return null;
-          return (
-            <span class="menu-prompt">
+          const inner = (
+            <>
               {set.map((g) => (
                 <kbd class={g.className ? `glyph ${g.className}` : 'glyph'}>{g.text}</kbd>
               ))}
               <span>{text}</span>
-            </span>
+            </>
+          );
+          const tap = TAPS[action];
+          if (!tap) return <span class="menu-prompt">{inner}</span>;
+          return (
+            <button
+              type="button"
+              class="menu-prompt tappable"
+              onClick={() => store.actions.tap(tap)}
+            >
+              {inner}
+            </button>
           );
         })}
         {store.message.value && <span class="menu-message">{store.message.value}</span>}

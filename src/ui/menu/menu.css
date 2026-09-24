@@ -548,6 +548,45 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+/* A prompt that works as a tap (Back, Pause, Tabs). */
+.menu-prompt.tappable {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.menu-prompt.tappable:active {
+  opacity: 0.6;
+}
+
+/* Touch screens: the way back, in the top corner of every screen that has one. */
+.menu-back {
+  position: absolute;
+  top: calc(14px + var(--safe-top));
+  right: calc(16px + var(--safe-right));
+  z-index: 2;
+  padding: 10px 18px 10px 14px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(20, 24, 34, 0.7);
+  color: #fff;
+  font: 700 15px var(--font);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: manipulation;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: rise 0.4s ease both;
+}
+
+.menu-back:active {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .glyph {

@@ -191,6 +191,8 @@ export interface MenuActions {
   startSession(setup: SessionSetup): void;
   restartSession(): void;
   resume(): void;
+  /** A tap on a menu prompt (touch): the same as the key or button for it. */
+  tap(event: 'back' | 'pause' | 'confirm' | 'tabNext'): void;
   resetCar(): void;
   /** Leave driving for the main menu. */
   quitToMenu(): void;

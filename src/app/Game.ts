@@ -2782,6 +2782,7 @@ export class Game {
         }
       },
       resume: () => this.resume(),
+      tap: (event) => this.input.tap(event),
       fastTravel: (id) => this.fastTravel(id),
       resetCar: () => {
         this.resume();
