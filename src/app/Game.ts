@@ -1267,7 +1267,10 @@ export class Game {
     if (this.school) this.school.root.hidden = !driving;
     this.perf.setVisible(this.settings.overlay);
     const device = this.input.lastDevice;
-    this.touch.setVisible(driving && hasTouch() && (device === 'touch' || device === 'none'));
+    const touchShown = driving && hasTouch() && (device === 'touch' || device === 'none');
+    this.touch.setVisible(touchShown);
+    // The readout moves out from under the pedals (to the left corner) while they are shown.
+    this.hud.setBesideTouch(touchShown);
   }
 
   // ---------------------------------------------------------------- frame

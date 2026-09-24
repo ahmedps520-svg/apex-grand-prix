@@ -149,6 +149,11 @@ export class Hud {
     parent.append(this.root, this.heat);
   }
 
+  /** On-screen pedals in the right corner (touch): the readout takes the left one instead. */
+  setBesideTouch(on: boolean): void {
+    this.root.classList.toggle('beside-touch', on);
+  }
+
   /** Shows or hides the HUD (the wanted level goes with it). */
   setVisible(visible: boolean): void {
     this.root.hidden = !visible;

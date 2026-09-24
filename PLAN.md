@@ -1014,6 +1014,7 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 ### Push 29: Back on touch (v0.29.0)
 - **A way back for the iPad:** every menu screen with a way back (Back, Exit on the results, Resume on the pause screen's Back) shows a ‹ Back button in its top right corner on touch screens (`hasTouch()`), and the footer's Back, Pause and Tabs prompts are buttons on every device. A tap sends the same menu event as the key or the pad button (`InputManager.tap` → the UI queue with the source `touch`), so it goes through the focus engine and the screen logic exactly as Esc does: pop, resume, or exit.
 - **Tests:** a new browser test on a touch screen (`tests/e2e/touch-menus.spec.ts`): Start by tap, no Back on the main menu, Free Roam → the corner button back, Race → track → car → the footer's Back prompt back, then the corner button to the main menu, with no page errors.
+- **The readout beside the pedals:** with the on-screen pedals in the right corner the gear-and-speed panel takes the left corner (`Hud.setBesideTouch`, `.hud.beside-touch`), the speed-limit sign on its right, so nothing sits under a thumb; the touch browser test taps into a screen again if a tap was lost mid-transition (CI's slow runner lost one).
 - **Honest limits:** the corner button shows on any touch-capable device (a touch laptop included); the Confirm prompt is not a tap (the focused item is not always the one a finger means).
 
 ### Push 30: In the rain (v0.30.0)
