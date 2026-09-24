@@ -20,6 +20,7 @@ import {
   type Weather,
 } from '../content/conditions';
 import { rivalName } from '../content/drivers';
+import { driftMedal, driftTargets } from '../content/driftTrial';
 import { ladderStanding } from '../content/ladder';
 import { randomLivery, type Livery } from '../content/livery';
 import { CHAMPIONSHIP_POINTS, PAINTS } from '../content/paints';
@@ -137,6 +138,8 @@ import {
   saveRoamSpot,
   saveSeason,
   type RoamSpot,
+  loadDriftRecords,
+  saveDriftRecord,
 } from './records';
 import { Festival, festivalTotals, medalFor } from './Festival';
 import { EventHud } from '../ui/EventHud';
@@ -519,6 +522,10 @@ export class Game {
   private resultsShown = false;
   /** The grid a qualifying set (for the race, and its restarts); null when the grid is chosen. */
   private carry: RaceCarry | null = null;
+  /** Drift trials: the best score per circuit and laps, kept in this browser. */
+  private driftRecords = loadDriftRecords();
+  /** Drift trial: the laps are done and the score is final. */
+  private driftDone = false;
   /** Championship round being raced, or -1. */
   private seasonRound = -1;
   /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
@@ -837,6 +844,11 @@ export class Game {
     const seed = carry?.seed ?? (Math.random() * 1e9) | 0;
     const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
     const qualifying = setup.mode === 'race' && !attract && !carry && (setup.qualifying ?? 0) > 0;
+    // A drift trial: a time trial with arcade handling, over a set number of laps.
+    const drift =
+      setup.mode === 'timeTrial' && !attract && setup.trial === 'drift'
+        ? Math.max(1, Math.min(Math.floor(setup.driftLaps ?? 2), 5))
+        : undefined;
     const dayMinutes =
       setup.mode === 'roam'
         ? DAY_MINUTES[setup.roamDayLength]
@@ -883,6 +895,7 @@ export class Game {
         : Math.min(setup.gridSlot, setup.opponents),
       gridOrder: carry?.gridOrder,
       qualifying: qualifying ? setup.qualifying : undefined,
+      drift,
       aids: { ...this.settings.aids },
       seed,
       attract: attract || (this.autopilot && setup.mode === 'race'),
@@ -896,7 +909,7 @@ export class Game {
         setup.mode !== 'free' &&
         (setup.mode === 'roam' ? setup.roamWeatherMotion : setup.weatherMotion) === 'moving',
       clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
-      handling: attract ? 'sim' : setup.handling,
+      handling: attract ? 'sim' : drift ? 'arcade' : setup.handling,
       elimination:
         setup.mode === 'race' && !attract && !qualifying && setup.raceType === 'elimination'
           ? ELIMINATION_EVERY
@@ -977,6 +990,8 @@ export class Game {
     this.bankedSkill = 0;
     this.skillHud.setLadder(ladderStanding(this.progress.skill));
     this.skillHud.reset();
+    this.skillHud.setDriftOnly(config.drift !== undefined);
+    this.driftDone = false;
     if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
     if (this.props) {
       this.props.onKnock = (kind) => {
@@ -1034,7 +1049,7 @@ export class Game {
   private setupGhost(config: SessionConfig): void {
     this.ghostRecorder.reset();
     this.ghostLaps = 0;
-    this.ghost = config.mode === 'timeTrial' ? loadGhost(config.trackId) : null;
+    this.ghost = config.mode === 'timeTrial' && !config.drift ? loadGhost(config.trackId) : null;
     if (this.ghost) this.showGhost(this.ghost);
     else if (this.ghostView) this.ghostView.root.visible = false;
   }
@@ -1435,7 +1450,7 @@ export class Game {
             this.keepRoamSpot();
           }
         }
-        if (this.skill) {
+        if (this.skill && !this.driftDone) {
           this.skill.update(dt, player, this.states, count);
           this.skillHud.update(this.skill);
           this.bankSkill();
@@ -2468,9 +2483,9 @@ export class Game {
 
     const me = race.cars[0];
     if (!me) return;
-    if (session.mode === 'timeTrial') this.updateGhost(dt, me, player);
-    // Keep the track record (time trial and races).
-    if (me.bestLap > 0 && me.bestLap < this.bestLapSeen) {
+    if (session.mode === 'timeTrial' && !session.drift) this.updateGhost(dt, me, player);
+    // Keep the track record (time trial and races; not a drift trial's arcade laps).
+    if (!session.drift && me.bestLap > 0 && me.bestLap < this.bestLapSeen) {
       this.bestLapSeen = me.bestLap;
       const previous = this.records[session.trackId];
       if (previous === undefined || me.bestLap < previous) {
@@ -2485,6 +2500,45 @@ export class Game {
       if (this.finishedAt < 0) this.finishedAt = this.lastTime;
       if (this.lastTime - this.finishedAt > 4 || race.phase === 'finished') this.showResults(race);
     }
+    // Drift trial: the laps done, the last drift has a moment to bank, then the results.
+    if (session.drift && !this.resultsShown) {
+      if (this.finishedAt < 0 && me.lap >= session.drift) {
+        this.finishedAt = this.lastTime;
+        this.raceHud.flash('FINISH', 3);
+      }
+      if (this.finishedAt >= 0 && this.lastTime - this.finishedAt > 3) this.showDriftResults();
+    }
+  }
+
+  /** After a drift trial: the drifts' points against the targets, and the best kept. */
+  private showDriftResults(): void {
+    const session = this.session!;
+    this.resultsShown = true;
+    this.driftDone = true;
+    const def = trackById(session.trackId);
+    const laps = session.drift ?? 1;
+    const score = Math.round(this.skill?.driftScore ?? 0);
+    const targets = driftTargets(this.track?.length ?? 4000, laps);
+    const key = `${session.trackId}:${laps}`;
+    const previous = this.driftRecords[key] ?? 0;
+    const newBest = score > previous;
+    if (newBest) this.driftRecords = saveDriftRecord(key, score);
+    this.menus.results.value = {
+      mode: 'timeTrial',
+      trackName: def?.name ?? '',
+      rows: [],
+      drift: {
+        score,
+        best: Math.max(score, previous),
+        newBest,
+        medal: driftMedal(score, targets),
+        targets,
+      },
+    };
+    this.menus.replayAvailable.value =
+      this.lastReplay !== null || (this.replayRecorder?.duration ?? 0) > 5;
+    this.menus.set(['results']);
+    this.applyHudVisibility();
   }
 
   /** Feeds the race engineer and plays what they say. */

@@ -444,6 +444,25 @@
   font-size: 20px;
 }
 
+.mn-note {
+  margin: 2px 0 4px;
+  padding: 6px 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.mn-medal {
+  animation: none;
+}
+
+.mn-medal.silver {
+  background: #d9dde3;
+}
+
+.mn-medal.bronze {
+  background: #d99a5b;
+}
+
 .mn-badge {
   margin-left: 10px;
   padding: 2px 8px;

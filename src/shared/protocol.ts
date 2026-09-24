@@ -135,6 +135,8 @@ export interface SessionConfig {
   qualifying?: number;
   /** The grid from a qualifying: car indices by position, pole first (unset: `gridSlot`, then index order). */
   gridOrder?: number[];
+  /** Drift trial: laps of it (a time trial in the simulation, arcade handling, the drifts scoring). */
+  drift?: number;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */

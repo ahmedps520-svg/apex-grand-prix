@@ -156,3 +156,31 @@ export function saveProgress(progress: FestivalProgress): void {
     // Storage blocked: the tallies last for this session only.
   }
 }
+
+const DRIFT_KEY = 'apex-gp.drift';
+
+/** Best drift trial score per circuit and laps (`trackId:laps`), kept in this browser. */
+export function loadDriftRecords(): Records {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(DRIFT_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object') return {};
+    const out: Records = {};
+    for (const [id, value] of Object.entries(raw)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) out[id] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveDriftRecord(key: string, score: number): Records {
+  const records = loadDriftRecords();
+  records[key] = score;
+  try {
+    localStorage.setItem(DRIFT_KEY, JSON.stringify(records));
+  } catch {
+    // Storage blocked: the record lasts for this session only.
+  }
+  return records;
+}

@@ -207,7 +207,11 @@ export class World {
     if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
     // A qualifying: the field runs its laps for the grid (nobody is put out in one).
     const qualifying = config.mode === 'race' ? Math.max(0, Math.floor(config.qualifying ?? 0)) : 0;
-    const laps = config.mode === 'race' ? qualifying || config.laps : 0;
+    // A time trial has no distance, but a drift trial has its laps (for the HUD; the main thread ends it).
+    const laps =
+      config.mode === 'race'
+        ? qualifying || config.laps
+        : Math.max(0, Math.floor(config.drift ?? 0));
     world.director = new RaceDirector(
       track,
       count,

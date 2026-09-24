@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals';
+import type { DriftMedal, DriftTargets } from '../../content/driftTrial';
 import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
 import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
@@ -77,12 +78,17 @@ export interface SessionSetup {
   raceType: RaceType;
   /** Races and championship rounds: laps of qualifying before the race (0: the grid is chosen). */
   qualifying: number;
+  /** Time trials: against the clock, or a drift trial (arcade handling, the drifts score). */
+  trial: TrialKind;
+  /** Drift trial: laps. */
+  driftLaps: number;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
 export type RaceType = 'standard' | 'elimination';
+export type TrialKind = 'time' | 'drift';
 
 export interface ResultRow {
   position: number;
@@ -172,6 +178,16 @@ export interface SessionResults {
   championship?: boolean;
   /** A qualifying: the rows are the grid, the times best laps, and the race follows. */
   qualifying?: boolean;
+  /** A drift trial: the score, the best for the circuit and laps, and the medal. */
+  drift?: DriftResult;
+}
+
+export interface DriftResult {
+  score: number;
+  best: number;
+  newBest: boolean;
+  medal: DriftMedal | null;
+  targets: DriftTargets;
 }
 
 /** A place to fast-travel to: a spawn, or a festival event with its best result. */
@@ -277,6 +293,8 @@ export class MenuStore {
     handling: 'sim',
     raceType: 'standard',
     qualifying: 0,
+    trial: 'time',
+    driftLaps: 2,
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);

@@ -39,6 +39,8 @@ const CRASH_AGAIN = 2;
 
 export class Skill {
   score = 0;
+  /** The drifts' share of the score (a drift trial's result). */
+  driftScore = 0;
   combo = 0;
   multiplier = 1;
   private readonly events: SkillEvent[] = [];
@@ -135,6 +137,7 @@ export class Skill {
   award(kind: SkillKind, base: number, label: string): void {
     const points = Math.round(base * this.multiplier);
     this.score += points;
+    if (kind === 'drift') this.driftScore += points;
     this.combo++;
     this.multiplier = 1 + Math.min(this.combo, 8) * 0.25;
     this.chain = 0;

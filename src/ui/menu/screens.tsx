@@ -27,7 +27,15 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, FestivalDestination, MenuStore, RaceType, ReplayCommand } from './store';
+import type {
+  Difficulty,
+  DriftResult,
+  FestivalDestination,
+  MenuStore,
+  RaceType,
+  ReplayCommand,
+  TrialKind,
+} from './store';
 import {
   Button,
   Choice,
@@ -174,8 +182,8 @@ export function TitleScreen({ store }: ScreenProps) {
 }
 
 export function MainScreen({ store }: ScreenProps) {
-  const go = (mode: 'race' | 'timeTrial') => {
-    store.update({ mode, trackId: store.setup.value.trackId || TRACKS[0]?.id || '' });
+  const go = (mode: 'race' | 'timeTrial', trial: TrialKind = 'time') => {
+    store.update({ mode, trial, trackId: store.setup.value.trackId || TRACKS[0]?.id || '' });
     store.push('trackSelect');
   };
   const season = store.championship.value;
@@ -212,6 +220,12 @@ export function MainScreen({ store }: ScreenProps) {
           label="Time Trial"
           hint="Beat your ghost"
           onPress={() => go('timeTrial')}
+        />
+        <Tile
+          icon="drift"
+          label="Drift Trial"
+          hint="Slide for points"
+          onPress={() => go('timeTrial', 'drift')}
         />
         <Tile
           icon="city"
@@ -619,10 +633,11 @@ export function RaceSetupScreen({ store }: ScreenProps) {
   const aids = store.settings.aids;
   const track = TRACKS.find((t) => t.id === setup.trackId);
   const race = setup.mode === 'race';
+  const drift = !race && setup.trial === 'drift';
   return (
     <div class="mn-panel">
       <Header
-        title={race ? 'Race setup' : 'Time trial setup'}
+        title={race ? 'Race setup' : drift ? 'Drift trial setup' : 'Time trial setup'}
         subtitle={track ? `${track.name} · ${track.location}` : ''}
       />
       <div class="mn-list">
@@ -674,8 +689,16 @@ export function RaceSetupScreen({ store }: ScreenProps) {
             <FieldChoices store={store} />
           </>
         )}
+        {drift && (
+          <Choice
+            label="Laps"
+            value={setup.driftLaps ?? 2}
+            options={[1, 2, 3].map((n) => ({ value: n, text: String(n) }))}
+            onChange={(driftLaps) => store.update({ driftLaps })}
+          />
+        )}
         <ConditionChoices store={store} />
-        <AidChoices store={store} aids={aids} />
+        <AidChoices store={store} aids={aids} drift={drift} />
         <Button
           label={race ? (setup.qualifying > 0 ? 'Start qualifying' : 'Start race') : 'Start'}
           primary
@@ -770,15 +793,28 @@ const HANDLING: ReadonlyArray<{ value: HandlingMode; text: string }> = [
   { value: 'arcade', text: 'Arcade: grip, drifts, nitro, skill points' },
 ];
 
-function AidChoices({ store, aids }: { store: MenuStore; aids: MenuStore['settings']['aids'] }) {
+function AidChoices({
+  store,
+  aids,
+  drift = false,
+}: {
+  store: MenuStore;
+  aids: MenuStore['settings']['aids'];
+  /** A drift trial: arcade handling, no choice about it. */
+  drift?: boolean;
+}) {
   return (
     <>
-      <Choice
-        label="Handling"
-        value={store.setup.value.handling}
-        options={HANDLING}
-        onChange={(handling) => store.update({ handling })}
-      />
+      {drift ? (
+        <p class="mn-note">Arcade handling: the drifts score, chained for a multiplier.</p>
+      ) : (
+        <Choice
+          label="Handling"
+          value={store.setup.value.handling}
+          options={HANDLING}
+          onChange={(handling) => store.update({ handling })}
+        />
+      )}
       <Choice
         label="Gearbox"
         value={aids.gearbox}
@@ -1101,15 +1137,19 @@ export function ResultsScreen({ store }: ScreenProps) {
     <div class="mn-panel mn-wide mn-results">
       <Header
         title={
-          results.qualifying
-            ? 'Qualifying'
-            : results.mode === 'race'
-              ? 'Race results'
-              : 'Session results'
+          results.drift
+            ? 'Drift trial'
+            : results.qualifying
+              ? 'Qualifying'
+              : results.mode === 'race'
+                ? 'Race results'
+                : 'Session results'
         }
         subtitle={results.trackName}
       />
-      {results.mode === 'timeTrial' ? (
+      {results.drift ? (
+        <DriftResultCard drift={results.drift} />
+      ) : results.mode === 'timeTrial' ? (
         <div class="mn-record">
           <div>
             Best lap <strong>{formatTime(results.bestLap ?? 0)}</strong>
@@ -1196,6 +1236,29 @@ export function ResultsScreen({ store }: ScreenProps) {
           <Button label="Main menu" onPress={() => store.actions.quitToMenu()} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** A drift trial's card: the score with its medal, the best, and the targets. */
+function DriftResultCard({ drift }: { drift: DriftResult }) {
+  const n = (v: number) => v.toLocaleString('en-US');
+  return (
+    <div class="mn-record">
+      <div>
+        Drift score <strong>{n(drift.score)}</strong>
+        {drift.medal && (
+          <span class={`mn-badge mn-medal ${drift.medal}`}>{drift.medal.toUpperCase()}</span>
+        )}
+      </div>
+      <div>
+        Best <strong>{n(drift.best)}</strong>
+        {drift.newBest && <span class="mn-badge">New best!</span>}
+      </div>
+      <div class="mn-dim">
+        Gold {n(drift.targets.gold)} · Silver {n(drift.targets.silver)} · Bronze{' '}
+        {n(drift.targets.bronze)}
+      </div>
     </div>
   );
 }
