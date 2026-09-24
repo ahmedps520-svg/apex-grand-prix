@@ -45,6 +45,18 @@ describe('settings', () => {
     expect(s.wheelsPrompted).toEqual(['G29']);
   });
 
+  it('keeps the HUD size within reason and knows the colour palettes', () => {
+    expect(parseSettings({ hudScale: 9, palette: 'neon' })).toMatchObject({
+      hudScale: 1.5,
+      palette: 'standard',
+    });
+    expect(parseSettings({ hudScale: 1.2, palette: 'colourSafe' })).toMatchObject({
+      hudScale: 1.2,
+      palette: 'colourSafe',
+    });
+    expect(parseSettings({})).toMatchObject({ hudScale: 1, palette: 'standard' });
+  });
+
   it('falls back to defaults for garbage', () => {
     expect(parseSettings('nope')).toEqual(defaultSettings());
     expect(parseSettings(null)).toEqual(defaultSettings());

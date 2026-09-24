@@ -22,6 +22,26 @@ const run = (
 };
 
 describe('arcade skill points', () => {
+  it("keeps the drifts' points apart from the rest of the score", () => {
+    const skill = new Skill();
+    const player = car();
+    player.speed = 20;
+    player.wheels[2]!.slipAngle = 0.3;
+    player.wheels[3]!.slipAngle = 0.3;
+    run(skill, 2, player);
+    player.wheels[2]!.slipAngle = 0;
+    player.wheels[3]!.slipAngle = 0;
+    run(skill, 1, player);
+    const drift = skill.score;
+    expect(drift).toBeGreaterThan(0);
+    expect(skill.driftScore).toBe(drift);
+    // Speed points add to the score, not to the drifts'.
+    player.speed = 50;
+    run(skill, 9, player);
+    expect(skill.score).toBeGreaterThan(drift);
+    expect(skill.driftScore).toBe(drift);
+  });
+
   it('scores a drift once it ends, by speed and angle', () => {
     const skill = new Skill();
     const player = car();

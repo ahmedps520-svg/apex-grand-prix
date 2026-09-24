@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals';
+import type { DriftMedal, DriftTargets } from '../../content/driftTrial';
 import type { RoamSpot } from '../../app/records';
 import type { Settings } from '../../app/settings';
 import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
@@ -20,6 +21,7 @@ import type { PromptFamily } from './prompts';
 
 export type ScreenId =
   | 'title'
+  | 'career'
   | 'main'
   | 'trackSelect'
   | 'carSelect'
@@ -75,14 +77,24 @@ export interface SessionSetup {
   handling: HandlingMode;
   /** Quick races: a standard race, or an elimination (the last car out every so often). */
   raceType: RaceType;
+  /** Races and championships: whether the tyres wear, and how fast. */
+  tyreWear: TyreWear;
   /** Races and championship rounds: laps of qualifying before the race (0: the grid is chosen). */
   qualifying: number;
+  /** Time trials: against the clock, or a drift trial (arcade handling, the drifts score). */
+  trial: TrialKind;
+  /** Drift trial: laps. */
+  driftLaps: number;
+  /** The daily challenge: the day's key while the session is it ('' otherwise). */
+  daily?: string;
   /** Free roam: continue from the spot the last drive was left at. */
   resume?: boolean;
 }
 
 export type FieldMode = 'same' | 'class' | 'multi';
 export type RaceType = 'standard' | 'elimination';
+export type TrialKind = 'time' | 'drift';
+export type TyreWear = 'off' | 'normal' | 'fast';
 
 export interface ResultRow {
   position: number;
@@ -114,6 +126,29 @@ export interface Championship {
   liverySeed?: number;
   /** Car, field size, laps and difficulty for every round. */
   setup: SessionSetup;
+  /** A career season: the tier it is for. */
+  career?: number;
+}
+
+/** The career as its screen shows it. */
+export interface CareerInfo {
+  /** The tier being raced; every tier done once it equals the count. */
+  tier: number;
+  complete: boolean;
+  tiers: Array<{
+    name: string;
+    className: string;
+    races: number;
+    laps: number;
+    opponents: number;
+    difficulty: Difficulty;
+    promote: number;
+    status: 'done' | 'current' | 'locked';
+    /** The finish of the latest season at that tier, or null. */
+    position: number | null;
+  }>;
+  /** The tier's season under way, or null. */
+  season: { round: number; races: number; position: number; next: string } | null;
 }
 
 /** Checks a stored championship before it is loaded. */
@@ -172,6 +207,26 @@ export interface SessionResults {
   championship?: boolean;
   /** A qualifying: the rows are the grid, the times best laps, and the race follows. */
   qualifying?: boolean;
+  /** A drift trial: the score, the best for the circuit and laps, and the medal. */
+  drift?: DriftResult;
+}
+
+/** Today's challenge as the main menu shows it. */
+export interface DailyInfo {
+  key: string;
+  trackName: string;
+  carName: string;
+  conditions: string;
+  /** Today's best lap, seconds, or null. */
+  best: number | null;
+}
+
+export interface DriftResult {
+  score: number;
+  best: number;
+  newBest: boolean;
+  medal: DriftMedal | null;
+  targets: DriftTargets;
 }
 
 /** A place to fast-travel to: a spawn, or a festival event with its best result. */
@@ -204,6 +259,8 @@ export interface MenuActions {
   restartSession(): void;
   /** After a qualifying: the race, on the grid it set. */
   startRace(): void;
+  /** The daily challenge: a time trial on the day's circuit, car and conditions. */
+  startDaily(): void;
   resume(): void;
   /** A tap on a menu prompt (touch): the same as the key or button for it. */
   tap(event: 'back' | 'pause' | 'confirm' | 'tabNext'): void;
@@ -228,6 +285,12 @@ export interface MenuActions {
   startChampionship(races: number): void;
   /** Runs the next championship race. */
   nextRound(): void;
+  /** Career: a season in the current tier's series, in a car of its class. */
+  startCareerSeason(carId: string): void;
+  /** Career: the next round of the tier's season. */
+  continueCareer(): void;
+  /** Career: back to the first tier, every result forgotten. */
+  resetCareer(): void;
   /** Watches the race just finished (from the results). */
   watchReplay(): void;
   /** Opens photo mode (from the pause menu or a replay). */
@@ -276,12 +339,19 @@ export class MenuStore {
     secondClass: 'Touring',
     handling: 'sim',
     raceType: 'standard',
+    tyreWear: 'off',
     qualifying: 0,
+    trial: 'time',
+    driftLaps: 2,
   });
   /** True while a session is running (the pause menu is over the game). */
   readonly inSession = signal(false);
   /** Free roam: the festival map's roads, destinations and the car's spot (null elsewhere). */
   readonly festival = signal<FestivalInfo | null>(null);
+  /** Today's challenge, for the main menu's tile. */
+  readonly daily = signal<DailyInfo | null>(null);
+  /** The career's ladder and the season under way. */
+  readonly career = signal<CareerInfo | null>(null);
   /** Free roam: where the last drive was left, for the Continue button (null when none). */
   readonly roamSpot = signal<RoamSpot | null>(null);
   readonly results = signal<SessionResults | null>(null);

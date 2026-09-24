@@ -62,6 +62,9 @@ async function press(page: Page, button: number): Promise<void> {
 }
 
 test('plays from the title screen to a race and back with only a controller', async ({ page }) => {
+  // The menus render their 3D backdrop at a frame or two a second in software GL, and a press
+  // waits for a frame: the walk to a race and back takes a while on CI.
+  test.setTimeout(180_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
@@ -88,8 +91,14 @@ test('plays from the title screen to a race and back with only a controller', as
 
   await press(page, OPTIONS);
   await expect.poll(screen).toBe('pause');
-  // The pause menu wraps: up from Resume is the last item, Quit to main menu.
-  await press(page, DPAD_UP);
+  // The pause menu wraps: up from Resume is the last item, Quit to main menu. A press that
+  // lands while the screen is still coming in can be lost, so the focus is checked first.
+  const focused = () =>
+    page.evaluate(() => document.querySelector('.nav-focus')?.textContent?.trim() ?? '');
+  for (let attempt = 0; attempt < 4 && !/Quit to main menu/.test(await focused()); attempt++) {
+    await press(page, DPAD_UP);
+  }
+  expect(await focused()).toMatch(/Quit to main menu/);
   await press(page, CROSS);
   await expect.poll(screen, { timeout: 60_000 }).toBe('main');
   expect(errors).toEqual([]);

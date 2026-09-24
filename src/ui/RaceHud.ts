@@ -110,7 +110,9 @@ export class RaceHud {
     setText(this.positionTotal, racing ? `/${race.cars.length}` : '');
     const lapText = racing
       ? `${race.qualifying ? 'QUALIFYING · ' : ''}LAP ${Math.min(Math.max(me.lap + 1, 1), race.laps)}/${race.laps}`
-      : `LAP ${Math.max(me.lap + 1, 1)}`;
+      : race.laps > 0
+        ? `LAP ${Math.min(Math.max(me.lap + 1, 1), race.laps)}/${race.laps}`
+        : `LAP ${Math.max(me.lap + 1, 1)}`;
     setText(this.lap, me.finished ? 'FINISHED' : lapText);
     this.updateElimination(race, player);
     setText(this.current, lapTime(me.currentLap));

@@ -112,7 +112,7 @@ export class RaceDirector {
       phase: mode === 'race' ? 'grid' : 'racing',
       lights: 0,
       go: mode !== 'race',
-      laps: mode === 'race' ? Math.max(laps, 1) : 0,
+      laps: mode === 'race' ? Math.max(laps, 1) : Math.max(laps, 0),
       time: 0,
       cars: [],
       order: [],

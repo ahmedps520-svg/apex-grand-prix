@@ -1,3 +1,4 @@
+import { isCareerSave, type CareerSave } from '../content/career';
 /** Best lap per track (time trial and races), kept in this browser. */
 
 const KEY = 'apex-gp.records';
@@ -154,5 +155,81 @@ export function saveProgress(progress: FestivalProgress): void {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
   } catch {
     // Storage blocked: the tallies last for this session only.
+  }
+}
+
+const DRIFT_KEY = 'apex-gp.drift';
+
+/** Best drift trial score per circuit and laps (`trackId:laps`), kept in this browser. */
+export function loadDriftRecords(): Records {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(DRIFT_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object') return {};
+    const out: Records = {};
+    for (const [id, value] of Object.entries(raw)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) out[id] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function saveDriftRecord(key: string, score: number): Records {
+  const records = loadDriftRecords();
+  records[key] = score;
+  try {
+    localStorage.setItem(DRIFT_KEY, JSON.stringify(records));
+  } catch {
+    // Storage blocked: the record lasts for this session only.
+  }
+  return records;
+}
+
+const DAILY_KEY = 'apex-gp.daily';
+
+/** The daily challenge's best lap, and the day it was set on. */
+export interface DailyBest {
+  key: string;
+  best: number;
+}
+
+export function loadDailyBest(): DailyBest | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(DAILY_KEY) ?? 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.key !== 'string' || typeof r.best !== 'number' || !(r.best > 0)) return null;
+    return { key: r.key, best: r.best };
+  } catch {
+    return null;
+  }
+}
+
+export function saveDailyBest(best: DailyBest): void {
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(best));
+  } catch {
+    // Storage blocked: the best lasts for this session only.
+  }
+}
+
+const CAREER_KEY = 'apex-gp.career';
+
+/** The career: the tier reached and every season's result, kept in this browser. */
+export function loadCareer(): CareerSave | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(CAREER_KEY) ?? 'null');
+    return isCareerSave(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCareer(career: CareerSave): void {
+  try {
+    localStorage.setItem(CAREER_KEY, JSON.stringify(career));
+  } catch {
+    // Storage blocked: the career lasts for this session only.
   }
 }

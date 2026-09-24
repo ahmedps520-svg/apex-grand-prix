@@ -135,6 +135,12 @@ export interface SessionConfig {
   qualifying?: number;
   /** The grid from a qualifying: car indices by position, pole first (unset: `gridSlot`, then index order). */
   gridOrder?: number[];
+  /** Drift trial: laps of it (a time trial in the simulation, arcade handling, the drifts scoring). */
+  drift?: number;
+  /** The daily challenge (the day's key): its best lap is kept apart from the track record. */
+  daily?: string;
+  /** Tyre wear rate: unset or 0 none, 1 a few per cent a lap, 2.5 fast (races only). */
+  tyreWear?: number;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -299,8 +305,10 @@ export const W = {
   SURFACE: 11,
   /** Camber relative to the road in radians (- = top of the wheel leaning inwards). */
   CAMBER: 12,
+  /** Tread gone: 0 new … 1 worn out. */
+  WEAR: 13,
 } as const;
-export const WHEEL_STRIDE = 13;
+export const WHEEL_STRIDE = 14;
 export const WHEEL_COUNT = 4;
 
 /** Per-car block. Poses are in world space: x right, y up, z towards the camera. */

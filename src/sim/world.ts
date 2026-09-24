@@ -197,7 +197,10 @@ export class World {
       world.cars[i]!.setAids({ ...defaultAids(), gearbox: 'auto', tc: 'high', abs: 'high' });
       world.cars[i]!.autoHybrid = true;
     }
-    for (const car of world.cars) car.damageScale = config.damage ?? 0;
+    for (const car of world.cars) {
+      car.damageScale = config.damage ?? 0;
+      car.wearRate = config.tyreWear ?? 0;
+    }
     // The day's clock when it runs (the hour of the chosen time of day, with the circuit's own
     // sun in the afternoon); the headlights come on after dark either way.
     const hour = wrapHour(
@@ -207,7 +210,11 @@ export class World {
     if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
     // A qualifying: the field runs its laps for the grid (nobody is put out in one).
     const qualifying = config.mode === 'race' ? Math.max(0, Math.floor(config.qualifying ?? 0)) : 0;
-    const laps = config.mode === 'race' ? qualifying || config.laps : 0;
+    // A time trial has no distance, but a drift trial has its laps (for the HUD; the main thread ends it).
+    const laps =
+      config.mode === 'race'
+        ? qualifying || config.laps
+        : Math.max(0, Math.floor(config.drift ?? 0));
     world.director = new RaceDirector(
       track,
       count,
@@ -353,7 +360,8 @@ export class World {
         const theirs = status.cars[i]?.progress ?? mine;
         band = arcadePace(mine - theirs);
       }
-      ai.paceScale = band * weather;
+      // Worn tyres: the plan's corner speeds fall with the grip left (speed goes as its root).
+      ai.paceScale = band * weather * Math.sqrt(this.cars[i]?.gripFactor ?? 1);
     }
   }
 

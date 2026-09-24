@@ -120,15 +120,15 @@
 }
 
 .rh-lights span.on {
-  background: #ff2a1a;
+  background: var(--lit);
   box-shadow:
-    0 0 24px #ff2a1a,
+    0 0 24px var(--lit),
     inset 0 0 6px rgba(255, 255, 255, 0.5);
 }
 
 .rh-lights span.go {
-  background: #2cff6a;
-  box-shadow: 0 0 24px #2cff6a;
+  background: var(--go);
+  box-shadow: 0 0 24px var(--go);
 }
 
 /* Elimination race: the clock to the next car out, under the lap. */
@@ -140,7 +140,7 @@
 }
 
 .rh-elimination.last {
-  color: #ff5a4a;
+  color: var(--bad);
   animation: rh-pulse 0.8s ease-in-out infinite alternate;
 }
 

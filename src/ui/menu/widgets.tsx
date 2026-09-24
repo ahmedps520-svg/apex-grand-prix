@@ -41,7 +41,8 @@ export function Tile(props: {
   hint?: string;
   onPress: () => void;
   autofocus?: boolean;
-  size?: 'big' | 'small';
+  /** Big: a tall tile across both columns; small: the bottom row; wide: a strip across both. */
+  size?: 'big' | 'small' | 'wide';
 }) {
   return (
     <button
@@ -51,7 +52,10 @@ export function Tile(props: {
       data-autofocus={props.autofocus ? '' : undefined}
       onClick={props.onPress}
     >
-      <Icon name={props.icon} size={props.size === 'small' ? 22 : 34} />
+      <Icon
+        name={props.icon}
+        size={props.size === 'small' ? 22 : props.size === 'wide' ? 26 : 34}
+      />
       <span class="mn-tile-label">{props.label}</span>
       {props.hint && <span class="mn-tile-hint">{props.hint}</span>}
     </button>

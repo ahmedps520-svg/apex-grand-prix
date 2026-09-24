@@ -7,12 +7,39 @@
   --accent: #ff3b2f;
   --accent-soft: rgba(255, 59, 47, 0.18);
   --ok: #39d98a;
+  /* Status colours the HUD reads by: the good and the bad, the start lights lit and out. */
+  --good: #39d98a;
+  --bad: #ff3b2f;
+  --lit: #ff2a1a;
+  --go: #2cff6a;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color-scheme: dark;
+}
+
+/* The colour-safe palette: blue for green and orange for red, for eyes that can't tell them apart. */
+html[data-palette='colourSafe'] {
+  --ok: #4cc9f0;
+  --good: #4cc9f0;
+  --bad: #ff9f1c;
+  --lit: #ff9f1c;
+  --go: #4cc9f0;
+}
+
+/* HUD size: every driving panel zooms by the setting (its position scales with it). */
+.hud,
+.hud-heat,
+.minimap,
+.skill,
+.fest,
+.radio-box,
+.race-card,
+.toasts,
+.race-hud > * {
+  zoom: var(--hud-scale, 1);
 }
 
 * {
@@ -485,13 +512,13 @@ body.fatal #loading-text {
 }
 
 .hud-shift span.green.on {
-  background: #37e27b;
-  box-shadow: 0 0 8px #37e27b;
+  background: var(--good);
+  box-shadow: 0 0 8px var(--good);
 }
 
 .hud-shift span.red.on {
-  background: #ff3b2f;
-  box-shadow: 0 0 8px #ff3b2f;
+  background: var(--bad);
+  box-shadow: 0 0 8px var(--bad);
 }
 
 .hud-shift span.blue.on,
@@ -948,7 +975,53 @@ body.fatal #loading-text {
 }
 
 .hud-damage-bar span.bad {
-  background: #ff3b2f;
+  background: var(--bad);
+}
+
+/* Tyre wear: the tread left on each tyre, two by two. */
+.hud-tyres {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  width: 100%;
+  margin-bottom: 6px;
+  font: 700 10px var(--font);
+  letter-spacing: 0.08em;
+}
+
+.hud-tyres[hidden] {
+  display: none;
+}
+
+.hud-tyre {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hud-tyre-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-tyre-bar span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--good);
+  transition: width 0.3s ease;
+}
+
+.hud-tyre-bar span.warn {
+  background: #f2b705;
+}
+
+.hud-tyre-bar span.bad {
+  background: var(--bad);
 }
 
 /* Hybrid cars: DRS lamp and ERS battery above the speedo. */
@@ -974,15 +1047,15 @@ body.fatal #loading-text {
 }
 
 .hud-drs.allowed {
-  color: #39d98a;
-  border-color: #39d98a;
+  color: var(--good);
+  border-color: var(--good);
 }
 
 .hud-drs.open {
   color: #051a10;
-  background: #39d98a;
-  border-color: #39d98a;
-  box-shadow: 0 0 12px rgba(57, 217, 138, 0.8);
+  background: var(--good);
+  border-color: var(--good);
+  box-shadow: 0 0 12px var(--good);
 }
 
 .hud-ers {
@@ -1310,7 +1383,7 @@ body.fatal #loading-text {
 }
 
 .skill-pop.crash {
-  color: #ff4a4a;
+  color: var(--bad);
 }
 
 @keyframes skill-pop {

@@ -47,6 +47,10 @@ export interface Settings {
   units: Units;
   overlay: boolean;
   telemetry: boolean;
+  /** Size of the driving HUD's panels, 1 = as designed. */
+  hudScale: number;
+  /** Standard colours, or a colour-safe palette (blue and orange for green and red). */
+  palette: Palette;
   camera: CameraMode;
   aids: DriverAids;
   pad: PadSettings;
@@ -79,6 +83,7 @@ export interface Settings {
   bindings: Bindings;
 }
 
+export type Palette = 'standard' | 'colourSafe';
 export type DamageLevel = 'off' | 'light' | 'full';
 const DAMAGE_LEVELS: readonly DamageLevel[] = ['off', 'light', 'full'];
 /** Damage setting → how much impacts hurt (see Car.damageScale). */
@@ -105,6 +110,8 @@ export const defaultSettings = (): Settings => ({
   units: 'metric',
   overlay: false,
   telemetry: false,
+  hudScale: 1,
+  palette: 'standard',
   camera: 'chase',
   aids: defaultAids(),
   pad: defaultPadSettings(),
@@ -182,6 +189,8 @@ export function parseSettings(raw: unknown): Settings {
     units: raw.units === 'imperial' ? 'imperial' : 'metric',
     overlay: typeof raw.overlay === 'boolean' ? raw.overlay : d.overlay,
     telemetry: typeof raw.telemetry === 'boolean' ? raw.telemetry : d.telemetry,
+    hudScale: num(raw.hudScale, 0.7, 1.5, d.hudScale),
+    palette: raw.palette === 'colourSafe' ? 'colourSafe' : 'standard',
     camera: oneOf(raw.camera, CAMERAS, d.camera),
     aids: {
       abs: oneOf(aids.abs, AID_LEVELS, d.aids.abs),

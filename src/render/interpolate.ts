@@ -18,6 +18,8 @@ export interface WheelRenderState {
   slipAngle: number;
   surface: number;
   camber: number;
+  /** Tread gone: 0 new … 1 worn out. */
+  wear: number;
 }
 
 export interface CarRenderState {
@@ -71,6 +73,7 @@ export function createCarRenderState(): CarRenderState {
       slipAngle: 0,
       surface: 0,
       camber: 0,
+      wear: 0,
     });
   }
   return {
@@ -170,6 +173,7 @@ export function interpolateCar(
     w.slipAngle = buf[o + W.SLIP_ANGLE]!;
     w.surface = buf[o + W.SURFACE]!;
     w.camber = buf[o + W.CAMBER]!;
+    w.wear = buf[o + W.WEAR]!;
   }
   return out;
 }

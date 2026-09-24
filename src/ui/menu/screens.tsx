@@ -21,13 +21,26 @@ import {
   type PadAction,
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
-import type { Detail } from '../../app/settings';
+import type { Detail, Palette } from '../../app/settings';
 import type { AidLevel, HandlingMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
-import type { Difficulty, FestivalDestination, MenuStore, RaceType, ReplayCommand } from './store';
+import { CAREER_TIERS } from '../../content/career';
+import type {
+  CareerInfo,
+  DailyInfo,
+  Difficulty,
+  DriftResult,
+  FestivalDestination,
+  MenuStore,
+  RaceType,
+  ReplayCommand,
+  TrialKind,
+  Championship,
+  TyreWear,
+} from './store';
 import {
   Button,
   Choice,
@@ -174,11 +187,17 @@ export function TitleScreen({ store }: ScreenProps) {
 }
 
 export function MainScreen({ store }: ScreenProps) {
-  const go = (mode: 'race' | 'timeTrial') => {
-    store.update({ mode, trackId: store.setup.value.trackId || TRACKS[0]?.id || '' });
+  const go = (mode: 'race' | 'timeTrial', trial: TrialKind = 'time') => {
+    store.update({
+      mode,
+      trial,
+      daily: '',
+      trackId: store.setup.value.trackId || TRACKS[0]?.id || '',
+    });
     store.push('trackSelect');
   };
   const season = store.championship.value;
+  const daily = store.daily.value;
   const inSeason = season !== null && season.round < season.tracks.length;
   return (
     <div class="mn-panel mn-main">
@@ -214,6 +233,12 @@ export function MainScreen({ store }: ScreenProps) {
           onPress={() => go('timeTrial')}
         />
         <Tile
+          icon="drift"
+          label="Drift Trial"
+          hint="Slide for points"
+          onPress={() => go('timeTrial', 'drift')}
+        />
+        <Tile
           icon="city"
           label="Free Roam"
           hint="The open world"
@@ -234,6 +259,15 @@ export function MainScreen({ store }: ScreenProps) {
           hint={store.settings.schoolDone ? 'Graduated · drive it again' : 'Learn to race'}
           onPress={() => store.actions.startSchool()}
         />
+        {daily && (
+          <Tile
+            icon="calendar"
+            label="Daily Challenge"
+            hint={dailyHint(daily)}
+            size="wide"
+            onPress={() => store.actions.startDaily()}
+          />
+        )}
       </nav>
       <nav class="mn-tiles small">
         <Tile icon="gear" label="Settings" size="small" onPress={() => store.push('settings')} />
@@ -243,6 +277,12 @@ export function MainScreen({ store }: ScreenProps) {
       </nav>
     </div>
   );
+}
+
+/** The daily tile's line: the circuit, the car, the conditions and today's best. */
+function dailyHint(daily: DailyInfo): string {
+  const best = daily.best ? ` · best ${formatTime(daily.best)}` : '';
+  return `${daily.trackName} · ${daily.carName} · ${daily.conditions}${best}`;
 }
 
 /** First visit: offer the driving school (it can always be found on the main menu). */
@@ -444,6 +484,11 @@ export function ChampionshipScreen({ store }: ScreenProps) {
     <div class="mn-panel">
       <Header title="Championship" subtitle="A season of races: points for the top ten" />
       <div class="mn-list">
+        <Button
+          label="Career"
+          hint={careerHint(store.career.value)}
+          onPress={() => store.push('career')}
+        />
         {running && (
           <>
             <Button
@@ -488,6 +533,12 @@ export function ChampionshipScreen({ store }: ScreenProps) {
           onChange={(laps) => store.update({ laps })}
         />
         <Choice
+          label="Tyre wear"
+          value={setup.tyreWear ?? 'off'}
+          options={TYRE_WEAR}
+          onChange={(tyreWear) => store.update({ tyreWear })}
+        />
+        <Choice
           label="Difficulty"
           value={setup.difficulty}
           options={DIFFICULTY}
@@ -505,6 +556,112 @@ export function ChampionshipScreen({ store }: ScreenProps) {
   );
 }
 
+/** The career button's line on the championship screen. */
+function careerHint(info: CareerInfo | null): string {
+  if (!info) return 'Six series, from street cars to formula cars';
+  if (info.complete) return 'Champion of every series';
+  const tier = info.tiers[info.tier];
+  if (!tier) return '';
+  return info.season
+    ? `${tier.name} · Round ${info.season.round + 1} of ${info.season.races}`
+    : `${tier.name} next`;
+}
+
+/** The career's word on a season's standings: what the finish means for moving up. */
+function careerLine(champ: Championship, done: boolean, position: number): string | null {
+  if (champ.career === undefined) return null;
+  const tier = CAREER_TIERS[champ.career];
+  if (!tier) return null;
+  const next = CAREER_TIERS[champ.career + 1];
+  if (!done) return `${tier.name}: finish P${tier.promote} or better to move up.`;
+  if (position <= tier.promote) {
+    return next ? `Promoted to the ${next.name}!` : 'Every series won: the career is complete.';
+  }
+  return `P${tier.promote} or better was needed to move up: the ${tier.name} can be run again.`;
+}
+
+/** The career: the ladder of series, the season under way, and the car for the next one. */
+export function CareerScreen({ store }: ScreenProps) {
+  const info = store.career.value;
+  const tier = info ? CAREER_TIERS[info.tier] : undefined;
+  const cars = tier ? CARS.filter((c) => c.className === tier.className) : [];
+  const [carId, setCarId] = useState(() => {
+    const chosen = store.setup.value.carId;
+    return cars.some((c) => c.id === chosen) ? chosen : (cars[0]?.id ?? '');
+  });
+  if (!info) return null;
+  return (
+    <div class="mn-panel mn-wide mn-career">
+      <Header
+        title="Career"
+        subtitle={
+          info.complete
+            ? 'Champion of every series'
+            : tier
+              ? `${tier.name} · ${tier.className} cars`
+              : ''
+        }
+      />
+      <div class="mn-list">
+        {info.season ? (
+          <>
+            <Button
+              label="Continue season"
+              hint={`Round ${info.season.round + 1} of ${info.season.races} · ${info.season.next}${info.season.round > 0 ? ` · P${info.season.position} so far` : ''}`}
+              onPress={() => store.actions.continueCareer()}
+              autofocus
+              primary
+            />
+            <Button label="Standings" onPress={() => store.push('standings')} />
+          </>
+        ) : (
+          tier && (
+            <>
+              <Choice
+                label="Car"
+                value={carId}
+                options={cars.map((c) => ({ value: c.id, text: c.name }))}
+                onChange={setCarId}
+                wrap
+              />
+              <Button
+                label={`Start the ${tier.name}`}
+                hint={`${tier.races} races · ${tier.laps} laps each · ${tier.opponents} rivals · ${tier.difficulty} · finish P${tier.promote} or better to move up`}
+                onPress={() => store.actions.startCareerSeason(carId)}
+                autofocus
+                primary
+              />
+            </>
+          )
+        )}
+      </div>
+      <div class="mn-career-ladder">
+        {info.tiers.map((t, i) => (
+          <div class={`mn-career-tier ${t.status}`} key={i}>
+            <span class="mn-career-step">{i + 1}</span>
+            <span class="mn-career-name">{t.name}</span>
+            <span class="mn-dim">
+              {t.className} · {t.races} races · {t.difficulty}
+            </span>
+            <span class="mn-career-state">
+              {t.status === 'done'
+                ? `P${t.position}`
+                : t.status === 'current'
+                  ? t.position
+                    ? `P${t.position} last time`
+                    : 'Now'
+                  : `Top ${t.promote} above`}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div class="mn-row-buttons">
+        <Button label="Restart career" onPress={() => store.actions.resetCareer()} />
+      </div>
+    </div>
+  );
+}
+
 export function StandingsScreen({ store }: ScreenProps) {
   const champ = store.championship.value;
   if (!champ) return null;
@@ -514,6 +671,7 @@ export function StandingsScreen({ store }: ScreenProps) {
     .sort((a, b) => b.points - a.points || a.car - b.car);
   const next = done ? undefined : TRACKS.find((t) => t.id === champ.tracks[champ.round]);
   const playerPos = order.findIndex((o) => o.car === 0) + 1;
+  const career = careerLine(champ, done, playerPos);
   return (
     <div class="mn-panel mn-wide mn-results">
       <Header
@@ -526,6 +684,7 @@ export function StandingsScreen({ store }: ScreenProps) {
             : `After round ${champ.round} of ${champ.tracks.length}`
         }
       />
+      {career && <p class="mn-note">{career}</p>}
       <table class="mn-table">
         <thead>
           <tr>
@@ -619,10 +778,11 @@ export function RaceSetupScreen({ store }: ScreenProps) {
   const aids = store.settings.aids;
   const track = TRACKS.find((t) => t.id === setup.trackId);
   const race = setup.mode === 'race';
+  const drift = !race && setup.trial === 'drift';
   return (
     <div class="mn-panel">
       <Header
-        title={race ? 'Race setup' : 'Time trial setup'}
+        title={race ? 'Race setup' : drift ? 'Drift trial setup' : 'Time trial setup'}
         subtitle={track ? `${track.name} · ${track.location}` : ''}
       />
       <div class="mn-list">
@@ -655,6 +815,12 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(difficulty) => store.update({ difficulty })}
             />
             <Choice
+              label="Tyre wear"
+              value={setup.tyreWear ?? 'off'}
+              options={TYRE_WEAR}
+              onChange={(tyreWear) => store.update({ tyreWear })}
+            />
+            <Choice
               label="Qualifying"
               value={setup.qualifying ?? 0}
               options={QUALIFYING}
@@ -674,8 +840,16 @@ export function RaceSetupScreen({ store }: ScreenProps) {
             <FieldChoices store={store} />
           </>
         )}
+        {drift && (
+          <Choice
+            label="Laps"
+            value={setup.driftLaps ?? 2}
+            options={[1, 2, 3].map((n) => ({ value: n, text: String(n) }))}
+            onChange={(driftLaps) => store.update({ driftLaps })}
+          />
+        )}
         <ConditionChoices store={store} />
-        <AidChoices store={store} aids={aids} />
+        <AidChoices store={store} aids={aids} drift={drift} />
         <Button
           label={race ? (setup.qualifying > 0 ? 'Start qualifying' : 'Start race') : 'Start'}
           primary
@@ -752,6 +926,19 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
   );
 }
 
+/** The HUD's colours: as designed, or safe for eyes that can't tell red from green. */
+const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
+  { value: 'standard', text: 'Standard' },
+  { value: 'colourSafe', text: 'Colour-safe: blue and orange' },
+];
+
+/** Whether the tyres wear over a race, and how fast. */
+const TYRE_WEAR: ReadonlyArray<{ value: TyreWear; text: string }> = [
+  { value: 'off', text: 'Off' },
+  { value: 'normal', text: 'Normal: a few per cent a lap' },
+  { value: 'fast', text: 'Fast' },
+];
+
 /** Laps of qualifying before a race: the best lap sets the grid. */
 const QUALIFYING: ReadonlyArray<{ value: number; text: string }> = [
   { value: 0, text: 'None' },
@@ -770,15 +957,28 @@ const HANDLING: ReadonlyArray<{ value: HandlingMode; text: string }> = [
   { value: 'arcade', text: 'Arcade: grip, drifts, nitro, skill points' },
 ];
 
-function AidChoices({ store, aids }: { store: MenuStore; aids: MenuStore['settings']['aids'] }) {
+function AidChoices({
+  store,
+  aids,
+  drift = false,
+}: {
+  store: MenuStore;
+  aids: MenuStore['settings']['aids'];
+  /** A drift trial: arcade handling, no choice about it. */
+  drift?: boolean;
+}) {
   return (
     <>
-      <Choice
-        label="Handling"
-        value={store.setup.value.handling}
-        options={HANDLING}
-        onChange={(handling) => store.update({ handling })}
-      />
+      {drift ? (
+        <p class="mn-note">Arcade handling: the drifts score, chained for a multiplier.</p>
+      ) : (
+        <Choice
+          label="Handling"
+          value={store.setup.value.handling}
+          options={HANDLING}
+          onChange={(handling) => store.update({ handling })}
+        />
+      )}
       <Choice
         label="Gearbox"
         value={aids.gearbox}
@@ -1101,15 +1301,19 @@ export function ResultsScreen({ store }: ScreenProps) {
     <div class="mn-panel mn-wide mn-results">
       <Header
         title={
-          results.qualifying
-            ? 'Qualifying'
-            : results.mode === 'race'
-              ? 'Race results'
-              : 'Session results'
+          results.drift
+            ? 'Drift trial'
+            : results.qualifying
+              ? 'Qualifying'
+              : results.mode === 'race'
+                ? 'Race results'
+                : 'Session results'
         }
         subtitle={results.trackName}
       />
-      {results.mode === 'timeTrial' ? (
+      {results.drift ? (
+        <DriftResultCard drift={results.drift} />
+      ) : results.mode === 'timeTrial' ? (
         <div class="mn-record">
           <div>
             Best lap <strong>{formatTime(results.bestLap ?? 0)}</strong>
@@ -1196,6 +1400,29 @@ export function ResultsScreen({ store }: ScreenProps) {
           <Button label="Main menu" onPress={() => store.actions.quitToMenu()} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** A drift trial's card: the score with its medal, the best, and the targets. */
+function DriftResultCard({ drift }: { drift: DriftResult }) {
+  const n = (v: number) => v.toLocaleString('en-US');
+  return (
+    <div class="mn-record">
+      <div>
+        Drift score <strong>{n(drift.score)}</strong>
+        {drift.medal && (
+          <span class={`mn-badge mn-medal ${drift.medal}`}>{drift.medal.toUpperCase()}</span>
+        )}
+      </div>
+      <div>
+        Best <strong>{n(drift.best)}</strong>
+        {drift.newBest && <span class="mn-badge">New best!</span>}
+      </div>
+      <div class="mn-dim">
+        Gold {n(drift.targets.gold)} · Silver {n(drift.targets.silver)} · Bronze{' '}
+        {n(drift.targets.bronze)}
+      </div>
     </div>
   );
 }
@@ -1503,6 +1730,21 @@ export function SettingsScreen({ store }: ScreenProps) {
               label="Performance overlay"
               value={s.overlay}
               onChange={(v) => ((s.overlay = v), changed())}
+            />
+            <Slider
+              label="HUD size"
+              value={s.hudScale}
+              min={0.8}
+              max={1.4}
+              step={0.05}
+              format={percent}
+              onChange={(v) => ((s.hudScale = v), changed())}
+            />
+            <Choice
+              label="Colours"
+              value={s.palette}
+              options={PALETTES}
+              onChange={(v) => ((s.palette = v), changed())}
             />
           </Section>
         )}

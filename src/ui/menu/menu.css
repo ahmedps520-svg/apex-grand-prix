@@ -444,6 +444,25 @@
   font-size: 20px;
 }
 
+.mn-note {
+  margin: 2px 0 4px;
+  padding: 6px 14px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.mn-medal {
+  animation: none;
+}
+
+.mn-medal.silver {
+  background: #d9dde3;
+}
+
+.mn-medal.bronze {
+  background: #d99a5b;
+}
+
 .mn-badge {
   margin-left: 10px;
   padding: 2px 8px;
@@ -1077,6 +1096,40 @@
   text-align: center;
 }
 
+/* A strip across both columns: the icon beside the label, the hint always in view. */
+.mn-tile.wide {
+  grid-column: span 2;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    'icon label'
+    'icon hint';
+  align-content: center;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  min-height: 60px;
+  padding: 9px 16px;
+  background: linear-gradient(135deg, rgba(255, 201, 51, 0.22), rgba(12, 15, 22, 0.86) 70%);
+}
+
+.mn-tile.wide .mn-icon {
+  grid-area: icon;
+}
+
+.mn-tile.wide .mn-tile-label {
+  grid-area: label;
+  font-size: 16px;
+}
+
+.mn-tile.wide .mn-tile-hint {
+  grid-area: hint;
+  max-height: 2em;
+  opacity: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mn-tiles > .mn-tile:nth-child(2) {
   animation-delay: 0.05s;
 }
@@ -1312,7 +1365,36 @@
 }
 
 /* Short screens (landscape phones, small windows): tighter menus. */
+/* Laptops and tablets on their side: the main menu's tiles fit without a scroll. */
+@media (max-height: 780px) and (min-height: 641px) {
+  .mn-main .logo {
+    font-size: clamp(28px, 4vw, 44px);
+  }
+
+  .mn-main .mn-tile {
+    min-height: 82px;
+    padding: 12px 16px;
+  }
+
+  .mn-main .mn-tile.big {
+    min-height: 108px;
+  }
+
+  .mn-main .mn-tile.small {
+    min-height: 54px;
+  }
+
+  .mn-main .mn-tile.wide {
+    min-height: 56px;
+    padding: 8px 16px;
+  }
+}
+
 @media (max-height: 640px) {
+  .mn-tiles {
+    gap: 8px;
+  }
+
   .mn-tile {
     min-height: 72px;
     padding: 10px 14px;
@@ -1323,7 +1405,16 @@
   }
 
   .mn-tile.small {
-    min-height: 48px;
+    min-height: 44px;
+  }
+
+  .mn-tile.wide {
+    min-height: 44px;
+    padding: 6px 14px;
+  }
+
+  .mn-tile.wide .mn-tile-hint {
+    display: none;
   }
 
   .mn-car-row {
@@ -1417,4 +1508,60 @@
 
 .mn-board-row.bronze .mn-dim {
   color: #d99a5b;
+}
+
+/* The career's ladder: one row a series, the current one lit, the ones above dimmed. */
+.mn-career-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 10px;
+}
+
+.mn-career-tier {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  grid-template-areas:
+    'step name state'
+    'step meta state';
+  align-items: center;
+  column-gap: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mn-career-tier.current {
+  background: rgba(255, 59, 47, 0.18);
+  border: 1px solid rgba(255, 59, 47, 0.4);
+}
+
+.mn-career-tier.locked {
+  opacity: 0.55;
+}
+
+.mn-career-step {
+  grid-area: step;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.mn-career-name {
+  grid-area: name;
+  font-weight: 800;
+}
+
+.mn-career-tier .mn-dim {
+  grid-area: meta;
+  font-size: 13px;
+}
+
+.mn-career-state {
+  grid-area: state;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mn-career-tier.done .mn-career-state {
+  color: #ffd166;
 }

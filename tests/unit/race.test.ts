@@ -287,6 +287,36 @@ describe('qualifying', () => {
   });
 });
 
+describe('tyre wear', () => {
+  /** One AI car lapping alone for `seconds`, wearing at `rate`. */
+  const lapAlone = (rate: number, seconds: number) => {
+    const car = new Car(TEST_MULE, track.gridSlot(0), track);
+    car.wearRate = rate;
+    const driver = new AiDriver(track, line, { skill: 0.95, seed: 7 });
+    race([car], [driver], null, seconds, () => false);
+    return car;
+  };
+
+  it('takes the tread a few per cent a lap at racing pace, and none when off', () => {
+    const fresh = lapAlone(0, 60);
+    expect(fresh.tyreWear).toBe(0);
+    expect(fresh.gripFactor).toBe(1);
+    const worn = lapAlone(1, 90);
+    const wears = worn.wheels.map((w) => w.wear);
+    // A lap of the 2.3 km loop takes about a minute: a few per cent, more at the fast rate.
+    expect(worn.tyreWear).toBeGreaterThan(0.02);
+    expect(worn.tyreWear).toBeLessThan(0.25);
+    expect(wears.every((w) => w > 0)).toBe(true);
+    expect(worn.gripFactor).toBeLessThan(1);
+    expect(worn.gripFactor).toBeGreaterThan(0.9);
+    const fast = lapAlone(2.5, 90);
+    expect(fast.tyreWear).toBeGreaterThan(worn.tyreWear * 2);
+    // New tyres.
+    fast.freshTyres();
+    expect(fast.tyreWear).toBe(0);
+  });
+});
+
 describe('car contacts', () => {
   it('pushes overlapping cars apart without invalid numbers', () => {
     const p = track.at(100);
