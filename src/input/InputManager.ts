@@ -405,6 +405,8 @@ export class InputManager {
       d.indicatorLeft += presses.indicatorLeft;
       d.indicatorRight += presses.indicatorRight;
       if (touch.horn) d.horn = true;
+      for (let i = 0; i < presses.camera; i++) this.actions.push('camera');
+      for (let i = 0; i < presses.reset; i++) this.actions.push('reset');
       if (presses.pause) this.actions.push('pause');
       throttle = Math.max(throttle, touch.throttle);
       brake = Math.max(brake, touch.brake);

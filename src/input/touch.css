@@ -143,3 +143,18 @@
 .tc-pause.down {
   transform: translateX(-50%) scale(0.94);
 }
+
+/* The camera and the reset, to the right of the pause button. */
+.tc-extras {
+  position: absolute;
+  top: calc(12px + var(--safe-top));
+  left: calc(50% + 40px);
+  display: flex;
+  gap: 8px;
+}
+
+.tc-extra {
+  width: 62px;
+  height: 44px;
+  font-size: 12px;
+}

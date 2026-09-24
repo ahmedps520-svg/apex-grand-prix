@@ -944,3 +944,9 @@ You agreed with all the push-backs in §2: no real-time ray tracing, path tracin
 - **Stereo for the other cars:** each of the other cars' engine voices goes through a stereo panner (where the browser has one), panned by the car's bearing from the focused car's heading (`bearingPan`): a car on your right sits right, one straight ahead or behind is centred, and one right beside you is centred rather than snapping to a side.
 - **Tests:** the headlights come on at night and not by day; the pan follows the bearing in both headings, centres close by and stays finite on bad input.
 - **Honest limits:** the touch row has no quick menu (TC, ABS, gearbox) and no camera button yet; there is no touch button for the festival map beyond the pause menu; the pan is by bearing only (no distance-based width or Doppler).
+
+### Push 20: Touch completeness and the arcade rubber band (v0.20.0)
+- **CAM and RESET on touch:** two buttons beside the pause button in every mode (`TouchControls.take` counts the taps; the input manager turns them into the `camera` and `reset` actions the keys and pads already raise), so an iPad can change camera and reset or repair the car.
+- **The arcade rubber band** (`AiDriver.paceScale`, `arcadePace`, `World.rubberBand`): in an arcade race each rival's speed plan is scaled by its gap to the player in laps (0.35 per lap, between 0.9 and 1.1): rivals behind push on, rivals ahead ease off; sim races keep their honest pace, and nothing pulls before the lights go out.
+- **Tests:** the band's curve and limits; an arcade race pulls the rivals by their progress and a sim race leaves them at 1.
+- **Honest limits:** the touch row still has no quick menu (TC, ABS, gearbox); the band scales the whole plan rather than only the straights, so a trailing rival also corners a little quicker.

@@ -13,7 +13,7 @@ import {
   type SessionConfig,
   type SpawnPoint,
 } from '../shared/protocol';
-import { AiDriver } from './race/AiDriver';
+import { AiDriver, arcadePace } from './race/AiDriver';
 import { resolveCarContacts } from './race/collisions';
 import { RaceDirector } from './race/RaceDirector';
 import { DEFAULT_LINE_OPTIONS, computeRacingLine, type RacingLineOptions } from './race/racingLine';
@@ -253,10 +253,29 @@ export class World {
     this.racers?.step(dt, cars[0]!);
     this.pedestrians?.step(dt, cars[0]!, this.traffic);
     director?.update(dt, cars);
+    this.rubberBand();
     this.drsTimer -= dt;
     if (this.drsTimer <= 0) {
       this.drsTimer = 0.02;
       this.updateDrs();
+    }
+  }
+
+  /**
+   * Arcade races: each rival's pace bends towards the player's position, so the race stays a
+   * race whoever is faster (sim races keep their honest pace). Runs every step, after the
+   * director has measured the field.
+   */
+  rubberBand(): void {
+    const status = this.director?.status;
+    const player = this.cars[0];
+    if (!status || !player?.arcade || status.mode !== 'race' || this.drivers[0]) return;
+    const mine = status.cars[0]?.progress ?? 0;
+    for (let i = 1; i < this.drivers.length; i++) {
+      const ai = this.drivers[i];
+      if (!ai) continue;
+      const theirs = status.cars[i]?.progress ?? mine;
+      ai.paceScale = status.phase === 'racing' ? arcadePace(mine - theirs) : 1;
     }
   }
 

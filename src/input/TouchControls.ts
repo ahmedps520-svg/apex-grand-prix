@@ -33,6 +33,8 @@ export class TouchControls {
   private pendingUp = 0;
   private pendingDown = 0;
   private pendingPause = false;
+  private pendingCamera = 0;
+  private pendingReset = 0;
   private pendingLights = 0;
   private pendingHazards = 0;
   private pendingIndicatorLeft = 0;
@@ -69,6 +71,13 @@ export class TouchControls {
       this.hold('tc-small tc-hb', 'HB', (v) => (this.handbrake = v)),
     );
     const pause = this.tap('tc-pause', 'II', () => (this.pendingPause = true));
+    // Beside the pause button: the camera and the reset, in every mode.
+    const extras = document.createElement('div');
+    extras.className = 'tc-extras';
+    extras.append(
+      this.tap('tc-small tc-extra', 'CAM', () => this.pendingCamera++),
+      this.tap('tc-small tc-extra', 'RESET', () => this.pendingReset++),
+    );
     // Free roam: lights, indicators, hazards and the horn, top left (shown by setRoam).
     this.roam.className = 'tc-roam';
     this.roam.hidden = true;
@@ -79,7 +88,7 @@ export class TouchControls {
       this.tap('tc-small tc-roam-btn tc-hazards', '▲', () => this.pendingHazards++),
       this.hold('tc-small tc-roam-btn tc-horn', 'HORN', (v) => (this.horn = v > 0)),
     );
-    this.root.append(pedals, paddles, pause, this.roam);
+    this.root.append(pedals, paddles, pause, extras, this.roam);
     parent.appendChild(this.root);
     window.addEventListener('deviceorientation', (e) => this.onTilt(e));
     // iOS: motion access asked for outside a tap fails; ask again on the first tap.
@@ -143,6 +152,8 @@ export class TouchControls {
     shiftUp: number;
     shiftDown: number;
     pause: boolean;
+    camera: number;
+    reset: number;
     lights: number;
     hazards: number;
     indicatorLeft: number;
@@ -152,6 +163,8 @@ export class TouchControls {
       shiftUp: this.pendingUp,
       shiftDown: this.pendingDown,
       pause: this.pendingPause,
+      camera: this.pendingCamera,
+      reset: this.pendingReset,
       lights: this.pendingLights,
       hazards: this.pendingHazards,
       indicatorLeft: this.pendingIndicatorLeft,
@@ -160,6 +173,8 @@ export class TouchControls {
     this.pendingUp = 0;
     this.pendingDown = 0;
     this.pendingPause = false;
+    this.pendingCamera = 0;
+    this.pendingReset = 0;
     this.pendingLights = 0;
     this.pendingHazards = 0;
     this.pendingIndicatorLeft = 0;
