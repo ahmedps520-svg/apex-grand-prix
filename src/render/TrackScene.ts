@@ -358,17 +358,17 @@ export class TrackScene {
   /** Sets the lights, sky, fog, wet surfaces and rain from `this.look`. */
   private applyLook(): void {
     const look = this.look;
-    const toward = (out: THREE.Vector3, elevationDeg: number) => {
+    const toward = (out: THREE.Vector3, elevationDeg: number, azimuthDeg: number) => {
       const elevation = THREE.MathUtils.degToRad(elevationDeg);
-      const azimuth = THREE.MathUtils.degToRad(look.sunAzimuth);
+      const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
       return out.set(
         Math.cos(elevation) * Math.sin(azimuth),
         Math.sin(elevation),
         Math.cos(elevation) * Math.cos(azimuth),
       );
     };
-    toward(this.sunDirection, look.sunElevation);
-    toward(this.lightDirection, look.lightElevation);
+    toward(this.sunDirection, look.sunElevation, look.sunAzimuth);
+    toward(this.lightDirection, look.lightElevation, look.lightAzimuth);
     this.atmosphere.set(look, this.sunDirection);
     this.hemi.color.copy(look.hemiSky);
     this.hemi.groundColor.copy(look.hemiGround);

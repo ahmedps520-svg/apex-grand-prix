@@ -11,9 +11,11 @@ import {
   grassGain,
   otherEngineCutoff,
   otherEngineLevel,
+  rainGain,
   saturationCurve,
   softClipCurve,
   softSquareWave,
+  sprayGain,
   squealFrequency,
   squealGain,
   v8ExhaustWave,
@@ -420,5 +422,25 @@ describe('EngineAudio', () => {
     audio.unlock();
     expect(paramCalls).toBe(calls);
     expect(FakeContext.instances).toHaveLength(1);
+  });
+});
+
+describe('rain mappings', () => {
+  it('patters with the rainfall and sprays with wetness and speed', () => {
+    expect(rainGain(0)).toBe(0);
+    expect(rainGain(0.45)).toBeGreaterThan(0.4);
+    expect(rainGain(1)).toBe(1);
+    expect(rainGain(0.45)).toBeLessThan(rainGain(1));
+    expect(sprayGain(1, 0)).toBe(0);
+    expect(sprayGain(0, 40)).toBe(0);
+    expect(sprayGain(1, 15)).toBeGreaterThan(0);
+    expect(sprayGain(1, 15)).toBeLessThan(sprayGain(1, 30));
+    expect(sprayGain(1, 30)).toBe(1);
+    expect(sprayGain(1, 60)).toBe(1);
+    expect(sprayGain(0.5, 30)).toBeCloseTo(0.5, 9);
+    for (const v of [Number.NaN, -3, 1e9]) {
+      expect(Number.isFinite(rainGain(v))).toBe(true);
+      expect(Number.isFinite(sprayGain(v, v))).toBe(true);
+    }
   });
 });

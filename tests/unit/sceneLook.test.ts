@@ -38,3 +38,31 @@ describe('the scene look', () => {
     expect(overcast.lightElevation).toBeGreaterThan(50);
   });
 });
+
+describe('the shadow light', () => {
+  it("shines from the sun by day and from the moon's side at night", () => {
+    const day = sceneLook(theme, { time: 'midday', weather: 'clear' });
+    expect(day.lightAzimuth).toBe(day.sunAzimuth);
+    expect(day.lightElevation).toBe(60);
+    const night = sceneLook(theme, { time: 'night', weather: 'clear' });
+    expect(night.lightAzimuth).toBeCloseTo(night.sunAzimuth + 180, 9);
+    expect(night.lightElevation).toBeCloseTo(25, 9);
+    // Twilight swings it part of the way, never with a jump.
+    let last = sceneLook(
+      theme,
+      { time: 'track', weather: 'clear' },
+      { elevation: 4, azimuth: 200 },
+    );
+    for (let e = 3.5; e >= -8; e -= 0.5) {
+      const look = sceneLook(
+        theme,
+        { time: 'track', weather: 'clear' },
+        { elevation: e, azimuth: 200 },
+      );
+      expect(Math.abs(look.lightAzimuth - last.lightAzimuth)).toBeLessThan(25);
+      expect(Math.abs(look.lightElevation - last.lightElevation)).toBeLessThan(4);
+      last = look;
+    }
+    expect(last.lightAzimuth).toBeCloseTo(380, 6);
+  });
+});

@@ -50,6 +50,8 @@ const HARD_BRAKE = 4.5;
 const STOP_WAIT = 0.9;
 const HAZARD_TIME = 12;
 /** A siren this close: slow to this (m/s) and ease this far over to the right. */
+/** How much of the limit the traffic gives up on a soaked road. */
+const WET_SLOWING = 0.18;
 const SIREN_RANGE = 70;
 const PULL_OVER_SPEED = 2;
 const PULL_OVER_OFFSET = 1.7;
@@ -125,6 +127,8 @@ export class Traffic {
   readonly count: number;
   /** Times the player has hit a car (the police count it as an offence when they see it). */
   playerHits = 0;
+  /** How wet the road is, 0 … 1: the traffic keeps below the limits in the wet. */
+  wet = 0;
 
   constructor(
     readonly map: CityMap,
@@ -193,6 +197,11 @@ export class Traffic {
   }
 
   /** One physics step: drivers decide at CONTROL_HZ, every car moves every step. */
+  /** The share of the limit the traffic drives at: all of it dry, less as the road gets wet. */
+  get wetPace(): number {
+    return 1 - WET_SLOWING * Math.max(0, Math.min(this.wet, 1));
+  }
+
   step(dt: number, player: Car): void {
     this.time += dt;
     this.controlTimer += dt;
@@ -333,11 +342,11 @@ export class Traffic {
             Math.hypot(player.vel.x, player.vel.z) * 1.15 + 5,
             22,
           )
-      : kmh(link.speedLimit || 60) * car.pace;
+      : kmh(link.speedLimit || 60) * car.pace * this.wetPace;
     // Slow for the next link's limit as its start nears.
     let target = limit;
     if (car.next) {
-      const nextLimit = kmh(car.next.speedLimit || 60) * car.pace;
+      const nextLimit = kmh(car.next.speedLimit || 60) * car.pace * this.wetPace;
       if (nextLimit < target)
         target = Math.min(
           target,

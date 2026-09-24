@@ -13,7 +13,9 @@ import {
   isRaining,
   isTimeOfDay,
   isWeather,
+  rainfall,
   sunElevationAt,
+  wetness,
   type Conditions,
   type Weather,
 } from '../content/conditions';
@@ -3033,6 +3035,9 @@ export class Game {
     frame.speed = Math.abs(state.speed);
     frame.slip = slip;
     frame.offRoad = contacts > 0 ? offRoad / contacts : 0;
+    const sky = this.skyNow();
+    frame.rain = sky.rain;
+    frame.wet = sky.wet;
     this.audio.update(dt, frame);
     this.audio.updateOthers(dt, this.nearestEngines(state));
   }
@@ -3126,6 +3131,18 @@ export class Game {
         this.toasts.show('The rain is easing off', { timeout: 6 });
     }
     return mix;
+  }
+
+  /** The rain falling and the road's wetness now, 0 … 1: the moving weather's mix, or the conditions'. */
+  private skyNow(): { rain: number; wet: number } {
+    const chosen = this.session?.conditions?.weather ?? 'clear';
+    const mix = this.sim.latest?.weather;
+    if (!mix) return { rain: rainfall(chosen), wet: wetness(chosen) };
+    const t = Math.max(0, Math.min(mix.blend, 1));
+    return {
+      rain: rainfall(mix.from) + (rainfall(mix.to) - rainfall(mix.from)) * t,
+      wet: wetness(mix.from) + (wetness(mix.to) - wetness(mix.from)) * t,
+    };
   }
 
   /** How dark it is now, 0 … 1: by the day's clock in free roam, else by the time of day. */

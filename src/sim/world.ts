@@ -1,7 +1,14 @@
 import { SPAWN, SPAWNS } from '../content/testGround';
 import { TRACKS, trackById } from '../content/tracks';
 import { mulberry32 } from '../shared/math';
-import { afterDark, dayRate, hourOf, sunElevationAt, wrapHour } from '../content/conditions';
+import {
+  afterDark,
+  dayRate,
+  hourOf,
+  sunElevationAt,
+  wetness,
+  wrapHour,
+} from '../content/conditions';
 import { cityHourOf } from '../content/city/day';
 import {
   CAR_STRIDE,
@@ -148,6 +155,7 @@ export class World {
         if (world.traffic) world.traffic.pedestrians = world.pedestrians;
       }
       world.startWeather(config);
+      if (world.traffic) world.traffic.wet = wetness(config.conditions?.weather ?? 'clear');
       return world;
     }
     if (config.mode === 'free' || !config.trackId) {
@@ -338,6 +346,7 @@ export class World {
     if (!weather) return;
     weather.step(dt);
     this.surface.gripScale = weather.grip;
+    if (this.traffic) this.traffic.wet = weather.wetness;
   }
 
   /**

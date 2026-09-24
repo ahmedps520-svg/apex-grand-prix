@@ -35,6 +35,8 @@ import {
   squealFrequency,
   squealGain,
   v8ExhaustWave,
+  rainGain,
+  sprayGain,
   windCutoff,
   windGain,
   type ExhaustShape,
@@ -56,6 +58,9 @@ export interface AudioFrame {
   slip: number;
   /** 0..1: how much of the tyre contact is on grass (grass: no squeal, a soft rumble instead is optional). */
   offRoad: number;
+  /** Rain falling on the car, 0 … 1, and how wet the road is, 0 … 1 (spray with speed). */
+  rain?: number;
+  wet?: number;
 }
 
 /** Mix levels, balanced against each other; the compressor and clip guard catch the sum. */
@@ -66,6 +71,8 @@ const LEVEL = {
   squeal: 0.7,
   wind: 0.25,
   grass: 0.9,
+  rain: 0.45,
+  spray: 0.5,
   others: 0.3,
 } as const;
 
@@ -178,6 +185,8 @@ interface Graph {
   windCutoff: Knob;
   wind: Knob;
   grass: Knob;
+  rain: Knob;
+  spray: Knob;
   /** The other cars' voices: pitch, brightness, level and (where the browser has it) pan each. */
   others: Array<{ pitch: Knob; cutoff: Knob; level: Knob; pan: Knob | null }>;
 }
@@ -390,6 +399,8 @@ export class EngineAudio {
     g.windCutoff.set(windCutoff(f.speed), now, tone);
     g.wind.set(windGain(f.speed) * LEVEL.wind, now, tone);
     g.grass.set(grassGain(f.offRoad, f.speed) * LEVEL.grass, now, tone);
+    g.rain.set(rainGain(f.rain ?? 0) * LEVEL.rain, now, tone);
+    g.spray.set(sprayGain(f.wet ?? 0, f.speed) * LEVEL.spray, now, tone);
 
     // Stall guard: every frame pushes a fade-out STALL_TIMEOUT into the future. If frames stop
     // (long hitch, a pause without suspend()), the fade runs instead of the note droning on. When
@@ -567,6 +578,13 @@ function buildGraph(ctx: BaseAudioContext): Graph {
   const grassFilter = filterNode(ctx, 'lowpass', 160, 4);
   const grass = gainNode(ctx, 0);
   roadNoise.connect(grassFilter).connect(grass).connect(stallGuard);
+  // Rain: a patter on the roof and glass (a band of hiss), and the spray off a wet road.
+  const rainFilter = filterNode(ctx, 'bandpass', 2600, 0.5);
+  const rain = gainNode(ctx, 0);
+  roadNoise.connect(rainFilter).connect(rain).connect(stallGuard);
+  const sprayFilter = filterNode(ctx, 'lowpass', 900, 0.7);
+  const spray = gainNode(ctx, 0);
+  roadNoise.connect(sprayFilter).connect(spray).connect(stallGuard);
 
   // Other cars' engines: one exhaust wave each, muffled and faded with distance, each detuned
   // a little from the player's and from each other so they don't phase.
@@ -629,5 +647,7 @@ function buildGraph(ctx: BaseAudioContext): Graph {
     windCutoff: new Knob(windFilter.frequency),
     wind: new Knob(wind.gain),
     grass: new Knob(grass.gain),
+    rain: new Knob(rain.gain),
+    spray: new Knob(spray.gain),
   };
 }
