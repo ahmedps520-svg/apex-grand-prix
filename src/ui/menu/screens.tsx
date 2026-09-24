@@ -260,7 +260,7 @@ export function MainScreen({ store }: ScreenProps) {
             icon="calendar"
             label="Daily Challenge"
             hint={dailyHint(daily)}
-            size="big"
+            size="wide"
             onPress={() => store.actions.startDaily()}
           />
         )}
