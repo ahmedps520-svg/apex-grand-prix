@@ -59,8 +59,9 @@ export interface SessionSetup {
   gridSlot: number;
   time: Conditions['time'];
   weather: Weather;
-  /** Free roam: whether, and how fast, the day's clock runs. */
+  /** Whether, and how fast, the day's clock runs: on the circuits, and in free roam. */
   dayLength: DayLength;
+  roamDayLength: DayLength;
   /** Who races: everyone in the player's car, mixed cars from their class, or two classes. */
   field: FieldMode;
   /** The other class in a two-class race. */
@@ -244,7 +245,8 @@ export class MenuStore {
     gridSlot: 4,
     time: 'track',
     weather: 'clear',
-    dayLength: 'short',
+    dayLength: 'still',
+    roamDayLength: 'short',
     field: 'same',
     secondClass: 'Touring',
     handling: 'sim',

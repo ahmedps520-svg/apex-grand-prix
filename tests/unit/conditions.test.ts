@@ -21,6 +21,7 @@ import {
   sanitizeConditions,
   sunElevation,
   sunElevationAt,
+  sunPathAt,
   wetness,
   wrapHour,
 } from '../../src/content/conditions';
@@ -131,6 +132,20 @@ describe("the day's clock", () => {
     // The circuit's own sun stands in the afternoon.
     expect(sunElevationAt(hourOf('track', 30))).toBeCloseTo(30, 9);
     expect(hourOf('track', 30)).toBeGreaterThan(12);
+  });
+
+  it("takes the sun across the sky through a circuit's own sun at its hour", () => {
+    const own = sunPathAt(hourAtElevation(30, 'afternoon'), 30, 200);
+    expect(own.elevation).toBeCloseTo(30, 9);
+    expect(own.azimuth).toBeCloseTo(200, 9);
+    expect(sunPathAt(9, 30, 200).azimuth - sunPathAt(6, 30, 200).azimuth).toBeCloseTo(45, 9);
+    expect(sunPathAt(18, 30, 200).azimuth).toBeGreaterThan(sunPathAt(6, 30, 200).azimuth);
+    const wrap = (a: number) => ((a % 360) + 360) % 360;
+    expect(wrap(sunPathAt(23.999, 30, 200).azimuth)).toBeCloseTo(
+      wrap(sunPathAt(0.001, 30, 200).azimuth),
+      1,
+    );
+    expect(sunPathAt(30, 30, 200)).toEqual(sunPathAt(6, 30, 200));
   });
 
   it('wraps at midnight, reads as a clock and runs at the chosen rate', () => {

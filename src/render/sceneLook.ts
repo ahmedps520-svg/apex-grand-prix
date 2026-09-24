@@ -70,6 +70,8 @@ export interface SceneLook {
   rain: number;
   /** Colour of rain streaks and spray (lit by the sky). */
   waterColor: THREE.Color;
+  /** How far into the night the sun is: 0 by day and dusk, 1 with the sun well under. */
+  night: number;
 }
 
 interface WeatherStyle {
@@ -290,5 +292,6 @@ export function sceneLook(
     wetness: wetness(conditions.weather),
     rain: style.rain,
     waterColor: horizon.clone().lerp(color(0xffffff), 0.25),
+    night,
   };
 }

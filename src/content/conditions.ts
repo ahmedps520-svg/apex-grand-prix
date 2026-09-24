@@ -151,6 +151,21 @@ export function hourOf(time: Conditions['time'], trackElevation: number): number
   return hourAtElevation(sunElevation(time, trackElevation), half);
 }
 
+/**
+ * The sun at an hour of the day on a path through a theme's own sun (elevation and bearing,
+ * degrees) at its hour, moving 15° an hour: elevation and bearing, degrees (the bearing is
+ * continuous round midnight, 180° either side of noon).
+ */
+export function sunPathAt(
+  hour: number,
+  themeElevation: number,
+  themeAzimuth: number,
+): { elevation: number; azimuth: number } {
+  const themeHour = hourAtElevation(themeElevation, 'afternoon');
+  const noonAzimuth = themeAzimuth - (themeHour - 12) * 15;
+  return { elevation: sunElevationAt(hour), azimuth: noonAzimuth + (wrapHour(hour) - 12) * 15 };
+}
+
 /** Darkness by sun elevation: full night 6° under the horizon, dusk at 2°, golden hour at 7°, day from 12°. */
 const DARKNESS_CURVE: ReadonlyArray<readonly [number, number]> = [
   [-6, 1],

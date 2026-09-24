@@ -10,7 +10,7 @@ import {
   texture,
   uniform,
 } from 'three/tsl';
-import { DEFAULT_CONDITIONS, type Conditions } from '../content/conditions';
+import { DEFAULT_CONDITIONS, type Conditions, sunPathAt } from '../content/conditions';
 import { mulberry32 } from '../shared/math';
 import { KERB_WIDTH, type Track } from '../sim/track/Track';
 import { Atmosphere } from './Atmosphere';
@@ -135,6 +135,11 @@ export class TrackScene {
   private lightsShown = -2;
   private current: Conditions;
   private look: SceneLook;
+  /** The day's clock: the hour it stands at, or null for the chosen time of day. */
+  private clock: number | null = null;
+  /** The sun and the night the reflections were last rendered for. */
+  private envElevation = NaN;
+  private envNight = NaN;
   /** Road wetness for the road shader: 0 dry … 1 standing water. */
   private readonly wet = uniform(0);
   private readonly wetSurfaces: WetSurface[] = [];
@@ -155,6 +160,7 @@ export class TrackScene {
     this.look = sceneLook(theme, this.current);
 
     this.sky = this.atmosphere.createSky();
+    this.sky.add(this.atmosphere.createNightSky(3));
     this.scene.add(this.sky);
     // Range fog like THREE.Fog, but its colour glows towards the sun (see Atmosphere).
     (this.scene as { fogNode?: THREE.Node }).fogNode = this.atmosphere.createFog();
@@ -208,11 +214,35 @@ export class TrackScene {
       return;
     }
     this.current = { ...conditions };
-    this.look = sceneLook(this.track.def.theme, this.current);
+    this.look = this.makeLook();
     this.applyLook();
     this.follow(this.followed);
     if (this.look.wetness <= 0) this.spraying.clear();
     this.renderEnvironment();
+  }
+
+  /**
+   * The day's clock: the sun moves across the sky with the hour and the sky, the fog and the
+   * light with it; null keeps the chosen time of day's look. Cheap enough to call every frame
+   * (the reflections are re-rendered only as the sun moves on).
+   */
+  setClock(hour: number | null): void {
+    if (hour === this.clock) return;
+    this.clock = hour;
+    this.look = this.makeLook();
+    this.applyLook();
+    this.follow(this.followed);
+    const moved = Math.abs(this.look.sunElevation - this.envElevation) > 1.5;
+    const dimmed = Math.abs(this.look.night - this.envNight) > 0.06;
+    if (moved || dimmed) this.renderEnvironment();
+  }
+
+  /** The look for the conditions, with the sun on its path when the clock runs. */
+  private makeLook(): SceneLook {
+    const theme = this.track.def.theme;
+    const sun =
+      this.clock === null ? undefined : sunPathAt(this.clock, theme.sunElevation, theme.sunAzimuth);
+    return sceneLook(theme, this.current, sun);
   }
 
   /** Reflections for shiny surfaces: a pre-filtered copy of the sky. */
@@ -342,6 +372,8 @@ export class TrackScene {
       this.envTarget = target;
       this.scene.environment = target.texture;
       this.scene.environmentIntensity = this.look.environmentIntensity;
+      this.envElevation = this.look.sunElevation;
+      this.envNight = this.look.night;
     } catch (error) {
       console.warn('Environment map unavailable; continuing without reflections.', error);
     }

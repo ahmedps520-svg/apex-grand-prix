@@ -1,7 +1,7 @@
 import { SPAWN, SPAWNS } from '../content/testGround';
 import { TRACKS, trackById } from '../content/tracks';
 import { mulberry32 } from '../shared/math';
-import { afterDark, dayRate, sunElevationAt, wrapHour } from '../content/conditions';
+import { afterDark, dayRate, hourOf, sunElevationAt, wrapHour } from '../content/conditions';
 import { cityHourOf } from '../content/city/day';
 import {
   CAR_STRIDE,
@@ -78,7 +78,10 @@ export class World {
   racers: Racers | null = null;
   /** Free roam: the pedestrians on the pavements (after the cars in the snapshot). */
   pedestrians: Pedestrians | null = null;
-  /** Free roam: the day's clock, hours, and its rate in hours per real second (null elsewhere). */
+  /**
+   * The day's clock, hours, and its rate in hours per real second: always in free roam (a rate
+   * of 0 stands still), on a circuit only when the clock runs, null on the proving ground.
+   */
   day: { hour: number; rate: number } | null = null;
   private readonly neutral = neutralInput();
   /** Nearest track sample per car (a hint for projecting onto the track). */
@@ -181,6 +184,13 @@ export class World {
       world.cars[i]!.autoHybrid = true;
     }
     for (const car of world.cars) car.damageScale = config.damage ?? 0;
+    // The day's clock when it runs (the hour of the chosen time of day, with the circuit's own
+    // sun in the afternoon); the headlights come on after dark either way.
+    const hour = wrapHour(
+      config.clock ?? hourOf(config.conditions?.time ?? 'track', def.theme.sunElevation),
+    );
+    if ((config.dayCycle ?? 0) > 0) world.day = { hour, rate: dayRate(config.dayCycle!) };
+    if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
     const laps = config.mode === 'race' ? config.laps : 0;
     world.director = new RaceDirector(track, count, config.mode, laps, config.seed);
     world.director.restart(world.cars, Math.min(config.gridSlot, count - 1));
@@ -271,8 +281,8 @@ export class World {
   }
 
   /**
-   * Free roam: the day's clock runs; when dusk falls the headlights come on (the player's and
-   * the traffic's) and at dawn they go off, once each, so the switch still works in between.
+   * The day's clock runs; when dusk falls the headlights come on (every car's, and the
+   * traffic's) and at dawn they go off, once each, so the switch still works in between.
    */
   private tickDay(dt: number): void {
     const day = this.day;
@@ -281,7 +291,7 @@ export class World {
     day.hour = wrapHour(day.hour + dt * day.rate);
     const dark = afterDark(sunElevationAt(day.hour));
     if (dark === wasDark) return;
-    this.cars[0]!.headlights = dark;
+    for (const car of this.cars) car.headlights = dark;
     if (this.traffic) this.traffic.lightsOn = dark;
   }
 

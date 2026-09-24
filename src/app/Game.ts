@@ -9,6 +9,7 @@ import {
   darkness,
   darknessAt,
   gripFactor,
+  hourOf,
   isTimeOfDay,
   isWeather,
   sunElevationAt,
@@ -31,7 +32,7 @@ import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
-import { cityHourOf } from '../content/city/day';
+import { CITY_SUN_ELEVATION, cityHourOf } from '../content/city/day';
 import { cityMap, type CityMap } from '../content/city/map';
 import {
   POLICE_PAINT,
@@ -797,6 +798,12 @@ export class Game {
       : given;
     const seed = (Math.random() * 1e9) | 0;
     const count = setup.mode === 'race' ? setup.opponents + 1 : 1;
+    const dayMinutes =
+      setup.mode === 'roam'
+        ? DAY_MINUTES[setup.roamDayLength]
+        : setup.mode === 'free'
+          ? 0
+          : DAY_MINUTES[setup.dayLength];
     // Free roam: traffic slots for this device, each with its own everyday car.
     const detail =
       this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
@@ -839,9 +846,9 @@ export class Game {
       damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
       grip: gripFactor(setup.weather),
       conditions: { time: setup.time, weather: setup.weather },
-      // Free roam: the day's clock, running at the chosen rate from the spot's hour when continuing.
-      dayCycle: setup.mode === 'roam' ? DAY_MINUTES[setup.dayLength] || undefined : undefined,
-      clock: setup.mode === 'roam' && DAY_MINUTES[setup.dayLength] > 0 ? spot?.hour : undefined,
+      // The day's clock at the chosen rate (never in attract), from the spot's hour when continuing.
+      dayCycle: attract ? undefined : dayMinutes || undefined,
+      clock: setup.mode === 'roam' && dayMinutes > 0 ? spot?.hour : undefined,
       handling: attract ? 'sim' : setup.handling,
     };
   }
@@ -1339,7 +1346,7 @@ export class Game {
         this.hud.setSpeedLimit(
           roam ? cityMap().speedLimitAt(player.pos.x, player.pos.z, player.pos.y) : 0,
         );
-        const clock = roam ? this.roamClock() : null;
+        const clock = this.dayClock();
         this.hud.setClock(clock);
         this.debug.clock = clock;
         this.menuAudio.horn(roam && (player.flags & FLAG_HORN) !== 0);
@@ -1671,11 +1678,12 @@ export class Game {
     const scene = this.scenery;
     if (scene instanceof CityScene) {
       scene.setTime(this.sim.latest?.simTime ?? 0);
-      scene.setClock(this.roamClock());
+      scene.setClock(this.dayClock());
       scene.update(dt, this.camera.camera);
       return;
     }
     if (!(scene instanceof TrackScene)) return;
+    scene.setClock(this.dayClock());
     scene.update(dt, this.camera.camera);
     for (let i = 0; i < this.cars.length; i++) {
       const s = this.states[i]!;
@@ -3038,27 +3046,30 @@ export class Game {
       weather: session.conditions?.weather ?? 'clear',
       handling: session.handling ?? 'sim',
     };
-    const clock = this.roamClock();
+    const clock = this.dayClock();
     if (clock !== null) spot.hour = Math.round(clock * 1000) / 1000;
     saveRoamSpot(spot);
     this.menus.roamSpot.value = spot;
   }
 
   /**
-   * Free roam with the day's clock running: the hour, from the sim's latest snapshot (the
-   * session's start hour before the first arrives); null when the time of day stands still.
+   * With the day's clock running: the hour, from the sim's latest snapshot (the session's start
+   * hour before the first arrives); null when the time of day stands still.
    */
-  private roamClock(): number | null {
+  private dayClock(): number | null {
     const session = this.session;
-    if (!session || session.mode !== 'roam' || !(session.dayCycle ?? 0)) return null;
+    if (!session || !(session.dayCycle ?? 0)) return null;
     const hour = this.sim.latest?.clock;
     if (typeof hour === 'number') return hour;
-    return session.clock ?? cityHourOf(session.conditions?.time ?? 'track');
+    if (session.clock !== undefined) return session.clock;
+    const time = session.conditions?.time ?? 'track';
+    if (session.mode === 'roam') return cityHourOf(time);
+    return hourOf(time, this.track?.def.theme.sunElevation ?? CITY_SUN_ELEVATION);
   }
 
   /** How dark it is now, 0 … 1: by the day's clock in free roam, else by the time of day. */
   private nightNow(): number {
-    const clock = this.roamClock();
+    const clock = this.dayClock();
     if (clock !== null) return darknessAt(sunElevationAt(clock));
     return darkness(this.session?.conditions?.time ?? 'track');
   }

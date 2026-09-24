@@ -699,7 +699,8 @@ function FieldChoices({ store }: ScreenProps) {
   );
 }
 
-function ConditionChoices({ store }: ScreenProps) {
+/** Time of day, weather and the day's clock (free roam keeps its own choice of clock). */
+function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolean }) {
   const setup = store.setup.value;
   return (
     <>
@@ -714,6 +715,12 @@ function ConditionChoices({ store }: ScreenProps) {
         value={setup.weather}
         options={WEATHERS}
         onChange={(weather) => store.update({ weather })}
+      />
+      <Choice
+        label="The day"
+        value={roam ? setup.roamDayLength : setup.dayLength}
+        options={DAY_LENGTHS}
+        onChange={(v) => store.update(roam ? { roamDayLength: v } : { dayLength: v })}
       />
     </>
   );
@@ -920,13 +927,7 @@ export function RoamSetupScreen({ store }: ScreenProps) {
           onChange={(carId) => store.update({ carId })}
           wrap
         />
-        <ConditionChoices store={store} />
-        <Choice
-          label="The day"
-          value={setup.dayLength}
-          options={DAY_LENGTHS}
-          onChange={(dayLength) => store.update({ dayLength })}
-        />
+        <ConditionChoices store={store} roam />
         <AidChoices store={store} aids={store.settings.aids} />
         <Button
           label="Drive"
