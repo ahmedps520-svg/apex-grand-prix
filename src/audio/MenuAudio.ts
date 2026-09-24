@@ -5,6 +5,8 @@
  */
 
 export type UiSound = 'move' | 'select' | 'back' | 'tab' | 'start';
+/** What a smashed prop is made of, for its knock. */
+export type SmashSound = 'plastic' | 'wood' | 'metal';
 
 const BPM = 96;
 const BEAT = 60 / BPM;
@@ -28,6 +30,7 @@ export class MenuAudio {
   private master: GainNode | null = null;
   private musicBus: GainNode | null = null;
   private sfxBus: GainNode | null = null;
+  private lastSmash = -1;
   private delay: DelayNode | null = null;
   private noise: AudioBuffer | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -100,6 +103,31 @@ export class MenuAudio {
           this.blip(t, hz(note), hz(note), 0.5, 0.06, 'sawtooth');
         this.hiss(t, 0.3, 4000, 0.06);
         break;
+    }
+  }
+
+  /**
+   * A prop sent flying: a thud with a plastic knock, a wooden crack or a metal clang over it;
+   * at most one every 80 ms, so a row of them doesn't stack up.
+   */
+  smash(sound: SmashSound): void {
+    const ctx = this.ctx;
+    const bus = this.sfxBus;
+    if (!ctx || !bus || ctx.state !== 'running') return;
+    const t = ctx.currentTime + 0.005;
+    if (t < this.lastSmash + 0.08) return;
+    this.lastSmash = t;
+    this.blip(t, 110, 55, 0.14, 0.2, 'sine');
+    if (sound === 'plastic') {
+      this.hiss(t, 0.08, 900, 0.12);
+      this.blip(t, 320, 170, 0.09, 0.09, 'triangle');
+    } else if (sound === 'wood') {
+      this.hiss(t, 0.05, 1900, 0.2);
+      this.hiss(t + 0.05, 0.12, 1100, 0.1);
+    } else {
+      this.blip(t, 1240, 1180, 0.4, 0.08, 'triangle');
+      this.blip(t, 2140, 2060, 0.28, 0.04, 'sine');
+      this.hiss(t, 0.05, 5000, 0.08);
     }
   }
 

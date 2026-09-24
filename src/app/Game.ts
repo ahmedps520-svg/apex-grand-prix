@@ -27,14 +27,16 @@ import { TouchControls, hasTouch } from '../input/TouchControls';
 import { CarView } from '../render/CarView';
 import { ChaseCamera, type CameraMode } from '../render/ChaseCamera';
 import { Cones } from '../render/Cones';
+import { Props } from '../render/Props';
 import { createCarRenderState, interpolateCar, type CarRenderState } from '../render/interpolate';
 import type { RendererHost } from '../render/RendererHost';
-import { TestGroundScene, type ConePlacement } from '../render/TestGroundScene';
+import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
 import { CITY_SUN_ELEVATION, cityHourOf } from '../content/city/day';
-import { cityMap, type CityMap } from '../content/city/map';
+import { cityMap } from '../content/city/map';
+import { PROP_SPECS, cityPropPlacements } from '../content/city/props';
 import {
   POLICE_PAINT,
   policeModel,
@@ -194,6 +196,11 @@ export interface DebugApi {
   clock: number | null;
   /** Moving weather: from, to and how far along (null when fixed). */
   weather: WeatherMix | null;
+  /** Arcade free roam: props flying or knocked over right now, and the nearest one standing. */
+  propsKnocked: number;
+  nearestProp: (x: number, z: number) => { kind: string; x: number; z: number } | null;
+  /** Free roam: puts the car down here (for the checks). */
+  place: (x: number, z: number, yaw: number) => void;
   /** Moving weather: starts a change to this weather now (for the checks). */
   weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
@@ -232,21 +239,6 @@ const SPAWN_NAMES: ReadonlyArray<[RoamStart, string]> = [
   ['mountain', 'Ridge Road'],
   ['circuit', 'Circuit'],
 ];
-
-/** Arcade: cones on the corners of the flat junctions (the cones lie on the ground plane). */
-function cityConePlacements(map: CityMap): ConePlacement[] {
-  const out: ConePlacement[] = [];
-  for (const j of map.junctions) {
-    if (j.control === 'none' || Math.abs(map.groundHeight(j.x, j.z)) > 0.05) continue;
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        out.push({ x: j.x + sx * 7.5, z: j.z + sz * 7.5 });
-      }
-    }
-    if (out.length >= 480) break;
-  }
-  return out;
-}
 
 declare global {
   interface Window {
@@ -387,6 +379,8 @@ export class Game {
   private readonly input = new InputManager();
   private scenery: Scenery;
   private cones: Cones | null = null;
+  /** Arcade free roam: the street furniture the car sends flying. */
+  private props: Props | null = null;
   private readonly cars: CarView[] = [];
   private readonly states: CarRenderState[] = [];
   private readonly camera: ChaseCamera;
@@ -688,6 +682,9 @@ export class Game {
       pedestrianSample: null,
       clock: null,
       weather: null,
+      propsKnocked: 0,
+      nearestProp: (x, z) => this.props?.nearest(x, z) ?? null,
+      place: (x, z, yaw) => this.sim.command({ kind: 'place', car: 0, x, z, yaw }),
       weatherTo: (to, blend) => {
         if (isWeather(to)) this.sim.command({ kind: 'weather', to, blend });
       },
@@ -935,6 +932,13 @@ export class Game {
     this.skill = config.handling === 'arcade' && !idle && !attract ? new Skill() : null;
     this.skillHud.reset();
     if (this.cones) this.cones.onKnock = () => this.skill?.award('smash', 25, 'SMASH');
+    if (this.props) {
+      this.props.onKnock = (kind) => {
+        const spec = PROP_SPECS[kind];
+        this.skill?.award('smash', spec.points, spec.label);
+        this.menuAudio.smash(spec.sound);
+      };
+    }
     // Free roam: the festival's events, with the bests kept in this browser.
     const events = roam ? festivalEvents(cityMap()) : [];
     this.festival =
@@ -1071,6 +1075,8 @@ export class Game {
     this.minimap?.dispose();
     this.minimap = null;
     this.cones = null;
+    this.props?.dispose();
+    this.props = null;
     this.festivalScene?.dispose();
     this.festivalScene = null;
     this.pedestrianView?.dispose();
@@ -1088,9 +1094,9 @@ export class Game {
       this.pedestrianView = new PedestrianView(config.pedestrians ?? 0);
       this.scenery.scene.add(this.pedestrianView.root);
       if (config.handling === 'arcade') {
-        // Festival cones on the junction corners, to send flying for points.
-        this.cones = new Cones(cityConePlacements(map), TEST_MULE.body);
-        this.scenery.scene.add(this.cones.mesh);
+        // Street furniture and cones to send flying for points.
+        this.props = new Props(cityPropPlacements(map), TEST_MULE.body);
+        this.scenery.scene.add(this.props.root);
       }
       this.minimap = new CityMinimap(this.ui, map, {
         minX: MAP_MIN_X,
@@ -1333,6 +1339,8 @@ export class Game {
         }
       }
       this.cones?.update(dt, player);
+      this.props?.update(dt, player);
+      this.debug.propsKnocked = this.props?.knocked ?? 0;
       const top = this.menus.top;
       const showroom = top === 'livery' || top === 'carSelect' || top === 'title';
       if (showroom !== this.showroom) {
