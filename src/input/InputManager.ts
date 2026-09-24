@@ -409,6 +409,9 @@ export class InputManager {
       for (let i = 0; i < presses.camera; i++) this.actions.push('camera');
       for (let i = 0; i < presses.reset; i++) this.actions.push('reset');
       for (let i = 0; i < presses.map; i++) this.actions.push('festivalMap');
+      for (let i = 0; i < presses.menuNext; i++) this.actions.push('menuNext');
+      for (let i = 0; i < presses.menuUp; i++) this.actions.push('menuUp');
+      for (let i = 0; i < presses.menuDown; i++) this.actions.push('menuDown');
       if (presses.pause) this.actions.push('pause');
       throttle = Math.max(throttle, touch.throttle);
       brake = Math.max(brake, touch.brake);

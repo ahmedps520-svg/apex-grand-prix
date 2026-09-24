@@ -275,3 +275,16 @@ export function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** The direction a car with rotation `q` faces (its −z axis), into `out`. */
+export function forwardOf(out: Vec3, q: Quat): Vec3 {
+  out.x = -2 * (q.x * q.z + q.w * q.y);
+  out.y = -2 * (q.y * q.z - q.w * q.x);
+  out.z = -(1 - 2 * (q.x * q.x + q.y * q.y));
+  return out;
+}
+
+/** The yaw (about y) a car with rotation `q` faces, the convention `quatFromYaw` uses. */
+export function yawOf(q: Quat): number {
+  return Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y));
+}

@@ -99,3 +99,119 @@ export function sanitizeConditions(value: unknown): Conditions {
     weather: isWeather(raw.weather) ? raw.weather : DEFAULT_CONDITIONS.weather,
   };
 }
+
+/**
+ * The day's clock (free roam): the sun rises at 6:00, stands 60° high at noon, sets at 18:00 and
+ * sinks 14° under the horizon by midnight. Each time-of-day setting is an hour on it.
+ */
+export const SUNRISE = 6;
+export const SUNSET = 18;
+const NOON_ELEVATION = 60;
+const MIDNIGHT_ELEVATION = -14;
+
+/** An hour brought into 0 … 24 (the clock wraps at midnight). */
+export function wrapHour(hour: number): number {
+  const h = hour % 24;
+  return h < 0 ? h + 24 : h;
+}
+
+/** The sun's height above the horizon at an hour of the day, degrees (negative at night). */
+export function sunElevationAt(hour: number): number {
+  const h = wrapHour(hour);
+  if (h >= SUNRISE && h <= SUNSET) {
+    return NOON_ELEVATION * Math.sin(((h - SUNRISE) / 12) * Math.PI);
+  }
+  const sinceSunset = h > SUNSET ? h - SUNSET : h + 24 - SUNSET;
+  return MIDNIGHT_ELEVATION * Math.sin((sinceSunset / 12) * Math.PI);
+}
+
+/**
+ * The hour at which the sun stands at an elevation (degrees), in the morning or the afternoon
+ * (the evening or the small hours for a sun under the horizon).
+ */
+export function hourAtElevation(
+  elevation: number,
+  half: 'morning' | 'afternoon' = 'afternoon',
+): number {
+  if (elevation < 0) {
+    const depth = Math.min(elevation / MIDNIGHT_ELEVATION, 1);
+    const t = (12 * Math.asin(depth)) / Math.PI;
+    return wrapHour(half === 'morning' ? SUNRISE - t : SUNSET + t);
+  }
+  const t = (12 * Math.asin(Math.min(elevation / NOON_ELEVATION, 1))) / Math.PI;
+  return half === 'morning' ? SUNRISE + t : SUNSET - t;
+}
+
+/**
+ * The hour of the day a time-of-day setting stands for: morning in the morning, the rest in the
+ * afternoon and evening, midnight for night; 'track' is the hour the circuit's own sun stands at.
+ */
+export function hourOf(time: Conditions['time'], trackElevation: number): number {
+  const half = time === 'morning' ? 'morning' : 'afternoon';
+  return hourAtElevation(sunElevation(time, trackElevation), half);
+}
+
+/** Darkness by sun elevation: full night 6° under the horizon, dusk at 2°, golden hour at 7°, day from 12°. */
+const DARKNESS_CURVE: ReadonlyArray<readonly [number, number]> = [
+  [-6, 1],
+  [2, 0.7],
+  [7, 0.25],
+  [12, 0],
+];
+
+/** How dark it is with the sun at an elevation (degrees), 0 (day) … 1 (night). */
+export function darknessAt(elevation: number): number {
+  const curve = DARKNESS_CURVE;
+  if (!Number.isFinite(elevation) || elevation <= curve[0]![0]) return 1;
+  for (let i = 1; i < curve.length; i++) {
+    const [e0, d0] = curve[i - 1]!;
+    const [e1, d1] = curve[i]!;
+    if (elevation <= e1) return d0 + ((d1 - d0) * (elevation - e0)) / (e1 - e0);
+  }
+  return 0;
+}
+
+/** How dark a time of day is, 0 (day) … 1 (night): the lamps, windows and searchlights follow it. */
+export function darkness(time: Conditions['time']): number {
+  return time === 'track' ? 0 : darknessAt(SUN_ELEVATION[time]);
+}
+
+/** Headlights come on by themselves with the sun this low: dusk and night, not golden hour. */
+export function afterDark(elevation: number): boolean {
+  return darknessAt(elevation) >= 0.5;
+}
+
+/** Free roam: how long a day of its clock takes in real time. */
+export type DayLength = 'still' | 'short' | 'long';
+
+/** Real minutes for a full day of the clock; 0 keeps the chosen time of day. */
+export const DAY_MINUTES: Readonly<Record<DayLength, number>> = {
+  still: 0,
+  short: 24,
+  long: 60,
+};
+
+/** Choices for the day-length setting. */
+export const DAY_LENGTHS: ReadonlyArray<{ value: DayLength; text: string }> = [
+  { value: 'still', text: 'Still: the time chosen' },
+  { value: 'short', text: 'A day in 24 minutes' },
+  { value: 'long', text: 'A day in an hour' },
+];
+
+export function isDayLength(value: unknown): value is DayLength {
+  return DAY_LENGTHS.some((option) => option.value === value);
+}
+
+/** The clock's rate for a day that takes this many real minutes: hours per real second (0 still). */
+export function dayRate(minutes: number): number {
+  return Number.isFinite(minutes) && minutes > 0 ? 24 / (minutes * 60) : 0;
+}
+
+/** An hour of the day as a clock readout, "18:42". */
+export function clockText(hour: number): string {
+  const h = wrapHour(Number.isFinite(hour) ? hour : 0);
+  const minutes = Math.floor(h * 60);
+  const hh = String(Math.floor(minutes / 60) % 24).padStart(2, '0');
+  const mm = String(minutes % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}

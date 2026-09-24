@@ -76,6 +76,7 @@ function tick(time: number): void {
       race: world.director?.status ?? null,
       police: world.police?.status ?? null,
       roamRace: world.racers?.active ?? null,
+      clock: world.day?.hour ?? null,
     },
     [buffer],
   );
@@ -126,6 +127,7 @@ scope.onmessage = (event) => {
         } else if (command.kind === 'sanction') {
           if (world.police) world.police.sanctioned = command.on;
         } else if (command.kind === 'endRace') world.racers?.endRace();
+        else if (command.kind === 'skipIntro') world.racers?.skipIntro();
         else if (command.kind === 'teleport') world.teleport(command.car, command.to);
         else if (command.kind === 'setAids') world.setAids(command.car, command.aids);
         else if (command.kind === 'holdStart' && world.director) {

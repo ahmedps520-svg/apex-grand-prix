@@ -193,6 +193,23 @@ describe('street racers', () => {
     expect(status.countdown).toBeGreaterThan(2);
   });
 
+  it('let the sweep be skipped straight to the count', () => {
+    const { world, race } = atStart('race-avenue');
+    run(world, 1);
+    crossTheLine(world, race);
+    const status = world.racers!.status;
+    expect(status.phase).toBe('countdown');
+    expect(status.placed).toBe(true);
+    expect(status.intro).toBe(true);
+    world.racers!.skipIntro();
+    run(world, 0.1);
+    expect(status.intro).toBe(false);
+    expect(status.countdown).toBeLessThan(3);
+    expect(status.countdown).toBeGreaterThan(2.7);
+    run(world, 3.2);
+    expect(status.phase).toBe('racing');
+  });
+
   it('give the player its finishing time and position at the line', () => {
     const { world, race } = atStart('race-avenue');
     run(world, 1);

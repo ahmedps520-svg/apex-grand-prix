@@ -35,6 +35,9 @@ export class TouchControls {
   private pendingPause = false;
   private pendingCamera = 0;
   private pendingReset = 0;
+  private pendingMenuNext = 0;
+  private pendingMenuUp = 0;
+  private pendingMenuDown = 0;
   private pendingLights = 0;
   private pendingMap = 0;
   private pendingHazards = 0;
@@ -79,6 +82,14 @@ export class TouchControls {
       this.tap('tc-small tc-extra', 'CAM', () => this.pendingCamera++),
       this.tap('tc-small tc-extra', 'RESET', () => this.pendingReset++),
     );
+    // Under them: the quick menu (TC, ABS, gearbox, …): open or next, and the value up or down.
+    const mfd = document.createElement('div');
+    mfd.className = 'tc-mfd';
+    mfd.append(
+      this.tap('tc-small tc-extra', 'MENU', () => this.pendingMenuNext++),
+      this.tap('tc-small tc-extra tc-mfd-arrow', '▲', () => this.pendingMenuUp++),
+      this.tap('tc-small tc-extra tc-mfd-arrow', '▼', () => this.pendingMenuDown++),
+    );
     // Free roam: lights, indicators, hazards and the horn, top left (shown by setRoam).
     this.roam.className = 'tc-roam';
     this.roam.hidden = true;
@@ -90,7 +101,7 @@ export class TouchControls {
       this.hold('tc-small tc-roam-btn tc-horn', 'HORN', (v) => (this.horn = v > 0)),
       this.tap('tc-small tc-roam-btn', 'MAP', () => this.pendingMap++),
     );
-    this.root.append(pedals, paddles, pause, extras, this.roam);
+    this.root.append(pedals, paddles, pause, extras, mfd, this.roam);
     parent.appendChild(this.root);
     window.addEventListener('deviceorientation', (e) => this.onTilt(e));
     // iOS: motion access asked for outside a tap fails; ask again on the first tap.
@@ -156,6 +167,9 @@ export class TouchControls {
     pause: boolean;
     camera: number;
     reset: number;
+    menuNext: number;
+    menuUp: number;
+    menuDown: number;
     map: number;
     lights: number;
     hazards: number;
@@ -168,6 +182,9 @@ export class TouchControls {
       pause: this.pendingPause,
       camera: this.pendingCamera,
       reset: this.pendingReset,
+      menuNext: this.pendingMenuNext,
+      menuUp: this.pendingMenuUp,
+      menuDown: this.pendingMenuDown,
       map: this.pendingMap,
       lights: this.pendingLights,
       hazards: this.pendingHazards,
@@ -179,6 +196,9 @@ export class TouchControls {
     this.pendingPause = false;
     this.pendingCamera = 0;
     this.pendingReset = 0;
+    this.pendingMenuNext = 0;
+    this.pendingMenuUp = 0;
+    this.pendingMenuDown = 0;
     this.pendingMap = 0;
     this.pendingLights = 0;
     this.pendingHazards = 0;

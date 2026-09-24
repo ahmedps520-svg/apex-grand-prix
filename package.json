@@ -1,7 +1,7 @@
 {
   "name": "apex-grand-prix",
   "private": true,
-  "version": "0.22.0",
+  "version": "0.24.0",
   "description": "APEX GRAND PRIX - browser racing game (TypeScript, Vite, three.js WebGPU).",
   "type": "module",
   "engines": {

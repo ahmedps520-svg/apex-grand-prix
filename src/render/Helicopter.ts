@@ -137,6 +137,14 @@ export class Helicopter {
     this.light.intensity = this.active ? 700 * Math.max(0, Math.min(night, 1)) : 0;
   }
 
+  /** Out of the sky at once (a new session). */
+  reset(): void {
+    this.active = false;
+    this.leaving = 0;
+    this.climb = ARRIVE_FROM;
+    this.root.visible = false;
+  }
+
   dispose(): void {
     this.root.removeFromParent();
     for (const g of this.geometries) g.dispose();

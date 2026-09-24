@@ -131,8 +131,8 @@ export class Traffic {
     trafficCount: number,
     policeCount: number,
     seed: number,
-    /** Headlights on (dusk and night). */
-    readonly lightsOn: boolean,
+    /** Headlights on (dusk and night; the world's clock switches it). */
+    public lightsOn: boolean,
     racerCount = 0,
   ) {
     this.graph = laneGraph(map);

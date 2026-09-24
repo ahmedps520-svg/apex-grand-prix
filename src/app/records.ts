@@ -91,6 +91,8 @@ export interface RoamSpot {
   time: string;
   weather: string;
   handling: string;
+  /** The hour on free roam's day clock when the drive was left (unset: the time of day's). */
+  hour?: number;
 }
 
 export function loadRoamSpot(): RoamSpot | null {
@@ -111,6 +113,7 @@ export function loadRoamSpot(): RoamSpot | null {
       time: r.time as string,
       weather: r.weather as string,
       handling: r.handling as string,
+      ...(num(r.hour) ? { hour: r.hour as number } : {}),
     };
   } catch {
     return null;
