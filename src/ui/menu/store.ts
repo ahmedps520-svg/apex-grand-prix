@@ -21,6 +21,7 @@ import type { PromptFamily } from './prompts';
 
 export type ScreenId =
   | 'title'
+  | 'career'
   | 'main'
   | 'trackSelect'
   | 'carSelect'
@@ -122,6 +123,29 @@ export interface Championship {
   liverySeed?: number;
   /** Car, field size, laps and difficulty for every round. */
   setup: SessionSetup;
+  /** A career season: the tier it is for. */
+  career?: number;
+}
+
+/** The career as its screen shows it. */
+export interface CareerInfo {
+  /** The tier being raced; every tier done once it equals the count. */
+  tier: number;
+  complete: boolean;
+  tiers: Array<{
+    name: string;
+    className: string;
+    races: number;
+    laps: number;
+    opponents: number;
+    difficulty: Difficulty;
+    promote: number;
+    status: 'done' | 'current' | 'locked';
+    /** The finish of the latest season at that tier, or null. */
+    position: number | null;
+  }>;
+  /** The tier's season under way, or null. */
+  season: { round: number; races: number; position: number; next: string } | null;
 }
 
 /** Checks a stored championship before it is loaded. */
@@ -258,6 +282,12 @@ export interface MenuActions {
   startChampionship(races: number): void;
   /** Runs the next championship race. */
   nextRound(): void;
+  /** Career: a season in the current tier's series, in a car of its class. */
+  startCareerSeason(carId: string): void;
+  /** Career: the next round of the tier's season. */
+  continueCareer(): void;
+  /** Career: back to the first tier, every result forgotten. */
+  resetCareer(): void;
   /** Watches the race just finished (from the results). */
   watchReplay(): void;
   /** Opens photo mode (from the pause menu or a replay). */
@@ -316,6 +346,8 @@ export class MenuStore {
   readonly festival = signal<FestivalInfo | null>(null);
   /** Today's challenge, for the main menu's tile. */
   readonly daily = signal<DailyInfo | null>(null);
+  /** The career's ladder and the season under way. */
+  readonly career = signal<CareerInfo | null>(null);
   /** Free roam: where the last drive was left, for the Continue button (null when none). */
   readonly roamSpot = signal<RoamSpot | null>(null);
   readonly results = signal<SessionResults | null>(null);

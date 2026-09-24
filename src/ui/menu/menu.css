@@ -1509,3 +1509,59 @@
 .mn-board-row.bronze .mn-dim {
   color: #d99a5b;
 }
+
+/* The career's ladder: one row a series, the current one lit, the ones above dimmed. */
+.mn-career-ladder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 10px;
+}
+
+.mn-career-tier {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  grid-template-areas:
+    'step name state'
+    'step meta state';
+  align-items: center;
+  column-gap: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mn-career-tier.current {
+  background: rgba(255, 59, 47, 0.18);
+  border: 1px solid rgba(255, 59, 47, 0.4);
+}
+
+.mn-career-tier.locked {
+  opacity: 0.55;
+}
+
+.mn-career-step {
+  grid-area: step;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.mn-career-name {
+  grid-area: name;
+  font-weight: 800;
+}
+
+.mn-career-tier .mn-dim {
+  grid-area: meta;
+  font-size: 13px;
+}
+
+.mn-career-state {
+  grid-area: state;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mn-career-tier.done .mn-career-state {
+  color: #ffd166;
+}

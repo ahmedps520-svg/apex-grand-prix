@@ -21,6 +21,7 @@ import {
   TIMES_OF_DAY,
 } from '../content/conditions';
 import { rivalName } from '../content/drivers';
+import { CAREER_TIERS, advanceCareer, freshCareer } from '../content/career';
 import { dailyChallenge } from '../content/daily';
 import { driftMedal, driftTargets } from '../content/driftTrial';
 import { ladderStanding } from '../content/ladder';
@@ -144,6 +145,8 @@ import {
   saveDriftRecord,
   loadDailyBest,
   saveDailyBest,
+  loadCareer,
+  saveCareer,
 } from './records';
 import { Festival, festivalTotals, medalFor } from './Festival';
 import { EventHud } from '../ui/EventHud';
@@ -152,7 +155,7 @@ import { FestivalScene } from '../render/FestivalScene';
 import { Helicopter } from '../render/Helicopter';
 import { PedestrianView } from '../render/Pedestrians';
 import { festivalEvents, type EventKind } from '../content/city/events';
-import type { FestivalInfo, DailyInfo } from '../ui/menu/store';
+import type { FestivalInfo, DailyInfo, CareerInfo } from '../ui/menu/store';
 import { ReplayRecorder, type Replay } from './replay';
 import {
   DAMAGE_SCALE,
@@ -532,6 +535,8 @@ export class Game {
   private driftDone = false;
   /** The daily challenge's best lap, kept in this browser. */
   private dailyBest = loadDailyBest();
+  /** The career: the tier reached and every season's result. */
+  private career = loadCareer() ?? freshCareer();
   /** Championship round being raced, or -1. */
   private seasonRound = -1;
   /** Seed for the rivals' liveries (the season's, so they keep their colours all year). */
@@ -729,6 +734,7 @@ export class Game {
     // The festival board reads this from the main menu too.
     this.menus.festival.value = this.festivalInfo();
     this.menus.daily.value = this.dailyInfo();
+    this.menus.career.value = this.careerInfo();
     this.sim.onError = (message) => {
       this.debug.errors.push(message);
       this.toasts.show(`Simulation error: ${message}`, { timeout: 0 });
@@ -1039,6 +1045,7 @@ export class Game {
     this.festivalMarkers = events.map((e) => ({ x: e.x, z: e.z, color: EVENT_COLOURS[e.kind] }));
     this.menus.festival.value = this.festivalInfo();
     this.menus.daily.value = this.dailyInfo();
+    this.menus.career.value = this.careerInfo();
     this.resultsShown = false;
     this.finishedAt = -1;
     this.bestLapSeen = Infinity;
@@ -1281,7 +1288,11 @@ export class Game {
     if (this.session?.mode === 'roam') {
       this.menus.festival.value = this.festivalInfo();
       this.menus.daily.value = this.dailyInfo();
+      this.menus.career.value = this.careerInfo();
+      this.menus.career.value = this.careerInfo();
       this.menus.daily.value = this.dailyInfo();
+      this.menus.career.value = this.careerInfo();
+      this.menus.career.value = this.careerInfo();
       this.keepRoamSpot();
     }
     this.menus.set(['pause']);
@@ -1303,6 +1314,7 @@ export class Game {
     if (this.session?.mode === 'roam') this.keepRoamSpot();
     this.menus.festival.value = this.festivalInfo();
     this.menus.daily.value = this.dailyInfo();
+    this.menus.career.value = this.careerInfo();
     this.menus.set(['main']);
     if (this.paused) {
       this.paused = false;
@@ -2726,9 +2738,104 @@ export class Game {
     this.menus.championship.value = next;
     this.seasonRound = -1;
     saveSeason(next);
+    // A career season over: the result kept, and a tier up when the finish earns it.
+    if (next.career !== undefined && next.round >= next.tracks.length) {
+      const order = points.map((p, car) => ({ car, p })).sort((a, b) => b.p - a.p || a.car - b.car);
+      const position = order.findIndex((o) => o.car === 0) + 1;
+      const outcome = advanceCareer(this.career, next.career, position, points[0] ?? 0);
+      this.career = outcome.career;
+      saveCareer(this.career);
+      if (outcome.promoted) {
+        const up = CAREER_TIERS[this.career.tier];
+        this.toasts.show(
+          up ? `Promoted to the ${up.name}!` : 'Every series won. Career complete!',
+          {
+            timeout: 6,
+          },
+        );
+      }
+    }
+    this.menus.career.value = this.careerInfo();
   }
 
-  private startChampionship(races: number): void {
+  /** The career as its screen shows it: the ladder, and the tier's season if one is under way. */
+  private careerInfo(): CareerInfo {
+    const career = this.career;
+    const season = this.menus.championship.value;
+    const running =
+      season !== null && season.career === career.tier && season.round < season.tracks.length
+        ? season
+        : null;
+    const tiers = CAREER_TIERS.map((t, i) => {
+      const result = career.results.find((r) => r.tier === i);
+      return {
+        name: t.name,
+        className: t.className,
+        races: t.races,
+        laps: t.laps,
+        opponents: t.opponents,
+        difficulty: t.difficulty,
+        promote: t.promote,
+        status: (i < career.tier ? 'done' : i === career.tier ? 'current' : 'locked') as
+          'done' | 'current' | 'locked',
+        position: result?.position ?? null,
+      };
+    });
+    let info: CareerInfo['season'] = null;
+    if (running) {
+      const order = running.points
+        .map((points, car) => ({ car, points }))
+        .sort((a, b) => b.points - a.points || a.car - b.car);
+      info = {
+        round: running.round,
+        races: running.tracks.length,
+        position: order.findIndex((o) => o.car === 0) + 1,
+        next: trackById(running.tracks[running.round] ?? '')?.name ?? '',
+      };
+    }
+    return { tier: career.tier, complete: career.tier >= CAREER_TIERS.length, tiers, season: info };
+  }
+
+  /** Career: a season in the current tier's series, in a car of its class. */
+  private startCareerSeason(carId: string): void {
+    const tier = CAREER_TIERS[this.career.tier];
+    if (!tier) return;
+    const inClass = (id: string) => CARS.some((c) => c.id === id && c.className === tier.className);
+    const car = inClass(carId)
+      ? carId
+      : (CARS.find((c) => c.className === tier.className)?.id ?? carId);
+    this.menus.update({
+      ...this.menus.setup.value,
+      mode: 'race',
+      carId: car,
+      opponents: tier.opponents,
+      laps: tier.laps,
+      difficulty: tier.difficulty,
+      field: 'class',
+      raceType: 'standard',
+    });
+    this.startChampionship(tier.races, this.career.tier);
+  }
+
+  private continueCareer(): void {
+    const season = this.menus.championship.value;
+    if (season?.career === this.career.tier && season.round < season.tracks.length)
+      this.nextRound();
+  }
+
+  private resetCareer(): void {
+    const season = this.menus.championship.value;
+    if (season?.career !== undefined) {
+      this.menus.championship.value = null;
+      saveSeason(null);
+    }
+    this.career = freshCareer();
+    saveCareer(this.career);
+    this.menus.career.value = this.careerInfo();
+    this.toasts.show('Career restarted: the Street Series awaits.');
+  }
+
+  private startChampionship(races: number, career?: number): void {
     const setup = { ...this.menus.setup.value, mode: 'race' as const };
     const count = Math.min(Math.max(races, 1), TRACKS.length);
     // A random pick of circuits, raced in calendar order.
@@ -2754,8 +2861,10 @@ export class Game {
       paints,
       setup,
     };
+    if (career !== undefined) season.career = career;
     this.menus.championship.value = season;
     saveSeason(season);
+    this.menus.career.value = this.careerInfo();
     this.nextRound();
   }
 
@@ -3025,6 +3134,9 @@ export class Game {
       record: (trackId) => this.records[trackId] ?? null,
       startChampionship: (races) => this.startChampionship(races),
       nextRound: () => this.nextRound(),
+      startCareerSeason: (carId) => this.startCareerSeason(carId),
+      continueCareer: () => this.continueCareer(),
+      resetCareer: () => this.resetCareer(),
       watchReplay: () => this.watchReplay(),
       photoMode: () => this.enterPhoto(),
       startSchool: () => this.startSchool(),

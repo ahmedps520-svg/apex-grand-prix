@@ -27,7 +27,9 @@ import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
 import { NAV_TAB } from './focus';
 import { PROMPT_LABELS, type PromptSetting } from './prompts';
+import { CAREER_TIERS } from '../../content/career';
 import type {
+  CareerInfo,
   DailyInfo,
   Difficulty,
   DriftResult,
@@ -36,6 +38,7 @@ import type {
   RaceType,
   ReplayCommand,
   TrialKind,
+  Championship,
 } from './store';
 import {
   Button,
@@ -480,6 +483,11 @@ export function ChampionshipScreen({ store }: ScreenProps) {
     <div class="mn-panel">
       <Header title="Championship" subtitle="A season of races: points for the top ten" />
       <div class="mn-list">
+        <Button
+          label="Career"
+          hint={careerHint(store.career.value)}
+          onPress={() => store.push('career')}
+        />
         {running && (
           <>
             <Button
@@ -541,6 +549,112 @@ export function ChampionshipScreen({ store }: ScreenProps) {
   );
 }
 
+/** The career button's line on the championship screen. */
+function careerHint(info: CareerInfo | null): string {
+  if (!info) return 'Six series, from street cars to formula cars';
+  if (info.complete) return 'Champion of every series';
+  const tier = info.tiers[info.tier];
+  if (!tier) return '';
+  return info.season
+    ? `${tier.name} · Round ${info.season.round + 1} of ${info.season.races}`
+    : `${tier.name} next`;
+}
+
+/** The career's word on a season's standings: what the finish means for moving up. */
+function careerLine(champ: Championship, done: boolean, position: number): string | null {
+  if (champ.career === undefined) return null;
+  const tier = CAREER_TIERS[champ.career];
+  if (!tier) return null;
+  const next = CAREER_TIERS[champ.career + 1];
+  if (!done) return `${tier.name}: finish P${tier.promote} or better to move up.`;
+  if (position <= tier.promote) {
+    return next ? `Promoted to the ${next.name}!` : 'Every series won: the career is complete.';
+  }
+  return `P${tier.promote} or better was needed to move up: the ${tier.name} can be run again.`;
+}
+
+/** The career: the ladder of series, the season under way, and the car for the next one. */
+export function CareerScreen({ store }: ScreenProps) {
+  const info = store.career.value;
+  const tier = info ? CAREER_TIERS[info.tier] : undefined;
+  const cars = tier ? CARS.filter((c) => c.className === tier.className) : [];
+  const [carId, setCarId] = useState(() => {
+    const chosen = store.setup.value.carId;
+    return cars.some((c) => c.id === chosen) ? chosen : (cars[0]?.id ?? '');
+  });
+  if (!info) return null;
+  return (
+    <div class="mn-panel mn-wide mn-career">
+      <Header
+        title="Career"
+        subtitle={
+          info.complete
+            ? 'Champion of every series'
+            : tier
+              ? `${tier.name} · ${tier.className} cars`
+              : ''
+        }
+      />
+      <div class="mn-list">
+        {info.season ? (
+          <>
+            <Button
+              label="Continue season"
+              hint={`Round ${info.season.round + 1} of ${info.season.races} · ${info.season.next}${info.season.round > 0 ? ` · P${info.season.position} so far` : ''}`}
+              onPress={() => store.actions.continueCareer()}
+              autofocus
+              primary
+            />
+            <Button label="Standings" onPress={() => store.push('standings')} />
+          </>
+        ) : (
+          tier && (
+            <>
+              <Choice
+                label="Car"
+                value={carId}
+                options={cars.map((c) => ({ value: c.id, text: c.name }))}
+                onChange={setCarId}
+                wrap
+              />
+              <Button
+                label={`Start the ${tier.name}`}
+                hint={`${tier.races} races · ${tier.laps} laps each · ${tier.opponents} rivals · ${tier.difficulty} · finish P${tier.promote} or better to move up`}
+                onPress={() => store.actions.startCareerSeason(carId)}
+                autofocus
+                primary
+              />
+            </>
+          )
+        )}
+      </div>
+      <div class="mn-career-ladder">
+        {info.tiers.map((t, i) => (
+          <div class={`mn-career-tier ${t.status}`} key={i}>
+            <span class="mn-career-step">{i + 1}</span>
+            <span class="mn-career-name">{t.name}</span>
+            <span class="mn-dim">
+              {t.className} · {t.races} races · {t.difficulty}
+            </span>
+            <span class="mn-career-state">
+              {t.status === 'done'
+                ? `P${t.position}`
+                : t.status === 'current'
+                  ? t.position
+                    ? `P${t.position} last time`
+                    : 'Now'
+                  : `Top ${t.promote} above`}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div class="mn-row-buttons">
+        <Button label="Restart career" onPress={() => store.actions.resetCareer()} />
+      </div>
+    </div>
+  );
+}
+
 export function StandingsScreen({ store }: ScreenProps) {
   const champ = store.championship.value;
   if (!champ) return null;
@@ -550,6 +664,7 @@ export function StandingsScreen({ store }: ScreenProps) {
     .sort((a, b) => b.points - a.points || a.car - b.car);
   const next = done ? undefined : TRACKS.find((t) => t.id === champ.tracks[champ.round]);
   const playerPos = order.findIndex((o) => o.car === 0) + 1;
+  const career = careerLine(champ, done, playerPos);
   return (
     <div class="mn-panel mn-wide mn-results">
       <Header
@@ -562,6 +677,7 @@ export function StandingsScreen({ store }: ScreenProps) {
             : `After round ${champ.round} of ${champ.tracks.length}`
         }
       />
+      {career && <p class="mn-note">{career}</p>}
       <table class="mn-table">
         <thead>
           <tr>

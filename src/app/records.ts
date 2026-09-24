@@ -1,3 +1,4 @@
+import { isCareerSave, type CareerSave } from '../content/career';
 /** Best lap per track (time trial and races), kept in this browser. */
 
 const KEY = 'apex-gp.records';
@@ -210,5 +211,25 @@ export function saveDailyBest(best: DailyBest): void {
     localStorage.setItem(DAILY_KEY, JSON.stringify(best));
   } catch {
     // Storage blocked: the best lasts for this session only.
+  }
+}
+
+const CAREER_KEY = 'apex-gp.career';
+
+/** The career: the tier reached and every season's result, kept in this browser. */
+export function loadCareer(): CareerSave | null {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(CAREER_KEY) ?? 'null');
+    return isCareerSave(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCareer(career: CareerSave): void {
+  try {
+    localStorage.setItem(CAREER_KEY, JSON.stringify(career));
+  } catch {
+    // Storage blocked: the career lasts for this session only.
   }
 }

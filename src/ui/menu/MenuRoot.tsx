@@ -8,6 +8,7 @@ import {
   BindKeysScreen,
   BindPadScreen,
   BoardScreen,
+  CareerScreen,
   CarSelectScreen,
   ChampionshipScreen,
   ControlsScreen,
@@ -48,6 +49,7 @@ const SCREENS: Record<ScreenId, FunctionComponent<Props>> = {
   roamSetup: RoamSetupScreen,
   map: MapScreen,
   board: BoardScreen,
+  career: CareerScreen,
   pause: PauseScreen,
   results: ResultsScreen,
   replay: ReplayScreen,
@@ -74,6 +76,7 @@ const FOOTER: Record<ScreenId, Array<PromptAction | [PromptAction, string]>> = {
   roamSetup: ['confirm', 'adjust', 'back'],
   map: ['confirm', 'back'],
   board: ['confirm', 'back'],
+  career: ['confirm', 'back'],
   pause: ['confirm', 'back'],
   results: ['confirm'],
   replay: [
