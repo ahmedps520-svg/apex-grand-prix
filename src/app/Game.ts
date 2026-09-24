@@ -906,7 +906,8 @@ export class Game {
       daily: setup.mode === 'timeTrial' && !attract && setup.daily ? setup.daily : undefined,
       aids: { ...this.settings.aids },
       seed,
-      attract: attract || (this.autopilot && setup.mode === 'race'),
+      // `?autopilot`: the AI drives the player's car in races and time trials (browser tests).
+      attract: attract || (this.autopilot && (setup.mode === 'race' || setup.mode === 'timeTrial')),
       damage: attract ? 0 : DAMAGE_SCALE[this.settings.damage],
       grip: gripFactor(setup.weather),
       conditions: { time: setup.time, weather: setup.weather },
