@@ -14,7 +14,7 @@ async function tapInto(
   for (let attempt = 0; attempt < 3; attempt++) {
     await locator.tap();
     try {
-      await expect.poll(screen, { timeout: 4000 }).toBe(expected);
+      await expect.poll(screen, { timeout: 8000 }).toBe(expected);
       return;
     } catch {
       // Once more.
@@ -25,6 +25,9 @@ async function tapInto(
 
 /** On a touch screen the menus can be walked with taps alone: in through the tiles, back out. */
 test('goes through the menus and back with taps on a touch screen', async ({ page }) => {
+  // The menus render their 3D backdrop at a frame or two a second in software GL, and every
+  // tap waits for a couple of frames before it lands: nine screens take a while on CI.
+  test.setTimeout(240_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => {
@@ -42,6 +45,11 @@ test('goes through the menus and back with taps on a touch screen', async ({ pag
   await tapInto(page.locator('.mn-tile', { hasText: /Free Roam/ }).first(), 'roamSetup', screen);
   const back = page.locator('[data-touch-back]');
   await expect(back).toHaveText(/Back/);
+  // The festival board opens from the roam setup and comes back to it.
+  await tapInto(page.locator('[data-nav]', { hasText: /Festival board/ }).first(), 'board', screen);
+  await expect(page.locator('.mn-board-group h3', { hasText: /Races/ })).toHaveCount(1);
+  await back.tap();
+  await expect.poll(screen).toBe('roamSetup');
   await back.tap();
   await expect.poll(screen).toBe('main');
 
