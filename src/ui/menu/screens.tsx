@@ -655,21 +655,29 @@ export function RaceSetupScreen({ store }: ScreenProps) {
               onChange={(difficulty) => store.update({ difficulty })}
             />
             <Choice
-              label="Start position"
-              value={setup.gridSlot}
-              options={Array.from({ length: setup.opponents + 1 }, (_, i) => ({
-                value: i,
-                text: i === 0 ? 'Pole' : `P${i + 1}`,
-              }))}
-              onChange={(gridSlot) => store.update({ gridSlot })}
+              label="Qualifying"
+              value={setup.qualifying ?? 0}
+              options={QUALIFYING}
+              onChange={(qualifying) => store.update({ qualifying })}
             />
+            {!(setup.qualifying > 0) && (
+              <Choice
+                label="Start position"
+                value={setup.gridSlot}
+                options={Array.from({ length: setup.opponents + 1 }, (_, i) => ({
+                  value: i,
+                  text: i === 0 ? 'Pole' : `P${i + 1}`,
+                }))}
+                onChange={(gridSlot) => store.update({ gridSlot })}
+              />
+            )}
             <FieldChoices store={store} />
           </>
         )}
         <ConditionChoices store={store} />
         <AidChoices store={store} aids={aids} />
         <Button
-          label={race ? 'Start race' : 'Start'}
+          label={race ? (setup.qualifying > 0 ? 'Start qualifying' : 'Start race') : 'Start'}
           primary
           autofocus
           onPress={() => store.actions.startSession(store.setup.value)}
@@ -743,6 +751,14 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
     </>
   );
 }
+
+/** Laps of qualifying before a race: the best lap sets the grid. */
+const QUALIFYING: ReadonlyArray<{ value: number; text: string }> = [
+  { value: 0, text: 'None' },
+  { value: 1, text: '1 lap' },
+  { value: 2, text: '2 laps' },
+  { value: 3, text: '3 laps' },
+];
 
 const RACE_TYPES: ReadonlyArray<{ value: RaceType; text: string }> = [
   { value: 'standard', text: 'Standard' },
@@ -1084,7 +1100,13 @@ export function ResultsScreen({ store }: ScreenProps) {
   return (
     <div class="mn-panel mn-wide mn-results">
       <Header
-        title={results.mode === 'race' ? 'Race results' : 'Session results'}
+        title={
+          results.qualifying
+            ? 'Qualifying'
+            : results.mode === 'race'
+              ? 'Race results'
+              : 'Session results'
+        }
         subtitle={results.trackName}
       />
       {results.mode === 'timeTrial' ? (
@@ -1105,7 +1127,7 @@ export function ResultsScreen({ store }: ScreenProps) {
               <th>Driver</th>
               <th>Car</th>
               <th>Best lap</th>
-              <th>Time</th>
+              <th>{results.qualifying ? 'Gap' : 'Time'}</th>
             </tr>
           </thead>
           <tbody>
@@ -1121,7 +1143,9 @@ export function ResultsScreen({ store }: ScreenProps) {
                     : !Number.isFinite(r.time)
                       ? '—'
                       : i === 0
-                        ? formatTime(r.time)
+                        ? results.qualifying
+                          ? 'Pole'
+                          : formatTime(r.time)
                         : `+${r.gap.toFixed(3)}`}
                 </td>
               </tr>
@@ -1129,7 +1153,22 @@ export function ResultsScreen({ store }: ScreenProps) {
           </tbody>
         </table>
       )}
-      {results.championship ? (
+      {results.qualifying ? (
+        <div class="mn-row-buttons">
+          <Button
+            label="Start the race"
+            hint="On this grid"
+            onPress={() => store.actions.startRace()}
+            autofocus
+            primary
+          />
+          <Button label="Qualify again" onPress={() => store.actions.restartSession()} />
+          {store.replayAvailable.value && (
+            <Button label="Watch replay" onPress={() => store.actions.watchReplay()} />
+          )}
+          <Button label="Main menu" onPress={() => store.actions.quitToMenu()} />
+        </div>
+      ) : results.championship ? (
         <div class="mn-row-buttons">
           <Button
             label="Continue"

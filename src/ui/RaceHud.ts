@@ -109,7 +109,7 @@ export class RaceHud {
     setText(this.position, racing ? `P${me.position}` : '');
     setText(this.positionTotal, racing ? `/${race.cars.length}` : '');
     const lapText = racing
-      ? `LAP ${Math.min(Math.max(me.lap + 1, 1), race.laps)}/${race.laps}`
+      ? `${race.qualifying ? 'QUALIFYING · ' : ''}LAP ${Math.min(Math.max(me.lap + 1, 1), race.laps)}/${race.laps}`
       : `LAP ${Math.max(me.lap + 1, 1)}`;
     setText(this.lap, me.finished ? 'FINISHED' : lapText);
     this.updateElimination(race, player);
@@ -148,7 +148,14 @@ export class RaceHud {
       this.flash('GO!', 1.2);
     }
     if (me.finished && this.lastPhase !== 'finished-shown') {
-      this.flash(racing ? `FINISH · P${me.position}` : 'SESSION OVER', 4);
+      this.flash(
+        racing
+          ? race.qualifying
+            ? `P${me.position} ON THE GRID`
+            : `FINISH · P${me.position}`
+          : 'SESSION OVER',
+        4,
+      );
       this.lastPhase = 'finished-shown';
     } else if (this.lastPhase !== 'finished-shown') {
       this.lastPhase = race.phase;
