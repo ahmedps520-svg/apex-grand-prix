@@ -6,8 +6,22 @@ import { projectNear, trackPos, wrapDelta, type TrackPos } from './trackPos';
 
 export type RaceMode = 'race' | 'timeTrial' | 'free';
 export type RacePhase = 'grid' | 'countdown' | 'racing' | 'finished';
-/** What a car is shown: a blue flag (let the lapping car by) or a yellow (a car stopped ahead). */
-export type RaceFlag = 'none' | 'blue' | 'yellow';
+/**
+ * What a car is shown: a blue flag (let the lapping car by), a yellow (a car stopped ahead) or
+ * the safety car board (hold station behind it).
+ */
+export type RaceFlag = 'none' | 'blue' | 'yellow' | 'safety';
+/** What a penalty was for. */
+export type PenaltyReason = 'none' | 'limits' | 'safetyCar';
+
+/** The safety car: in its box, out leading the field, or coming in this lap. */
+export interface SafetyCarStatus {
+  phase: 'none' | 'out' | 'in';
+  /** Laps led since it came out. */
+  laps: number;
+  /** Times out this race. */
+  deployments: number;
+}
 
 /** One car's race and timing state. Times are seconds; 0 means "none yet". */
 export interface CarRaceState {
@@ -37,6 +51,8 @@ export interface CarRaceState {
   warnings: number;
   penalty: number;
   flag: RaceFlag;
+  /** What the last penalty was for. */
+  penaltyFor: PenaltyReason;
 }
 
 /** Everything the HUD needs about the session, updated in place every step. */
@@ -62,6 +78,8 @@ export interface RaceStatus {
   rules: boolean;
   /** The sector under a yellow flag (a car stopped in it), or -1. */
   yellow: number;
+  /** The safety car, when the session has one. */
+  safetyCar: SafetyCarStatus | null;
 }
 
 /** Seconds on the grid before the first red light. */
@@ -154,6 +172,7 @@ export class RaceDirector {
       qualifying: mode === 'race' && qualifying,
       rules: mode === 'race' && rules,
       yellow: -1,
+      safetyCar: null,
     };
     for (let i = 0; i < carCount; i++) {
       this.status.cars.push(freshState());
@@ -334,7 +353,10 @@ export class RaceDirector {
       } else {
         if (t.offMetres >= CUT_METRES && t.offMetres <= CUT_MAX_METRES && !t.offSlow) {
           state.warnings++;
-          if (state.warnings % WARNINGS_PER_PENALTY === 0) state.penalty += PENALTY_SECONDS;
+          if (state.warnings % WARNINGS_PER_PENALTY === 0) {
+            state.penalty += PENALTY_SECONDS;
+            state.penaltyFor = 'limits';
+          }
         }
         t.offMetres = 0;
         t.offSlow = false;
@@ -368,6 +390,13 @@ export class RaceDirector {
           slow.flag = 'blue';
           break;
         }
+      }
+    }
+    // Under the safety car every car on the track is shown it, over a yellow or a blue.
+    if (status.safetyCar && status.safetyCar.phase !== 'none') {
+      for (let i = 0; i < n; i++) {
+        const state = status.cars[i]!;
+        if (!state.finished && !cars[i]!.retired && !cars[i]!.onRails) state.flag = 'safety';
       }
     }
   }
@@ -581,6 +610,7 @@ const freshState = (): CarRaceState => ({
   warnings: 0,
   penalty: 0,
   flag: 'none',
+  penaltyFor: 'none',
 });
 
 const freshTracker = (): Tracker => ({

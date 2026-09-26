@@ -85,6 +85,10 @@ type Part =
   | 'strobeR'
   | 'strobeB';
 
+/** A light bar on the roof: the police's, or the safety car's. */
+export type LightBar = 'none' | 'police' | 'safety';
+/** The safety car's strobes: amber both sides. */
+const AMBER_STROBE = { color: 0x5a3a08, emissive: 0xffa020, emissiveIntensity: 0.2 };
 /** The police light bar's strobes alternate red and blue this often, ms. */
 const STROBE_PERIOD = 440;
 
@@ -228,8 +232,11 @@ export class CarView {
   };
   /** The player's car casts real headlight beams. */
   private readonly beams: THREE.SpotLight[] = [];
-  /** A police car: a light bar on the roof whose strobes run with the siren. */
-  private readonly police: boolean;
+  /**
+   * A light bar on the roof: the police's red and blue strobes run with the siren, the safety
+   * car's amber ones with its hazards.
+   */
+  private readonly lightBar: LightBar;
   /** Damage: the meshes that follow the lattice, the panels that can come off, and debris. */
   private readonly deformables: Deformable[] = [];
   private readonly panelGeometries: Array<{
@@ -255,9 +262,9 @@ export class CarView {
     style: CarStyle = 'gt',
     livery?: Livery,
     beams = false,
-    police = false,
+    lightBar: LightBar = 'none',
   ) {
-    this.police = police;
+    this.lightBar = lightBar;
     this.axes = latticeAxes(spec);
     this.dims = { front: spec.body.front, rear: spec.body.rear };
     const mat = {
@@ -299,18 +306,18 @@ export class CarView {
         }),
       ),
       strobeR: this.material(
-        new THREE.MeshStandardMaterial({
-          color: 0x5a0a0a,
-          emissive: 0xff2020,
-          emissiveIntensity: 0.2,
-        }),
+        new THREE.MeshStandardMaterial(
+          lightBar === 'safety'
+            ? AMBER_STROBE
+            : { color: 0x5a0a0a, emissive: 0xff2020, emissiveIntensity: 0.2 },
+        ),
       ),
       strobeB: this.material(
-        new THREE.MeshStandardMaterial({
-          color: 0x0a1a5a,
-          emissive: 0x2050ff,
-          emissiveIntensity: 0.2,
-        }),
+        new THREE.MeshStandardMaterial(
+          lightBar === 'safety'
+            ? AMBER_STROBE
+            : { color: 0x0a1a5a, emissive: 0x2050ff, emissiveIntensity: 0.2 },
+        ),
       ),
     };
     this.lamps = {
@@ -372,13 +379,14 @@ export class CarView {
     lamps.head.emissiveIntensity = lights ? 4.5 : 1.6;
     lamps.tail.emissiveIntensity = state.brake > 0.05 ? 3.5 : lights ? 1.6 : 0.6;
     for (const beam of this.beams) beam.visible = lights;
-    if (this.police) {
-      const siren = (flags & FLAG_SIREN) !== 0;
+    if (this.lightBar !== 'none') {
+      const police = this.lightBar === 'police';
+      const on = (flags & (police ? FLAG_SIREN : FLAG_HAZARDS)) !== 0;
       const red = performance.now() % STROBE_PERIOD < STROBE_PERIOD / 2;
-      lamps.strobeR.emissiveIntensity = siren && red ? 7 : 0.2;
-      lamps.strobeB.emissiveIntensity = siren && !red ? 7 : 0.2;
-      // The headlamps wig-wag with the strobes.
-      if (siren) lamps.head.emissiveIntensity = red ? 5 : 1;
+      lamps.strobeR.emissiveIntensity = on && red ? 7 : 0.2;
+      lamps.strobeB.emissiveIntensity = on && !red ? 7 : 0.2;
+      // The police headlamps wig-wag with the strobes.
+      if (on && police) lamps.head.emissiveIntensity = red ? 5 : 1;
     }
     this.root.quaternion.set(state.rot.x, state.rot.y, state.rot.z, state.rot.w);
     for (let i = 0; i < this.wheels.length; i++) {
@@ -684,8 +692,9 @@ export class CarView {
       cabinTop + 0.005,
       (roofFront + roofRear) / 2,
     ]);
-    if (this.police) {
-      // The light bar: a dark base across the roof, red strobes left and blue right.
+    if (this.lightBar !== 'none') {
+      // The light bar: a dark base across the roof, red strobes left and blue right (the
+      // safety car's both amber).
       const barZ = (roofFront + roofRear) / 2 - 0.05;
       const barWidth = roofWidth * 0.88;
       this.block('carbon', barWidth, 0.05, 0.24, [0, cabinTop + 0.04, barZ]);

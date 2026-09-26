@@ -21,11 +21,13 @@ import {
   type HandlingMode,
   type SessionConfig,
   type SpawnPoint,
+  SAFETY_CAR_MODEL,
 } from '../shared/protocol';
 import { AiDriver, arcadePace } from './race/AiDriver';
 import { resolveCarContacts } from './race/collisions';
 import { RaceDirector } from './race/RaceDirector';
 import { Pits } from './race/Pits';
+import { SAFETY_CAR_SPEED, SafetyCar } from './race/SafetyCar';
 import { DEFAULT_LINE_OPTIONS, computeRacingLine, type RacingLineOptions } from './race/racingLine';
 import { TestGround, type Surface } from './track/surface';
 import { Track } from './track/Track';
@@ -79,6 +81,9 @@ export class World {
   director: RaceDirector | null = null;
   /** Pit stops (races with tyre wear): the lane, and who is in it. */
   pits: Pits | null = null;
+  /** Race rules: the safety car, waiting in its box (its slot follows the racers in the snapshot). */
+  safetyCar: SafetyCar | null = null;
+  private withSafetyCar: Car[] = [];
   /** The grid from a qualifying (car indices by position, pole first), kept for restarts. */
   gridOrder: number[] | null = null;
   /** AI driver per car (null for the player). */
@@ -211,13 +216,24 @@ export class World {
         Array.from({ length: count }, (_, i) => world.drivers[i] !== undefined),
       );
     }
+    // The safety car (never in an elimination race or a qualifying): its own car and driver.
+    if (
+      config.mode === 'race' &&
+      config.safetyCar &&
+      !config.elimination &&
+      !(config.qualifying ?? 0)
+    ) {
+      const m = carById(SAFETY_CAR_MODEL);
+      world.safetyCar = new SafetyCar(track, m.spec, lineFor(m), config.seed);
+      world.withSafetyCar = [...world.cars, world.safetyCar.car];
+    }
     // The day's clock when it runs (the hour of the chosen time of day, with the circuit's own
     // sun in the afternoon); the headlights come on after dark either way.
     const hour = wrapHour(
       config.clock ?? hourOf(config.conditions?.time ?? 'track', def.theme.sunElevation),
     );
     if ((config.dayCycle ?? 0) > 0) world.day = { hour, rate: dayRate(config.dayCycle!) };
-    if (afterDark(sunElevationAt(hour))) for (const car of world.cars) car.headlights = true;
+    if (afterDark(sunElevationAt(hour))) for (const car of world.everyCar) car.headlights = true;
     // A qualifying: the field runs its laps for the grid (nobody is put out in one).
     const qualifying = config.mode === 'race' ? Math.max(0, Math.floor(config.qualifying ?? 0)) : 0;
     // A time trial has no distance, but a drift trial has its laps (for the HUD; the main thread ends it).
@@ -235,6 +251,7 @@ export class World {
       qualifying > 0,
       config.rules === true,
     );
+    world.director.status.safetyCar = world.safetyCar?.status ?? null;
     world.gridOrder = config.gridOrder ? [...config.gridOrder] : null;
     world.director.restart(
       world.cars,
@@ -258,7 +275,7 @@ export class World {
 
   /** Sim or arcade handling, for every car (the AI drives the same physics as the player). */
   setHandling(mode: HandlingMode): void {
-    for (const car of this.cars) car.arcade = mode === 'arcade';
+    for (const car of this.everyCar) car.arcade = mode === 'arcade';
   }
 
   teleport(car: number, to: SpawnPoint): void {
@@ -285,13 +302,24 @@ export class World {
       car.repair();
       car.retired = false;
     }
+    this.safetyCar?.reset();
     this.pits?.reset(this.cars);
     this.director?.restart(this.cars, playerSlot, this.gridOrder ?? undefined);
     if (!this.director) this.cars[0]?.reset();
   }
 
+  /** The safety car, now (the debug command). */
+  deploySafetyCar(): void {
+    this.safetyCar?.deploy(this.director?.status ?? null, true);
+  }
+
+  /** The racers and the safety car, when there is one. */
+  private get everyCar(): readonly Car[] {
+    return this.safetyCar ? this.withSafetyCar : this.cars;
+  }
+
   storePrevious(): void {
-    for (const car of this.cars) car.storePrevious();
+    for (const car of this.everyCar) car.storePrevious();
     this.traffic?.storePrevious();
   }
 
@@ -300,13 +328,17 @@ export class World {
     const director = this.director;
     // The pit lane: who goes in, and the drive down it on rails.
     this.pits?.update(dt, cars, director?.status ?? null);
+    // The safety car: its call, its drive and its laps; the field sees it among the others.
+    const safety = this.safetyCar;
+    safety?.update(dt, cars, director?.status ?? null, this.surface);
+    const others = safety?.active ? this.withSafetyCar : cars;
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i]!;
       // Out of the race: left where it stopped, unseen and untouched. In the pit lane: on rails.
       if (car.retired || car.onRails) continue;
       const ai = this.drivers[i];
       if (ai) {
-        car.setInput(ai.drive(car, cars, dt));
+        car.setInput(ai.drive(car, others, dt));
         if (ai.needsReset) {
           this.resetCar(i);
           ai.needsReset = false;
@@ -321,7 +353,7 @@ export class World {
         this.warnings.push('Physics produced invalid numbers; the car was reset.');
       }
     }
-    if (cars.length > 1) resolveCarContacts(cars);
+    if (others.length > 1) resolveCarContacts(others);
     this.tickDay(dt);
     this.tickWeather(dt);
     this.traffic?.step(dt, cars[0]!);
@@ -349,7 +381,7 @@ export class World {
     day.hour = wrapHour(day.hour + dt * day.rate);
     const dark = afterDark(sunElevationAt(day.hour));
     if (dark === wasDark) return;
-    for (const car of this.cars) car.headlights = dark;
+    for (const car of this.everyCar) car.headlights = dark;
     if (this.traffic) this.traffic.lightsOn = dark;
   }
 
@@ -379,6 +411,13 @@ export class World {
       const flag = status?.cars[i]?.flag;
       const flagged = flag === 'yellow' ? 0.8 : flag === 'blue' ? 0.9 : 1;
       ai.paceScale = band * weather * Math.sqrt(this.cars[i]?.gripFactor ?? 1) * flagged;
+    }
+    // Under the safety car the field holds station at its speed.
+    const held = this.safetyCar !== null && this.safetyCar.status.phase !== 'none';
+    for (const ai of this.drivers) {
+      if (!ai) continue;
+      ai.limit = held ? SAFETY_CAR_SPEED : Infinity;
+      ai.holdStation = held;
     }
   }
 
@@ -440,14 +479,16 @@ export class World {
     }
   }
 
-  /** Cars in the snapshot: the physics cars, then the traffic slots. */
+  /** Cars in the snapshot: the physics cars, the safety car, then the traffic slots. */
   get snapshotCount(): number {
-    return this.cars.length + (this.traffic?.count ?? 0);
+    return this.cars.length + (this.safetyCar ? 1 : 0) + (this.traffic?.count ?? 0);
   }
 
   writeSnapshot(out: Float32Array): void {
     for (let i = 0; i < this.cars.length; i++) this.cars[i]!.writeSnapshot(out, i * CAR_STRIDE);
-    this.traffic?.writeSnapshot(out, this.cars.length);
+    let next = this.cars.length;
+    if (this.safetyCar) this.safetyCar.car.writeSnapshot(out, next++ * CAR_STRIDE);
+    this.traffic?.writeSnapshot(out, next);
     // The player's soft body, after every car (zeros when there is none).
     const base = this.snapshotCount * CAR_STRIDE;
     const soft = this.cars[0]?.soft;

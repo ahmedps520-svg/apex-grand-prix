@@ -77,6 +77,10 @@ export class AiDriver {
    * player), 1 when nothing is pulling.
    */
   paceScale = 1;
+  /** A speed never exceeded, m/s: the safety car's own, and the field's behind it. */
+  limit = Infinity;
+  /** Under the safety car: follow the car ahead and never pull out to pass. */
+  holdStation = false;
   private readonly aggression: number;
   private readonly edge: number;
   private readonly pos = trackPos();
@@ -349,7 +353,7 @@ export class AiDriver {
     const k = this.line.curvature[this.indexAt(s + Math.max(v, 0) * 0.5)]!;
     const tighter = 1 + k * this.offset;
     if (tighter < 1) target *= Math.sqrt(Math.max(tighter, 0.5));
-    target = Math.min(target, this.speedCap);
+    target = Math.min(target, this.speedCap, this.limit);
     const ahead = this.planAt(s + 6) * this.paceScale;
     const need = ahead < target ? ((target - ahead) / 6) * target : 0;
     const err = v - target;
@@ -424,7 +428,7 @@ export class AiDriver {
       const room = gap - length;
       // Follow at a gap that grows with speed (closer the more aggressive).
       const desired = 4 + (0.22 - 0.1 * aggression) * Math.max(v, 0);
-      if (!clear && closing > 1.2 - aggression) {
+      if (!clear && !this.holdStation && closing > 1.2 - aggression) {
         // Pass on the side with more room, if there is room.
         const left = lat - SIDE_GAP - -this.edge;
         const right = this.edge - (lat + SIDE_GAP);
