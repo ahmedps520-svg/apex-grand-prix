@@ -17,7 +17,7 @@ function makeCanvas(width: number, height = width): [HTMLCanvasElement, CanvasRe
 }
 
 /** Tileable multi-octave value noise in [0, 1]. */
-function tileableNoise(
+export function tileableNoise(
   size: number,
   seed: number,
   octaves: number,

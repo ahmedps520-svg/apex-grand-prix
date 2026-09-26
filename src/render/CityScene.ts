@@ -1,5 +1,6 @@
 import {
   color,
+  float,
   hash,
   instanceIndex,
   mix,
@@ -49,7 +50,9 @@ import { Atmosphere } from './Atmosphere';
 import { Rain } from './Rain';
 import { sceneLook, type SceneLook } from './sceneLook';
 import type { ConePlacement } from './TestGroundScene';
-import { asphaltTexture, glowTexture, turfTexture } from './textures';
+import { asphaltTexture, glowTexture, noiseTexture, turfTexture } from './textures';
+import { PLAIN_ROAD, asphaltMaps, detailedRoad, type RoadLook } from './asphalt';
+import { reflective } from './Effects';
 import { MeshBuilder } from './trackMeshes';
 
 /**
@@ -88,6 +91,15 @@ export function detectDetail(): DetailLevel {
   if (cores >= 8 && memory >= 8) return DETAIL_LEVELS.high;
   return DETAIL_LEVELS.medium;
 }
+
+/** The light bounced off the city's concrete: how much of the shade's fill it makes. */
+const CANYON_GREY = new THREE.Color(0.8, 0.8, 0.8);
+const CANYON_BOUNCE = 0.7;
+/** The sky's fill and reflections, cut by the towers that hide most of it... */
+const CANYON_SKY = 0.4;
+/** ...and the bounce off the towers making up for it. */
+const CANYON_FILL = 1.4;
+const luminanceOf = (c: THREE.Color): number => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 
 const CITY_THEME: TrackTheme = {
   grass: 0x5d8a45,
@@ -128,7 +140,7 @@ export class CityScene {
   private readonly night = uniform(0);
   private readonly mat: {
     ground: THREE.MeshStandardMaterial;
-    road: THREE.MeshStandardMaterial;
+    road: THREE.MeshStandardNodeMaterial;
     walk: THREE.MeshStandardMaterial;
     concrete: THREE.MeshStandardMaterial;
     white: THREE.MeshBasicMaterial;
@@ -184,6 +196,7 @@ export class CityScene {
     readonly map: CityMap,
     conditions: Conditions = DEFAULT_CONDITIONS,
     readonly detail: DetailLevel = DETAIL_LEVELS.medium,
+    private readonly roadLook: RoadLook = PLAIN_ROAD,
   ) {
     this.current = { ...conditions };
     this.look = this.makeLook();
@@ -341,20 +354,36 @@ export class CityScene {
     toward(this.sunDirection, look.sunElevation, look.sunAzimuth);
     toward(this.lightDirection, look.lightElevation, look.lightAzimuth);
     this.atmosphere.set(look, this.sunDirection);
-    this.hemi.color.copy(look.hemiSky);
-    this.hemi.groundColor.copy(look.hemiGround);
-    this.hemi.intensity = look.hemiIntensity;
+    // In the streets between the towers much of the sky is concrete and glass: the light that
+    // fills the shade is greyer than the open sky's (and the shaded tarmac reads grey, not navy).
+    const bounce = CANYON_GREY.clone().multiplyScalar(luminanceOf(look.hemiSky));
+    this.hemi.color.copy(look.hemiSky).lerp(bounce, CANYON_BOUNCE);
+    this.hemi.groundColor.copy(look.hemiGround).lerp(bounce, CANYON_BOUNCE * 0.5);
+    this.hemi.intensity = look.hemiIntensity * CANYON_FILL;
     this.sun.color.copy(look.sunColor);
     this.sun.intensity = look.sunIntensity;
-    this.sun.shadow.radius = look.shadowRadius;
+    this.sun.shadow.radius = look.shadowRadius * this.shadowSoftness;
     this.sun.shadow.intensity = look.shadowIntensity;
-    this.scene.environmentIntensity = look.environmentIntensity;
+    this.scene.environmentIntensity = look.environmentIntensity * CANYON_SKY;
     this.night.value =
       this.clock === null ? darkness(this.current.time) : darknessAt(this.look.sunElevation);
     this.rain.set(look.rain, look.waterColor, 1.4, 0.6);
     const wet = look.wetness;
+    this.wet.value = wet;
     this.mat.road.roughness = THREE.MathUtils.lerp(0.92, 0.35, wet);
     this.mat.road.color.setScalar(THREE.MathUtils.lerp(1, 0.6, wet));
+  }
+
+  /** How much the shadow edges are softened over what the weather gives (the graphics). */
+  private shadowSoftness = 1;
+  /** Road wetness for the detailed asphalt: 0 dry … 1 standing water. */
+  private readonly wet = uniform(0);
+
+  /** The sun's shadow map size and softness; the map is resized on the next frame. */
+  setShadows(size: number, softness: number): void {
+    this.shadowSoftness = softness;
+    this.sun.shadow.mapSize.set(size, size);
+    this.sun.shadow.radius = this.look.shadowRadius * softness;
   }
 
   private renderEnvironment(): void {
@@ -371,7 +400,7 @@ export class CityScene {
       });
       this.envTarget = target;
       this.scene.environment = target.texture;
-      this.scene.environmentIntensity = this.look.environmentIntensity;
+      this.scene.environmentIntensity = this.look.environmentIntensity * CANYON_SKY;
       this.envElevation = this.look.sunElevation;
       this.envNight = this.night.value;
       this.envCloud = this.look.cloud;
@@ -381,6 +410,28 @@ export class CityScene {
   }
 
   // ---------------------------------------------------------------- materials
+
+  /** The roads: the plain texture, or the detailed asphalt laid in world space. */
+  private roadMaterial(asphalt: THREE.Texture): THREE.MeshStandardNodeMaterial {
+    if (!this.roadLook.detailed) {
+      const plain = new THREE.MeshStandardNodeMaterial({
+        map: asphalt,
+        roughness: 0.92,
+        color: 0xffffff,
+      });
+      reflective(plain, this.wet.mul(0.45).add(0.02), float(0.35));
+      return plain;
+    }
+    const puddles = noiseTexture(53, 256, 4, 4);
+    const noise = noiseTexture(71, 256, 5, 4);
+    this.disposables.push(puddles, noise);
+    return detailedRoad({
+      maps: asphaltMaps(this.roadLook.size),
+      wet: this.wet,
+      puddles,
+      noise,
+    });
+  }
 
   private buildMaterials(): CityScene['mat'] {
     const turf = turfTexture();
@@ -439,7 +490,7 @@ export class CityScene {
     }
     return {
       ground: new THREE.MeshStandardMaterial({ map: turf, vertexColors: true, roughness: 1 }),
-      road: new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.92, color: 0xffffff }),
+      road: this.roadMaterial(asphalt),
       walk: new THREE.MeshStandardMaterial({ color: 0xa9aaa6, roughness: 0.95 }),
       concrete: new THREE.MeshStandardMaterial({ color: 0x8f9296, roughness: 0.85 }),
       white: new THREE.MeshBasicMaterial({ color: 0xe8e8e2 }),

@@ -22,6 +22,7 @@ import {
 import type { Vec3 } from '../shared/math';
 import { SOFT_NZ, latticeAxes, nodeIndex } from '../sim/vehicle/softbody';
 import type { CarRenderState } from './interpolate';
+import { reflective } from './Effects';
 import { LiveryMaterial, type LiveryLayout } from './liveryMaterial';
 
 /** Panels that can come off in a crash (free roam), and the flag each answers to. */
@@ -71,6 +72,13 @@ interface WheelView {
   /** Child of the pivot; rotates as the wheel rolls. */
   spinner: THREE.Group;
   hardpointY: number;
+  radius: number;
+}
+
+/** Windows mirror what is around the car (screen-space reflections, when they are on). */
+function reflectiveGlass<M extends THREE.NodeMaterial>(material: M): M {
+  reflective(material, 0.35, 0.08);
+  return material;
 }
 
 /** Materials of the static body parts; each becomes one merged mesh (one draw call). */
@@ -269,7 +277,9 @@ export class CarView {
     this.dims = { front: spec.body.front, rear: spec.body.rear };
     const mat = {
       glass: this.material(
-        new THREE.MeshPhysicalMaterial({ color: 0x0d141c, roughness: 0.08, metalness: 0.3 }),
+        reflectiveGlass(
+          new THREE.MeshPhysicalNodeMaterial({ color: 0x0d141c, roughness: 0.08, metalness: 0.3 }),
+        ),
       ),
       carbon: this.material(new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.55 })),
       tyre: this.material(new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.92 })),
@@ -356,6 +366,25 @@ export class CarView {
   }
 
   private retired = false;
+
+  /** Tyre tread width, metres. */
+  readonly tyreWidth = TYRE_WIDTH;
+
+  get wheelCount(): number {
+    return this.wheels.length;
+  }
+
+  /**
+   * Where wheel `i` touches the road, in world space, as last updated: its centre, down the
+   * car's own up by the radius. Call after `update`.
+   */
+  contactPoint(i: number, out: THREE.Vector3): THREE.Vector3 {
+    const w = this.wheels[i]!;
+    out.copy(w.pivot.position);
+    out.y -= w.radius;
+    this.root.updateMatrix();
+    return out.applyMatrix4(this.root.matrix);
+  }
 
   update(state: CarRenderState): void {
     this.root.position.set(state.pos.x, state.pos.y, state.pos.z);
@@ -945,7 +974,7 @@ export class CarView {
       caliper.position.set(side * (width / 2 - 0.06), r * 0.42, r * 0.22);
       pivot.add(spinner, caliper);
       this.root.add(pivot);
-      this.wheels.push({ pivot, spinner, hardpointY });
+      this.wheels.push({ pivot, spinner, hardpointY, radius: r });
     }
   }
 
