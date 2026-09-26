@@ -54,7 +54,9 @@ describe('settings', () => {
       hudScale: 1.2,
       palette: 'colourSafe',
     });
-    expect(parseSettings({})).toMatchObject({ hudScale: 1, palette: 'standard' });
+    expect(parseSettings({})).toMatchObject({ hudScale: 1, palette: 'standard', effects: 'auto' });
+    expect(parseSettings({ effects: 'full' }).effects).toBe('full');
+    expect(parseSettings({ effects: 'sparkles' }).effects).toBe('auto');
   });
 
   it('falls back to defaults for garbage', () => {

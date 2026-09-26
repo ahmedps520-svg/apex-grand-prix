@@ -40,6 +40,7 @@ import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
+import { Effects, type EffectsLevel } from '../render/Effects';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
 import { CITY_SUN_ELEVATION, cityHourOf } from '../content/city/day';
 import { cityMap } from '../content/city/map';
@@ -219,6 +220,8 @@ export interface DebugApi {
   /** Free roam: puts the car down here (for the checks). */
   place: (x: number, z: number, yaw: number) => void;
   /** Moving weather: starts a change to this weather now (for the checks). */
+  /** Post-processing: the bloom's strength, radius and threshold, for tuning by eye. */
+  tuneBloom: (strength: number, radius: number, threshold: number) => void;
   weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
@@ -501,6 +504,8 @@ export class Game {
   private attractTimer = 0;
   private audioDuck = 1;
   /** Photo mode (from the pause menu or a replay), or null. */
+  /** Post-processing over the frame (null: the plain render). */
+  private effects: Effects | null = null;
   private photo: {
     camera: PhotoCamera;
     pipeline: PhotoPipeline;
@@ -730,6 +735,7 @@ export class Game {
       propsKnocked: 0,
       nearestProp: (x, z) => this.props?.nearest(x, z) ?? null,
       place: (x, z, yaw) => this.sim.command({ kind: 'place', car: 0, x, z, yaw }),
+      tuneBloom: (strength, radius, threshold) => this.effects?.tune(strength, radius, threshold),
       weatherTo: (to, blend) => {
         if (isWeather(to)) this.sim.command({ kind: 'weather', to, blend });
       },
@@ -949,6 +955,32 @@ export class Game {
     };
   }
 
+  /** The post-processing the settings ask for: by the detail level when on auto. */
+  private effectsLevel(): EffectsLevel {
+    const s = this.settings;
+    if (s.effects !== 'auto') return s.effects;
+    const detail = s.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[s.detail];
+    return detail === DETAIL_LEVELS.high
+      ? 'full'
+      : detail === DETAIL_LEVELS.medium
+        ? 'bloom'
+        : 'off';
+  }
+
+  /** The post-processing pipeline over the current scene, at the level the settings ask for. */
+  private rebuildEffects(): void {
+    const level = this.effectsLevel();
+    this.effects?.dispose();
+    this.effects = null;
+    if (level === 'off') return;
+    try {
+      this.effects = new Effects(this.host.renderer, this.scenery.scene, this.camera.camera, level);
+    } catch (error) {
+      console.warn('Post-processing is off: it could not be set up on this renderer.', error);
+      this.effects = null;
+    }
+  }
+
   /** Builds the scene and cars for a session and starts it in the worker. */
   private async startSession(
     setup: SessionSetup,
@@ -977,6 +1009,7 @@ export class Game {
     ) {
       this.scenery.setConditions(config.conditions);
     }
+    this.rebuildEffects();
     this.attract = attract && this.tv !== null;
     const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
     this.liverySeed = season?.liverySeed ?? config.seed;
@@ -1558,6 +1591,7 @@ export class Game {
     if (this.menus.top === 'tester') this.updateTester();
 
     if (this.photo) this.photo.pipeline.render();
+    else if (this.effects) this.effects.render();
     else this.host.renderer.render(this.scenery.scene, this.camera.camera);
 
     this.frames++;
@@ -3191,6 +3225,7 @@ export class Game {
     this.input.bindings = s.bindings;
     this.input.wheelProfiles = s.wheels;
     this.hud.setUnits(s.units);
+    if ((this.effects?.level ?? 'off') !== this.effectsLevel()) this.rebuildEffects();
     // The HUD's size and the colour palette are CSS: a variable on the UI root, a flag on <html>.
     this.ui.style.setProperty('--hud-scale', String(s.hudScale));
     document.documentElement.dataset.palette = s.palette;

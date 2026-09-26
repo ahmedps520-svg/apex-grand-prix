@@ -51,6 +51,8 @@ export interface Settings {
   hudScale: number;
   /** Standard colours, or a colour-safe palette (blue and orange for green and red). */
   palette: Palette;
+  /** Post-processing: by the detail level (auto), none, a bloom, or a bloom with ambient occlusion. */
+  effects: EffectsSetting;
   camera: CameraMode;
   aids: DriverAids;
   pad: PadSettings;
@@ -84,6 +86,8 @@ export interface Settings {
 }
 
 export type Palette = 'standard' | 'colourSafe';
+export type EffectsSetting = 'auto' | 'off' | 'bloom' | 'full';
+const EFFECTS: readonly EffectsSetting[] = ['auto', 'off', 'bloom', 'full'];
 export type DamageLevel = 'off' | 'light' | 'full';
 const DAMAGE_LEVELS: readonly DamageLevel[] = ['off', 'light', 'full'];
 /** Damage setting → how much impacts hurt (see Car.damageScale). */
@@ -112,6 +116,7 @@ export const defaultSettings = (): Settings => ({
   telemetry: false,
   hudScale: 1,
   palette: 'standard',
+  effects: 'auto',
   camera: 'chase',
   aids: defaultAids(),
   pad: defaultPadSettings(),
@@ -191,6 +196,7 @@ export function parseSettings(raw: unknown): Settings {
     telemetry: typeof raw.telemetry === 'boolean' ? raw.telemetry : d.telemetry,
     hudScale: num(raw.hudScale, 0.7, 1.5, d.hudScale),
     palette: raw.palette === 'colourSafe' ? 'colourSafe' : 'standard',
+    effects: oneOf(raw.effects, EFFECTS, d.effects),
     camera: oneOf(raw.camera, CAMERAS, d.camera),
     aids: {
       abs: oneOf(aids.abs, AID_LEVELS, d.aids.abs),
