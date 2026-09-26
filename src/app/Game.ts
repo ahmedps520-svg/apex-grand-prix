@@ -40,7 +40,16 @@ import type { RendererHost } from '../render/RendererHost';
 import { TestGroundScene } from '../render/TestGroundScene';
 import { TrackScene, type Footprint } from '../render/TrackScene';
 import { CityScene, DETAIL_LEVELS, detectDetail } from '../render/CityScene';
-import { Effects, type EffectsLevel } from '../render/Effects';
+import { Effects, effectsKey, noEffects, type EffectsOptions } from '../render/Effects';
+import { SkidMarks, skidIntensity } from '../render/SkidMarks';
+import type { RoadLook } from '../render/asphalt';
+import {
+  SHADOW_SETTINGS,
+  applyPreset,
+  effectiveGraphics,
+  type Graphics,
+  type Level,
+} from './graphics';
 import { CityMinimap, type MinimapMarker } from '../ui/CityMinimap';
 import { CITY_SUN_ELEVATION, cityHourOf } from '../content/city/day';
 import { cityMap } from '../content/city/map';
@@ -226,6 +235,9 @@ export interface DebugApi {
   tuneBloom: (strength: number, radius: number, threshold: number) => void;
   /** Brings the safety car out now (a race with the rules on). */
   safetyCar: () => void;
+  /** Graphics: the post-processing in force ('' for the plain render) and tyre-mark strips laid. */
+  effects: string;
+  skidMarks: number;
   weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
@@ -409,6 +421,9 @@ function rivalPaints(player: number): number[] {
  * The whole game on the main thread: menus, the session being driven (proving ground or a
  * circuit with AI), rendering, HUDs, sound and rumble. The simulation runs in the worker.
  */
+/** Tyre marks are laid by the cars this close to the camera, metres. */
+const SKID_RANGE = 120;
+
 /** The safety car's slot in a race's snapshot: after the racers. */
 const safetySlot = (config: SessionConfig, car: number): boolean =>
   config.mode === 'race' && config.safetyCar === true && car === config.opponents + 1;
@@ -514,6 +529,11 @@ export class Game {
   /** Photo mode (from the pause menu or a replay), or null. */
   /** Post-processing over the frame (null: the plain render). */
   private effects: Effects | null = null;
+  /** Tyre marks on the road (see laySkidMarks). */
+  private readonly skid = new SkidMarks();
+  /** The road look the current scenery was built with (a change rebuilds it). */
+  private roadKey = '';
+  private readonly contact = new THREE.Vector3();
   private photo: {
     camera: PhotoCamera;
     pipeline: PhotoPipeline;
@@ -741,6 +761,8 @@ export class Game {
       clock: null,
       weather: null,
       propsKnocked: 0,
+      effects: '',
+      skidMarks: 0,
       nearestProp: (x, z) => this.props?.nearest(x, z) ?? null,
       place: (x, z, yaw) => this.sim.command({ kind: 'place', car: 0, x, z, yaw }),
       tuneBloom: (strength, radius, threshold) => this.effects?.tune(strength, radius, threshold),
@@ -889,8 +911,7 @@ export class Game {
           ? 0
           : DAY_MINUTES[setup.dayLength];
     // Free roam: traffic slots for this device, each with its own everyday car.
-    const detail =
-      this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
+    const detail = DETAIL_LEVELS[this.graphics().detail];
     const traffic = setup.mode === 'roam' && !attract ? trafficSlotsFor(detail.chunks) : 0;
     // The police take slots after the traffic: the same body, white paint and a light bar;
     // the festival's street racers the slots after them.
@@ -973,30 +994,85 @@ export class Game {
     };
   }
 
-  /** The post-processing the settings ask for: by the detail level when on auto. */
-  private effectsLevel(): EffectsLevel {
-    const s = this.settings;
-    if (s.effects !== 'auto') return s.effects;
-    const detail = s.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[s.detail];
-    return detail === DETAIL_LEVELS.high
-      ? 'full'
-      : detail === DETAIL_LEVELS.medium
-        ? 'bloom'
-        : 'off';
+  /** This device's level of detail (its cores and memory, and whether it is a phone or tablet). */
+  private deviceLevel(): Level {
+    const d = detectDetail();
+    return d === DETAIL_LEVELS.high ? 'high' : d === DETAIL_LEVELS.medium ? 'medium' : 'low';
   }
 
-  /** The post-processing pipeline over the current scene, at the level the settings ask for. */
+  /** The graphics in force: the preset's, or the custom choices. */
+  private graphics(): Graphics {
+    return effectiveGraphics(this.settings, this.deviceLevel());
+  }
+
+  /** How the roads are laid: the detailed asphalt's map is larger at high detail. */
+  private roadLook(): RoadLook {
+    const g = this.graphics();
+    return { detailed: g.surfaces === 'detailed', size: g.detail === 'high' ? 1024 : 512 };
+  }
+
+  /** The post-processing the graphics ask for. */
+  private effectsOptions(): EffectsOptions {
+    const g = this.graphics();
+    return {
+      bloom: g.effects !== 'off',
+      ao: g.effects === 'full',
+      ssr: g.reflections,
+      aa: g.antialiasing,
+      grade: g.effects === 'full',
+    };
+  }
+
+  /** The post-processing pipeline over the current scene, as the graphics ask for. */
   private rebuildEffects(): void {
-    const level = this.effectsLevel();
+    const options = this.effectsOptions();
     this.effects?.dispose();
     this.effects = null;
-    if (level === 'off') return;
+    this.debug.effects = '';
+    if (noEffects(options)) return;
     try {
-      this.effects = new Effects(this.host.renderer, this.scenery.scene, this.camera.camera, level);
+      this.effects = new Effects(
+        this.host.renderer,
+        this.scenery.scene,
+        this.camera.camera,
+        options,
+      );
+      this.debug.effects = this.effects.key;
     } catch (error) {
       console.warn('Post-processing is off: it could not be set up on this renderer.', error);
       this.effects = null;
     }
+  }
+
+  /** The sun's shadow map size and softness from the graphics. */
+  private applyShadows(): void {
+    const s = SHADOW_SETTINGS[this.graphics().shadows];
+    this.scenery.setShadows(s.size, s.radius);
+  }
+
+  /** Tyre marks from every sliding, locked or spinning wheel near the camera. */
+  private laySkidMarks(count: number): void {
+    const cam = this.camera.camera.position;
+    for (let i = 0; i < count; i++) {
+      const state = this.states[i]!;
+      const view = this.cars[i]!;
+      const dx = state.pos.x - cam.x;
+      const dz = state.pos.z - cam.z;
+      const far = dx * dx + dz * dz > SKID_RANGE * SKID_RANGE;
+      const out = (state.flags & FLAG_RETIRED) !== 0;
+      const wheels = Math.min(view.wheelCount, state.wheels.length, 4);
+      for (let w = 0; w < wheels; w++) {
+        const intensity = far || out ? 0 : skidIntensity(state.wheels[w]!);
+        if (intensity <= 0) {
+          this.skid.wheel(i * 4 + w, 0, 0, 0, 0, 0);
+          continue;
+        }
+        const p = view.contactPoint(w, this.contact);
+        this.skid.wheel(i * 4 + w, p.x, p.y, p.z, view.tyreWidth, intensity);
+      }
+    }
+    this.skid.flush();
+    this.debug.skidMarks = this.skid.count;
   }
 
   /** Builds the scene and cars for a session and starts it in the worker. */
@@ -1016,9 +1092,13 @@ export class Game {
     this.session = config;
     // The proving ground is built at start-up; circuits are built when first driven.
     const roam = config.mode === 'roam';
-    const changed = previous
-      ? previous.trackId !== config.trackId || (previous.mode === 'roam') !== roam
-      : config.trackId !== '' || roam;
+    const road = this.roadLook();
+    const roadKey = `${road.detailed}:${road.size}`;
+    const changed =
+      (previous
+        ? previous.trackId !== config.trackId || (previous.mode === 'roam') !== roam
+        : config.trackId !== '' || roam) ||
+      ((config.trackId !== '' || roam) && roadKey !== this.roadKey);
     this.input.roam = roam;
     if (changed) this.buildScenery(config);
     else if (
@@ -1028,6 +1108,10 @@ export class Game {
       this.scenery.setConditions(config.conditions);
     }
     this.rebuildEffects();
+    this.applyShadows();
+    // A clean road for every session (the racing line keeps its rubber).
+    this.skid.clear();
+    this.skid.mesh.visible = this.graphics().skidMarks;
     this.attract = attract && this.tv !== null;
     const season = this.seasonRound >= 0 ? this.menus.championship.value : null;
     this.liverySeed = season?.liverySeed ?? config.seed;
@@ -1222,6 +1306,7 @@ export class Game {
   private buildScenery(config: SessionConfig): void {
     // Take out what outlives the scenery, so disposing it doesn't free their materials.
     for (const car of this.cars) car.root.removeFromParent();
+    this.skid.mesh.removeFromParent();
     this.helicopter.root.removeFromParent();
     this.strips.root.removeFromParent();
     this.ghostView?.root.removeFromParent();
@@ -1240,9 +1325,8 @@ export class Game {
       this.track = null;
       this.tv = null;
       const map = cityMap();
-      const detail =
-        this.settings.detail === 'auto' ? detectDetail() : DETAIL_LEVELS[this.settings.detail];
-      this.scenery = new CityScene(map, config.conditions, detail);
+      const detail = DETAIL_LEVELS[this.graphics().detail];
+      this.scenery = new CityScene(map, config.conditions, detail, this.roadLook());
       this.festivalScene = new FestivalScene(festivalEvents(map));
       this.scenery.scene.add(this.festivalScene.root);
       this.pedestrianView = new PedestrianView(config.pedestrians ?? 0);
@@ -1260,7 +1344,7 @@ export class Game {
       });
     } else if (def) {
       this.track = new Track(def);
-      const scene = new TrackScene(this.track, config.conditions);
+      const scene = new TrackScene(this.track, config.conditions, this.roadLook());
       this.scenery = scene;
       this.minimap = new Minimap(this.ui, this.track);
       this.tv = new TvDirector(this.track, { obstacles: scene.obstacles });
@@ -1270,6 +1354,9 @@ export class Game {
       this.scenery = this.buildProvingGround();
     }
     this.scenery.buildEnvironment(this.host.renderer);
+    const road = this.roadLook();
+    this.roadKey = `${road.detailed}:${road.size}`;
+    this.scenery.scene.add(this.skid.mesh);
     for (const car of this.cars) this.scenery.scene.add(car.root);
     void this.host.renderer.compileAsync(this.scenery.scene, this.camera.camera);
   }
@@ -1489,6 +1576,7 @@ export class Game {
         interpolateCar(view, i, snapshot.alpha, this.states[i]!);
         this.cars[i]!.update(this.states[i]!);
       }
+      if (this.skid.mesh.visible) this.laySkidMarks(count);
       const player = this.states[0]!;
       if (this.session?.mode === 'roam' && count > 0) {
         this.updateSoftBody(view, snapshot.carCount, player, dt);
@@ -3227,6 +3315,12 @@ export class Game {
         this.applySettings();
         this.save();
       },
+      graphicsPreset: (preset) => {
+        applyPreset(this.settings, preset, this.deviceLevel());
+        this.applySettings();
+        this.save();
+        this.menus.revision.value++;
+      },
       openWheelSetup: () => this.openWheelSetup(),
       testRumble: () => this.rumble.test(this.input.activePad),
       exportSettings: () => this.exportSettings(),
@@ -3267,7 +3361,14 @@ export class Game {
     this.input.bindings = s.bindings;
     this.input.wheelProfiles = s.wheels;
     this.hud.setUnits(s.units);
-    if ((this.effects?.level ?? 'off') !== this.effectsLevel()) this.rebuildEffects();
+    const options = this.effectsOptions();
+    if ((this.effects?.key ?? '') !== (noEffects(options) ? '' : effectsKey(options))) {
+      this.rebuildEffects();
+    }
+    this.applyShadows();
+    const marks = this.graphics().skidMarks;
+    if (!marks && this.skid.mesh.visible) this.skid.clear();
+    this.skid.mesh.visible = marks;
     // The HUD's size and the colour palette are CSS: a variable on the UI root, a flag on <html>.
     this.ui.style.setProperty('--hud-scale', String(s.hudScale));
     document.documentElement.dataset.palette = s.palette;

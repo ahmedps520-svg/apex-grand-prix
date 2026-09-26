@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { reflective } from './Effects';
 import {
   Fn,
   If,
@@ -202,6 +203,14 @@ export class LiveryMaterial {
     this.buildNodes();
     this.setLayout(layout);
     this.set(livery);
+    // Screen-space reflections: a clear coat mirrors the cars and the scenery beside it, a
+    // matte finish barely does.
+    const u = this.u;
+    reflective(
+      this.material,
+      u.clearcoat.mul(0.3).add(u.metalness.mul(0.25)).add(0.06),
+      mix(u.roughness, u.clearcoatRoughness, u.clearcoat),
+    );
   }
 
   /** Moves the livery's features to fit a body style. */

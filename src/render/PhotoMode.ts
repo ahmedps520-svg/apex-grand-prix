@@ -6,6 +6,8 @@ import {
   length,
   luminance,
   mix,
+  mrt,
+  output,
   pass,
   renderOutput,
   saturation,
@@ -448,6 +450,9 @@ export class PhotoPipeline {
     this.dofSupported = support === '';
     this.dofNote = support;
     this.scenePass = pass(scene, camera);
+    // An MRT, so the surfaces that ask the game's passes for reflections (their own MRT
+    // channel) still write their colour here.
+    this.scenePass.setMRT(mrt({ output }));
     this.plainOutput = this.grade(this.scenePass.getTextureNode('output'));
     this.pipeline = new THREE.RenderPipeline(renderer, this.plainOutput);
     // Tone mapping and sRGB happen in `grade`, before the adjustments made on the final image.

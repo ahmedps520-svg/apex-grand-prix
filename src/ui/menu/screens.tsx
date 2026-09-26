@@ -21,7 +21,15 @@ import {
   type PadAction,
 } from '../../input/bindings';
 import { RUMBLE_CHANNELS } from '../../input/rumble';
-import type { Detail, EffectsSetting, Palette } from '../../app/settings';
+import type {
+  AntiAliasing,
+  Detail,
+  EffectsSetting,
+  GraphicsPreset,
+  Palette,
+  ShadowQuality,
+  SurfaceQuality,
+} from '../../app/settings';
 import type { AidLevel, HandlingMode, RoamStart, SpawnPoint } from '../../shared/protocol';
 import { Track } from '../../sim/track/Track';
 import { CARS, CAR_CLASSES, carById, peakPower, topSpeed } from '../../sim/vehicle/cars';
@@ -938,6 +946,41 @@ function ConditionChoices({ store, roam = false }: ScreenProps & { roam?: boolea
   );
 }
 
+/** Graphics presets: by the device, a level, or the choices below. */
+const PRESETS: ReadonlyArray<{ value: GraphicsPreset; text: string }> = [
+  { value: 'auto', text: 'Auto (by device)' },
+  { value: 'low', text: 'Low' },
+  { value: 'medium', text: 'Medium' },
+  { value: 'high', text: 'High' },
+  { value: 'ultra', text: 'Ultra' },
+  { value: 'custom', text: 'Custom' },
+];
+
+/** Screen-space ray-traced reflections: the wet road, the paint and the glass. */
+const REFLECTIONS: ReadonlyArray<{ value: boolean; text: string }> = [
+  { value: false, text: 'Off' },
+  { value: true, text: 'Ray-traced (screen space)' },
+];
+
+const ANTIALIASING: ReadonlyArray<{ value: AntiAliasing; text: string }> = [
+  { value: 'off', text: 'Off' },
+  { value: 'fxaa', text: 'FXAA' },
+  { value: 'smaa', text: 'SMAA' },
+];
+
+const SHADOW_OPTIONS: ReadonlyArray<{ value: ShadowQuality; text: string }> = [
+  { value: 'low', text: 'Low' },
+  { value: 'medium', text: 'Medium' },
+  { value: 'high', text: 'High (soft)' },
+  { value: 'ultra', text: 'Ultra (soft, 4K map)' },
+];
+
+/** Road surfaces: plain, or realistic asphalt with the racing line rubbered in. */
+const SURFACE_OPTIONS: ReadonlyArray<{ value: SurfaceQuality; text: string }> = [
+  { value: 'standard', text: 'Standard' },
+  { value: 'detailed', text: 'Detailed asphalt and rubber' },
+];
+
 /** Post-processing: by the detail level, or as chosen. */
 const EFFECTS: ReadonlyArray<{ value: EffectsSetting; text: string }> = [
   { value: 'auto', text: 'By detail level' },
@@ -1738,6 +1781,12 @@ export function SettingsScreen({ store }: ScreenProps) {
         )}
         {tab === 'graphics' && (
           <Section>
+            <Choice
+              label="Preset"
+              value={s.preset}
+              options={PRESETS}
+              onChange={(v) => store.actions.graphicsPreset(v)}
+            />
             <Slider
               label="Resolution"
               value={s.resolutionScale}
@@ -1751,7 +1800,36 @@ export function SettingsScreen({ store }: ScreenProps) {
               label="World detail"
               value={s.detail}
               options={DETAIL_OPTIONS}
-              onChange={(v) => ((s.detail = v), changed())}
+              onChange={(v) => ((s.detail = v), (s.preset = 'custom'), changed())}
+            />
+            <Choice
+              label="Reflections"
+              value={s.reflections}
+              options={REFLECTIONS}
+              onChange={(v) => ((s.reflections = v), (s.preset = 'custom'), changed())}
+            />
+            <Choice
+              label="Anti-aliasing"
+              value={s.antialiasing}
+              options={ANTIALIASING}
+              onChange={(v) => ((s.antialiasing = v), (s.preset = 'custom'), changed())}
+            />
+            <Choice
+              label="Shadows"
+              value={s.shadows}
+              options={SHADOW_OPTIONS}
+              onChange={(v) => ((s.shadows = v), (s.preset = 'custom'), changed())}
+            />
+            <Choice
+              label="Road surfaces"
+              value={s.surfaces}
+              options={SURFACE_OPTIONS}
+              onChange={(v) => ((s.surfaces = v), (s.preset = 'custom'), changed())}
+            />
+            <Toggle
+              label="Skid marks"
+              value={s.skidMarks}
+              onChange={(v) => ((s.skidMarks = v), (s.preset = 'custom'), changed())}
             />
             <Toggle
               label="Performance overlay"
@@ -1777,7 +1855,7 @@ export function SettingsScreen({ store }: ScreenProps) {
               label="Effects"
               value={s.effects}
               options={EFFECTS}
-              onChange={(v) => ((s.effects = v), changed())}
+              onChange={(v) => ((s.effects = v), (s.preset = 'custom'), changed())}
             />
           </Section>
         )}

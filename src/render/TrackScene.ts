@@ -27,7 +27,17 @@ import {
 import type { WeatherMix } from '../shared/protocol';
 import { mulberry32 } from '../shared/math';
 import { KERB_WIDTH, type Track } from '../sim/track/Track';
+import { computeRacingLine } from '../sim/race/racingLine';
 import { Atmosphere } from './Atmosphere';
+import {
+  PLAIN_ROAD,
+  asphaltMaps,
+  bakeRubber,
+  detailedRoad,
+  rubberTexture,
+  type RoadLook,
+} from './asphalt';
+import { reflective } from './Effects';
 import { Rain } from './Rain';
 import { CLEAR_FOG_FAR, sceneLook, type SceneLook } from './sceneLook';
 import { Spray } from './Spray';
@@ -171,6 +181,7 @@ export class TrackScene {
   constructor(
     private readonly track: Track,
     conditions: Conditions = DEFAULT_CONDITIONS,
+    private readonly road: RoadLook = PLAIN_ROAD,
   ) {
     const theme = track.def.theme;
     this.current = { ...conditions };
@@ -215,6 +226,19 @@ export class TrackScene {
 
     this.applyLook();
     this.follow(new THREE.Vector3(track.samples[0]!.x, 0, track.samples[0]!.z));
+  }
+
+  /** How much the shadow edges are softened over what the weather gives (the graphics). */
+  private shadowSoftness = 1;
+  /** The road's noise textures, shared with the pit lane. */
+  private roadNoise: THREE.Texture | null = null;
+  private roadPuddles: THREE.Texture | null = null;
+
+  /** The sun's shadow map size and softness; the map is resized on the next frame. */
+  setShadows(size: number, softness: number): void {
+    this.shadowSoftness = softness;
+    this.sun.shadow.mapSize.set(size, size);
+    this.sun.shadow.radius = this.look.shadowRadius * softness;
   }
 
   /** The time of day and weather shown. */
@@ -384,7 +408,7 @@ export class TrackScene {
     this.hemi.intensity = look.hemiIntensity;
     this.sun.color.copy(look.sunColor);
     this.sun.intensity = look.sunIntensity;
-    this.sun.shadow.radius = look.shadowRadius;
+    this.sun.shadow.radius = look.shadowRadius * this.shadowSoftness;
     this.sun.shadow.intensity = look.shadowIntensity;
     this.scene.environmentIntensity = look.environmentIntensity;
 
@@ -509,22 +533,45 @@ export class TrackScene {
     const theme = track.def.theme;
 
     const tile = track.length / Math.max(1, Math.round(track.length / ASPHALT_TILE));
-    const asphalt = asphaltTexture(1, 1);
     const puddles = noiseTexture(53, 256, 4, 4);
-    this.disposables.push(asphalt, puddles);
-    const road = new THREE.MeshStandardNodeMaterial({
-      map: asphalt,
-      roughness: 0.93,
-      metalness: 0,
-      ...layer(1),
-    });
-    // Wet asphalt: darker and glossy, so it mirrors the sky; standing water in the dips (where
-    // the noise peaks) once the road is soaked. Dry, the nodes reduce to the plain material.
-    const wet = this.wet;
-    const water = texture(puddles, positionWorld.xz.div(PUDDLE_TILE)).r;
-    const puddle = smoothstep(0.64, 0.8, water).mul(smoothstep(0.5, 1, wet));
-    road.colorNode = materialColor.mul(mix(1, 0.5, wet)).mul(mix(1, 0.72, puddle));
-    road.roughnessNode = mix(materialRoughness, mix(0.2, 0.04, puddle), wet);
+    this.disposables.push(puddles);
+    let road: THREE.MeshStandardNodeMaterial;
+    this.roadPuddles = puddles;
+    if (this.road.detailed) {
+      // Realistic asphalt with the racing line rubbered in (the line the AI drives).
+      const noise = noiseTexture(71, 256, 5, 4);
+      this.roadNoise = noise;
+      const rubber = rubberTexture(bakeRubber(rubberInput(track)));
+      this.disposables.push(noise, rubber);
+      road = detailedRoad({
+        maps: asphaltMaps(this.road.size),
+        wet: this.wet,
+        puddles,
+        noise,
+        tile,
+        rubber: { texture: rubber, length: track.length, apron: track.halfWidth + KERB_WIDTH },
+        params: layer(1),
+      });
+    } else {
+      const asphalt = asphaltTexture(1, 1);
+      this.disposables.push(asphalt);
+      road = new THREE.MeshStandardNodeMaterial({
+        map: asphalt,
+        roughness: 0.93,
+        metalness: 0,
+        ...layer(1),
+      });
+      // Wet asphalt: darker and glossy, so it mirrors the sky; standing water in the dips
+      // (where the noise peaks) once the road is soaked. Dry, the nodes reduce to the plain
+      // material.
+      const wet = this.wet;
+      const water = texture(puddles, positionWorld.xz.div(PUDDLE_TILE)).r;
+      const puddle = smoothstep(0.64, 0.8, water).mul(smoothstep(0.5, 1, wet));
+      road.colorNode = materialColor.mul(mix(1, 0.5, wet)).mul(mix(1, 0.72, puddle));
+      const roughness = mix(materialRoughness, mix(0.2, 0.04, puddle), wet);
+      road.roughnessNode = roughness;
+      reflective(road, wet.mul(0.5).add(puddle.mul(0.35)).add(0.03), roughness);
+    }
     this.addFlat(meshes.road(tile), road);
 
     // Gravel where the physics has it: in the corners, when the track uses gravel traps.
@@ -605,6 +652,7 @@ export class TrackScene {
     const track = this.track;
     const lateral = -(track.halfWidth + PIT_OFFSET);
     const positions: number[] = [];
+    const uvs: number[] = [];
     const indices: number[] = [];
     let n = 0;
     for (let d = 0; d <= PIT_LENGTH; d += 4) {
@@ -613,6 +661,8 @@ export class TrackScene {
       for (const side of [-PIT_LANE_HALF_WIDTH, PIT_LANE_HALF_WIDTH]) {
         const off = lat + side;
         positions.push(p.x - p.tz * off, 0.02, p.z + p.tx * off);
+        // Metres along and across the lane, in asphalt tiles.
+        uvs.push(d / ASPHALT_TILE, side / ASPHALT_TILE);
       }
       if (n > 0) {
         const b = n * 2;
@@ -622,17 +672,27 @@ export class TrackScene {
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    const params = { side: THREE.DoubleSide, ...layer(2) };
     this.addFlat(
       geometry,
-      new THREE.MeshStandardMaterial({
-        color: 0x3b3e45,
-        roughness: 0.95,
-        metalness: 0,
-        side: THREE.DoubleSide,
-        ...layer(2),
-      }),
+      this.road.detailed && this.roadNoise && this.roadPuddles
+        ? detailedRoad({
+            maps: asphaltMaps(this.road.size),
+            wet: this.wet,
+            puddles: this.roadPuddles,
+            noise: this.roadNoise,
+            tile: ASPHALT_TILE,
+            params,
+          })
+        : new THREE.MeshStandardMaterial({
+            color: 0x3b3e45,
+            roughness: 0.95,
+            metalness: 0,
+            ...params,
+          }),
     );
     // The wall along the lane's outer side, where the lane runs straight.
     const a = track.at(track.length - PIT_ENTRY + PIT_BLEND);
@@ -1093,5 +1153,31 @@ function valueNoise(seed: number, cell: number): (x: number, z: number) => numbe
     const c = hash(i, j + 1);
     const d = hash(i + 1, j + 1);
     return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz;
+  };
+}
+
+/** The racing line per circuit, worked out once (it takes a moment). */
+const lines = new Map<string, { lateral: Float32Array; speed: Float32Array }>();
+
+/** What the rubber is laid from: the racing line with default grip, and the grid boxes. */
+function rubberInput(track: Track): Parameters<typeof bakeRubber>[0] {
+  let line = lines.get(track.def.id);
+  if (!line) {
+    const computed = computeRacingLine(track);
+    line = { lateral: computed.lateral, speed: computed.speed };
+    lines.set(track.def.id, line);
+  }
+  const grid: Array<{ s: number; lateral: number }> = [];
+  for (let i = 0; i < 12; i++) {
+    const slot = track.gridSlot(i);
+    const p = track.project(slot.x, slot.z);
+    grid.push({ s: p.s, lateral: p.lateral });
+  }
+  return {
+    length: track.length,
+    apron: track.halfWidth + KERB_WIDTH,
+    lateral: line.lateral,
+    speed: line.speed,
+    grid,
   };
 }

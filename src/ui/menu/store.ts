@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals';
 import type { DriftMedal, DriftTargets } from '../../content/driftTrial';
 import type { RoamSpot } from '../../app/records';
-import type { Settings } from '../../app/settings';
+import type { GraphicsPreset, Settings } from '../../app/settings';
 import type { Conditions, DayLength, Weather, WeatherMotion } from '../../content/conditions';
 import type { LadderStanding } from '../../content/ladder';
 import type {
@@ -273,6 +273,8 @@ export interface MenuActions {
   quitToMenu(): void;
   /** A setting changed: apply it and save. */
   settingsChanged(): void;
+  /** Graphics: picks a preset (its values fill the individual choices), applies and saves. */
+  graphicsPreset(preset: GraphicsPreset): void;
   /** Opens the steering wheel setup (wizard or settings) for the connected wheel. */
   openWheelSetup(): void;
   testRumble(): void;

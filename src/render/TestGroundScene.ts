@@ -90,6 +90,12 @@ export class TestGroundScene {
   }
 
   /** Reflections for shiny surfaces: a pre-filtered copy of the sky. */
+  /** The sun's shadow map size and softness (PCF radius in texels). */
+  setShadows(size: number, softness: number): void {
+    this.sun.shadow.mapSize.set(size, size);
+    this.sun.shadow.radius = softness;
+  }
+
   buildEnvironment(renderer: THREE.WebGPURenderer): void {
     try {
       const pmrem = new THREE.PMREMGenerator(renderer);

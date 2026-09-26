@@ -53,6 +53,21 @@ export interface Settings {
   palette: Palette;
   /** Post-processing: by the detail level (auto), none, a bloom, or a bloom with ambient occlusion. */
   effects: EffectsSetting;
+  /**
+   * Graphics preset: by the device (auto), a named level (its values are copied into the
+   * choices below), or custom (the choices below as they are).
+   */
+  preset: GraphicsPreset;
+  /** Screen-space ray-traced reflections on the wet road, the paint and the glass. */
+  reflections: boolean;
+  /** Edge smoothing with post-processing on (the plain render uses the renderer's MSAA). */
+  antialiasing: AntiAliasing;
+  /** Sun shadow map size and softness. */
+  shadows: ShadowQuality;
+  /** Road surfaces: plain textures, or detailed asphalt with the racing line rubbered in. */
+  surfaces: SurfaceQuality;
+  /** Tyre marks laid on the road by sliding and locked wheels. */
+  skidMarks: boolean;
   camera: CameraMode;
   aids: DriverAids;
   pad: PadSettings;
@@ -88,6 +103,21 @@ export interface Settings {
 export type Palette = 'standard' | 'colourSafe';
 export type EffectsSetting = 'auto' | 'off' | 'bloom' | 'full';
 const EFFECTS: readonly EffectsSetting[] = ['auto', 'off', 'bloom', 'full'];
+export type GraphicsPreset = 'auto' | 'low' | 'medium' | 'high' | 'ultra' | 'custom';
+export const GRAPHICS_PRESET_NAMES: readonly GraphicsPreset[] = [
+  'auto',
+  'low',
+  'medium',
+  'high',
+  'ultra',
+  'custom',
+];
+export type AntiAliasing = 'off' | 'fxaa' | 'smaa';
+const ANTIALIASING: readonly AntiAliasing[] = ['off', 'fxaa', 'smaa'];
+export type ShadowQuality = 'low' | 'medium' | 'high' | 'ultra';
+const SHADOWS: readonly ShadowQuality[] = ['low', 'medium', 'high', 'ultra'];
+export type SurfaceQuality = 'standard' | 'detailed';
+const SURFACES: readonly SurfaceQuality[] = ['standard', 'detailed'];
 export type DamageLevel = 'off' | 'light' | 'full';
 const DAMAGE_LEVELS: readonly DamageLevel[] = ['off', 'light', 'full'];
 /** Damage setting → how much impacts hurt (see Car.damageScale). */
@@ -117,6 +147,12 @@ export const defaultSettings = (): Settings => ({
   hudScale: 1,
   palette: 'standard',
   effects: 'auto',
+  preset: 'auto',
+  reflections: false,
+  antialiasing: 'smaa',
+  shadows: 'medium',
+  surfaces: 'detailed',
+  skidMarks: true,
   camera: 'chase',
   aids: defaultAids(),
   pad: defaultPadSettings(),
@@ -197,6 +233,12 @@ export function parseSettings(raw: unknown): Settings {
     hudScale: num(raw.hudScale, 0.7, 1.5, d.hudScale),
     palette: raw.palette === 'colourSafe' ? 'colourSafe' : 'standard',
     effects: oneOf(raw.effects, EFFECTS, d.effects),
+    preset: oneOf(raw.preset, GRAPHICS_PRESET_NAMES, d.preset),
+    reflections: typeof raw.reflections === 'boolean' ? raw.reflections : d.reflections,
+    antialiasing: oneOf(raw.antialiasing, ANTIALIASING, d.antialiasing),
+    shadows: oneOf(raw.shadows, SHADOWS, d.shadows),
+    surfaces: oneOf(raw.surfaces, SURFACES, d.surfaces),
+    skidMarks: typeof raw.skidMarks === 'boolean' ? raw.skidMarks : d.skidMarks,
     camera: oneOf(raw.camera, CAMERAS, d.camera),
     aids: {
       abs: oneOf(aids.abs, AID_LEVELS, d.aids.abs),
