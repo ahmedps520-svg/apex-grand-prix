@@ -137,6 +137,7 @@ scope.onmessage = (event) => {
         else if (command.kind === 'holdStart' && world.director) {
           world.director.holdGrid = command.hold;
         } else if (command.kind === 'pit') world.pits?.arm(command.car, command.on);
+        else if (command.kind === 'safetyCar') world.deploySafetyCar();
         break;
       }
     }

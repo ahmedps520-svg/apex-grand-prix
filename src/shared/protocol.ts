@@ -146,6 +146,8 @@ export interface SessionConfig {
   pitStops?: boolean;
   /** Race rules: track limits enforced (warnings, penalties) and flags shown. */
   rules?: boolean;
+  /** Race rules: a safety car waits in the pits (a slot after the racers in the snapshot). */
+  safetyCar?: boolean;
   /** Free roam: traffic cars sharing the world (slots after the player in the snapshot). */
   traffic?: number;
   /** Free roam: police cars (slots after the traffic). */
@@ -197,7 +199,9 @@ export type SimCommand =
   /** Keeps the cars on the grid (true) or lets the start sequence run (false). */
   | { kind: 'holdStart'; hold: boolean }
   /** Pit stops: box this lap (or not), for a car not yet in the lane. */
-  | { kind: 'pit'; car: number; on: boolean };
+  | { kind: 'pit'; car: number; on: boolean }
+  /** Brings the safety car out now (the debug API). */
+  | { kind: 'safetyCar' };
 
 export type MainToWorker =
   | { type: 'init'; session: SessionConfig }
@@ -389,6 +393,10 @@ export const FLAG_HAZARDS = 512;
 export const FLAG_HORN = 1024;
 /** A police car with its lights and siren going. */
 export const FLAG_SIREN = 2048;
+
+/** The car the safety car is (see sim/vehicle/cars), and its paint. */
+export const SAFETY_CAR_MODEL = 'gt';
+export const SAFETY_CAR_PAINT = 0xe4e7ec;
 /** Arcade: the nitro is burning. */
 export const FLAG_NITRO = 4096;
 /** Out of the race and off the track (an elimination): not drawn, not in the way. */

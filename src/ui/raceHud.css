@@ -254,6 +254,10 @@
   background: #ffd166;
 }
 
+.rh-flag.safety {
+  background: #ffb000;
+}
+
 .rh-flag[hidden] {
   display: none;
 }

@@ -952,9 +952,9 @@ const PALETTES: ReadonlyArray<{ value: Palette; text: string }> = [
   { value: 'colourSafe', text: 'Colour-safe: blue and orange' },
 ];
 
-/** Race rules: track limits (warnings, then penalties) and flags. */
+/** Race rules: track limits (warnings, then penalties), flags and the safety car. */
 const RULES: ReadonlyArray<{ value: boolean; text: string }> = [
-  { value: true, text: 'Track limits and flags' },
+  { value: true, text: 'Track limits, flags and safety car' },
   { value: false, text: 'Off' },
 ];
 

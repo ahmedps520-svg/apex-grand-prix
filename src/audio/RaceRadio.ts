@@ -6,7 +6,7 @@
 
 import type { GameMode } from '../shared/protocol';
 import type { PitPhase } from '../shared/pitLane';
-import type { RaceFlag } from '../sim/race/RaceDirector';
+import type { PenaltyReason, RaceFlag } from '../sim/race/RaceDirector';
 
 /** What the engineer knows about the player's race, every frame. */
 export interface RadioInput {
@@ -22,6 +22,10 @@ export interface RadioInput {
   penalty?: number;
   flag?: RaceFlag;
   yellow?: number;
+  /** What the last penalty was for. */
+  penaltyFor?: PenaltyReason;
+  /** The safety car: out, coming in this lap, or in its box. */
+  safetyCar?: 'none' | 'out' | 'in';
   phase: 'grid' | 'countdown' | 'racing' | 'finished';
   /** Laps completed by the player. */
   lapsDone: number;
@@ -91,6 +95,7 @@ export class RaceEngineer {
   private warnings = 0;
   private penalty = 0;
   private flag: RaceFlag = 'none';
+  private safetyCar: 'none' | 'out' | 'in' = 'none';
 
   reset(): void {
     this.lastPhase = null;
@@ -112,6 +117,7 @@ export class RaceEngineer {
     this.warnings = 0;
     this.penalty = 0;
     this.flag = 'none';
+    this.safetyCar = 'none';
   }
 
   update(dt: number, r: RadioInput): RadioMessage[] {
@@ -228,7 +234,10 @@ export class RaceEngineer {
       this.penalty = r.penalty ?? 0;
       this.warnings = r.warnings ?? 0;
       out.push({
-        text: `${this.penalty}-second penalty for track limits. Keep it clean.`,
+        text:
+          r.penaltyFor === 'safetyCar'
+            ? `${this.penalty}-second penalty for overtaking under the safety car. Hold position.`
+            : `${this.penalty}-second penalty for track limits. Keep it clean.`,
         priority: 2,
       });
     } else if ((r.warnings ?? 0) > this.warnings) {
@@ -244,6 +253,18 @@ export class RaceEngineer {
       if (flag === 'blue') out.push({ text: 'Blue flag. Let them through.', priority: 2 });
       else if (flag === 'yellow') {
         out.push({ text: `Yellow flag in sector ${(r.yellow ?? 0) + 1}. Ease off.`, priority: 2 });
+      } else if (flag === 'safety') {
+        out.push({ text: 'Safety car, safety car. Hold position, no overtaking.', priority: 2 });
+      }
+    }
+    const safety = r.safetyCar ?? 'none';
+    if (safety !== this.safetyCar) {
+      const was = this.safetyCar;
+      this.safetyCar = safety;
+      if (safety === 'in') {
+        out.push({ text: 'Safety car in this lap. Bunch up, the restart is coming.', priority: 2 });
+      } else if (safety === 'none' && was !== 'none' && r.phase === 'racing') {
+        out.push({ text: 'Green flag, green flag! Go, go, go.', priority: 2 });
       }
     }
 

@@ -40,6 +40,7 @@ export class RaceHud {
   /** Race rules: the flag shown, and a short notice for a warning or a penalty. */
   private readonly flag = el('div', 'rh-flag');
   private flagShown = '';
+  private safetyShown: 'none' | 'out' | 'in' = 'none';
   private readonly notice = el('div', 'rh-notice');
   private noticeTimer = 0;
   private warningsShown = 0;
@@ -75,22 +76,41 @@ export class RaceHud {
 
   /** Race rules: the flag shown, and a notice when a warning or a penalty lands. */
   private updateRules(race: RaceStatus, me: CarRaceState, dt: number): void {
+    const safety = race.safetyCar?.phase ?? 'none';
     const flag =
-      me.flag === 'blue'
-        ? 'BLUE FLAG'
-        : me.flag === 'yellow'
-          ? `YELLOW FLAG · SECTOR ${race.yellow + 1}`
-          : '';
+      me.flag === 'safety'
+        ? safety === 'in'
+          ? 'SAFETY CAR · IN THIS LAP'
+          : 'SAFETY CAR · NO OVERTAKING'
+        : me.flag === 'blue'
+          ? 'BLUE FLAG'
+          : me.flag === 'yellow'
+            ? `YELLOW FLAG · SECTOR ${race.yellow + 1}`
+            : '';
     if (flag !== this.flagShown) {
       this.flagShown = flag;
       this.flag.hidden = flag === '';
       setText(this.flag, flag);
       this.flag.className = `rh-flag ${me.flag}`;
     }
+    if (safety !== this.safetyShown) {
+      const was = this.safetyShown;
+      this.safetyShown = safety;
+      if (safety === 'none' && was !== 'none' && race.phase === 'racing') {
+        setText(this.notice, 'GREEN FLAG · GO');
+        this.notice.hidden = false;
+        this.noticeTimer = 3;
+      }
+    }
     if (me.penalty > this.penaltyShown) {
       this.penaltyShown = me.penalty;
       this.warningsShown = me.warnings;
-      setText(this.notice, `+${me.penalty} s PENALTY · TRACK LIMITS`);
+      setText(
+        this.notice,
+        me.penaltyFor === 'safetyCar'
+          ? `+${me.penalty} s PENALTY · OVERTAKING UNDER THE SAFETY CAR`
+          : `+${me.penalty} s PENALTY · TRACK LIMITS`,
+      );
       this.notice.hidden = false;
       this.noticeTimer = 4;
     } else if (me.warnings > this.warningsShown) {
@@ -242,6 +262,7 @@ export class RaceHud {
     this.pitShown = '';
     this.pit.hidden = true;
     this.flagShown = '';
+    this.safetyShown = 'none';
     this.flag.hidden = true;
     this.notice.hidden = true;
     this.noticeTimer = 0;

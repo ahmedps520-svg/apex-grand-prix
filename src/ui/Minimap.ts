@@ -8,6 +8,8 @@ export interface MinimapCar {
   z: number;
   color: string;
   player: boolean;
+  /** Off the map: out of the race, or the safety car waiting in its box. */
+  hidden?: boolean;
 }
 
 /** Space between the track's extremes and the edge of the map, CSS pixels. */
@@ -64,7 +66,7 @@ export class Minimap {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.drawImage(this.outline, 0, 0);
     ctx.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
-    for (const car of cars) if (!car.player) this.drawCar(ctx, car);
+    for (const car of cars) if (!car.player && !car.hidden) this.drawCar(ctx, car);
     // The player last, on top of everyone else.
     for (const car of cars) if (car.player) this.drawCar(ctx, car);
   }

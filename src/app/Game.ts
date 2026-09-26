@@ -90,6 +90,8 @@ import {
   type WeatherMix,
   FLAG_RETIRED,
   type PitInfo,
+  SAFETY_CAR_MODEL,
+  SAFETY_CAR_PAINT,
 } from '../shared/protocol';
 import { forwardOf, mulberry32, vec3, yawOf } from '../shared/math';
 import type { RaceStatus } from '../sim/race/RaceDirector';
@@ -222,6 +224,8 @@ export interface DebugApi {
   /** Moving weather: starts a change to this weather now (for the checks). */
   /** Post-processing: the bloom's strength, radius and threshold, for tuning by eye. */
   tuneBloom: (strength: number, radius: number, threshold: number) => void;
+  /** Brings the safety car out now (a race with the rules on). */
+  safetyCar: () => void;
   weatherTo: (to: string, blend?: number) => void;
   /** Free roam: the festival race with rivals (phase, the player's position, progress in m). */
   roamRace: {
@@ -405,6 +409,10 @@ function rivalPaints(player: number): number[] {
  * The whole game on the main thread: menus, the session being driven (proving ground or a
  * circuit with AI), rendering, HUDs, sound and rumble. The simulation runs in the worker.
  */
+/** The safety car's slot in a race's snapshot: after the racers. */
+const safetySlot = (config: SessionConfig, car: number): boolean =>
+  config.mode === 'race' && config.safetyCar === true && car === config.opponents + 1;
+
 export class Game {
   private readonly settings: Settings = loadSettings();
   private readonly sim = new SimClient();
@@ -736,6 +744,7 @@ export class Game {
       nearestProp: (x, z) => this.props?.nearest(x, z) ?? null,
       place: (x, z, yaw) => this.sim.command({ kind: 'place', car: 0, x, z, yaw }),
       tuneBloom: (strength, radius, threshold) => this.effects?.tune(strength, radius, threshold),
+      safetyCar: () => this.sim.command({ kind: 'safetyCar' }),
       weatherTo: (to, blend) => {
         if (isWeather(to)) this.sim.command({ kind: 'weather', to, blend });
       },
@@ -933,6 +942,15 @@ export class Game {
           ? true
           : undefined,
       rules: setup.mode === 'race' && !attract && !qualifying && setup.rules !== false,
+      safetyCar:
+        setup.mode === 'race' &&
+        !attract &&
+        !qualifying &&
+        setup.rules !== false &&
+        setup.raceType !== 'elimination' &&
+        setup.laps >= 3
+          ? true
+          : undefined,
       aids: { ...this.settings.aids },
       seed,
       // `?autopilot`: the AI drives the player's car in races and time trials (browser tests).
@@ -1015,19 +1033,25 @@ export class Game {
     this.liverySeed = season?.liverySeed ?? config.seed;
     const count =
       config.mode === 'race'
-        ? config.opponents + 1
+        ? config.opponents + 1 + (config.safetyCar ? 1 : 0)
         : config.mode === 'roam'
           ? 1 + (config.traffic ?? 0) + (config.police ?? 0) + (config.racers ?? 0)
           : 1;
     // A change of world means a change of paint scheme (liveries or plain traffic): rebuild.
-    // So does a change in the traffic and police slots, which decide who wears the light bar.
+    // So does a change in the traffic, police and safety car slots, which decide who wears a
+    // light bar.
     const slots =
       previous?.traffic !== config.traffic ||
       previous?.police !== config.police ||
-      previous?.racers !== config.racers;
-    if (changed || (roam && slots)) this.buildCars([]);
+      previous?.racers !== config.racers ||
+      previous?.safetyCar !== config.safetyCar;
+    if (changed || slots) this.buildCars([]);
     this.buildCars(
-      Array.from({ length: count }, (_, i) => carById(config.fieldCars?.[i] ?? config.carId)),
+      Array.from({ length: count }, (_, i) =>
+        safetySlot(config, i)
+          ? carById(SAFETY_CAR_MODEL)
+          : carById(config.fieldCars?.[i] ?? config.carId),
+      ),
     );
     this.setupGhost(config);
     this.replay = null;
@@ -1273,13 +1297,15 @@ export class Game {
       // Traffic wears plain paint and the police white with a light bar; the street racers
       // and everyone else a livery.
       const roam = this.session?.mode === 'roam' && i > 0;
-      const role = roam ? this.roamRole(i) : 'car';
+      const role = roam ? this.roamRole(i) : this.isSafetyCar(i) ? 'safety' : 'car';
       const view =
         role === 'police'
-          ? new CarView(model.spec, POLICE_PAINT, model.style, undefined, false, true)
-          : role === 'traffic'
-            ? new CarView(model.spec, trafficPaint(i - 1), model.style)
-            : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
+          ? new CarView(model.spec, POLICE_PAINT, model.style, undefined, false, 'police')
+          : role === 'safety'
+            ? new CarView(model.spec, SAFETY_CAR_PAINT, model.style, undefined, false, 'safety')
+            : role === 'traffic'
+              ? new CarView(model.spec, trafficPaint(i - 1), model.style)
+              : new CarView(model.spec, 0xffffff, model.style, this.liveryFor(i), i === 0);
       const old = this.cars[i];
       if (old) {
         old.root.removeFromParent();
@@ -1300,6 +1326,11 @@ export class Game {
   }
 
   /** Free roam: what a snapshot slot after the player is (traffic, then police, then racers). */
+  /** The safety car's slot in a race: after the racers. */
+  private isSafetyCar(car: number): boolean {
+    return this.session ? safetySlot(this.session, car) : false;
+  }
+
   private roamRole(car: number): 'traffic' | 'police' | 'racer' {
     const traffic = this.session?.traffic ?? 0;
     const police = this.session?.police ?? 0;
@@ -1318,6 +1349,10 @@ export class Game {
     const roam = this.session?.mode === 'roam';
     for (let i = 0; i < this.cars.length; i++) {
       const dot = this.minimapCars[i];
+      if (this.isSafetyCar(i)) {
+        if (dot) dot.color = '#ffb000';
+        continue;
+      }
       if (roam && i > 0 && this.roamRole(i) !== 'racer') {
         // Traffic keeps its plain paint; it shows as pale dots on the map, the police as blue.
         if (dot) dot.color = this.roamRole(i) === 'police' ? '#4f8dff' : '#d8dce2';
@@ -2465,11 +2500,14 @@ export class Game {
         break;
       }
       case 'prevCar':
-      case 'nextCar':
-        this.replayCar = (this.replayCar + (command === 'nextCar' ? 1 : -1) + count) % count;
+      case 'nextCar': {
+        // The racers only: the safety car's slot comes after them.
+        const racers = this.isSafetyCar(count - 1) ? count - 1 : count;
+        this.replayCar = (this.replayCar + (command === 'nextCar' ? 1 : -1) + racers) % racers;
         this.tv?.cut();
         this.camera.reset();
         break;
+      }
       case 'camera': {
         const i = REPLAY_CAMERAS.indexOf(this.replayCamera);
         this.replayCamera = REPLAY_CAMERAS[(i + 1) % REPLAY_CAMERAS.length]!;
@@ -2534,8 +2572,10 @@ export class Game {
     if (this.minimap && (track || this.session?.mode === 'roam')) {
       for (let i = 0; i < count; i++) {
         const dot = this.minimapCars[i]!;
-        dot.x = this.states[i]!.pos.x;
-        dot.z = this.states[i]!.pos.z;
+        const state = this.states[i]!;
+        dot.x = state.pos.x;
+        dot.z = state.pos.z;
+        dot.hidden = (state.flags & FLAG_RETIRED) !== 0;
       }
       this.minimap.update(this.minimapCars.slice(0, count), this.festivalMarkers);
     }
@@ -2703,6 +2743,8 @@ export class Game {
     r.penalty = me.penalty;
     r.flag = me.flag;
     r.yellow = race.yellow;
+    r.penaltyFor = me.penaltyFor;
+    r.safetyCar = race.safetyCar?.phase ?? 'none';
     for (let i = 1; i < race.cars.length; i++) {
       const best = race.cars[i]!.bestLap;
       if (best > 0 && (rivalBest === 0 || best < rivalBest)) rivalBest = best;
